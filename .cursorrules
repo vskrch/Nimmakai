@@ -1,18 +1,16 @@
 # Scratchpad
 
 ## Current task
-Dynamic per-model context_length — implemented.
+Multi-provider OpenRouter-style gateway on `development` — implement + commit.
+
+## Branches
+- `main` — stable published
+- `development` — active (this work)
 
 ## Progress
-[X] Spec + unbiased gap review
-[X] context.py extractor (API + docs text)
-[X] Registry context_by_model + snapshot cache
-[X] Enrich GET /v1/models; auto omits context
-[X] X-Nimmakai-Context-Length header
-[X] Context-exceeded → ladder retry
-[X] Tests
-
-## Lessons
-- max_tokens is completion budget, not context window — never set max_tokens = context_length
-- Never invent context_length when unknown; never shrink larger upstream values
-- nimmakai/auto must omit context_length (no single window)
+[X] ProviderStore + ProviderHub
+[X] refresh_from_hub + namespaced models
+[X] Fallback routes per provider
+[X] Admin CRUD /admin/providers
+[X] Tests (66)
+[ ] Commit + push development

@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     llm_classify_threshold: float = 0.55
     llm_classify_cache_ttl: float = 600.0
     llm_classify_cache_size: int = 256
+    providers_config_path: str = "config/providers.yaml"
+    providers_overlay_path: str = ".nimmakai/providers.json"
 
     # Account safety
     safety_jitter_enabled: bool = True

@@ -153,11 +153,20 @@ class FallbackExecutor:
         registry: ModelRegistry,
         settings: Settings,
         stats: RoutingStats | None = None,
+        hub: Any | None = None,
     ) -> None:
         self.upstream = upstream
         self.registry = registry
         self.settings = settings
         self.stats = stats or RoutingStats()
+        self.hub = hub
+
+    def _client_for(self, model: str) -> tuple[Any, str]:
+        """Return (upstream_client, upstream_model_id) for this namespaced model."""
+        if self.hub is not None:
+            client, _pid, upstream_mid = self.hub.client_for_model(model)
+            return client, upstream_mid
+        return self.upstream, model
 
     def _chain(self, decision: RouteDecision) -> list[str]:
         max_n = self.settings.max_model_fallbacks
@@ -186,6 +195,9 @@ class FallbackExecutor:
         ctx_len = self.registry.context_length_for(model)
         if ctx_len is not None:
             h["X-Nimmakai-Context-Length"] = str(ctx_len)
+        if self.hub is not None:
+            _c, pid, _u = self.hub.client_for_model(model)
+            h["X-Nimmakai-Provider"] = pid
         return h
 
     async def execute_json(
@@ -224,9 +236,10 @@ class FallbackExecutor:
         last: UpstreamResult | None = None
 
         for idx, model in enumerate(chain):
-            attempt_body = {**body, "model": model}
+            client, upstream_mid = self._client_for(model)
+            attempt_body = {**body, "model": upstream_mid}
             try:
-                status, resp_body, headers, key = await self.upstream.request_json(
+                status, resp_body, headers, key = await client.request_json(
                     "POST",
                     path,
                     json_body=attempt_body,
@@ -427,9 +440,10 @@ class FallbackExecutor:
         last_model = chain[0]
 
         for idx, model in enumerate(chain):
-            attempt_body = {**body, "model": model}
+            client, upstream_mid = self._client_for(model)
+            attempt_body = {**body, "model": upstream_mid}
             try:
-                status, byte_iter, headers, key = await self.upstream.stream(
+                status, byte_iter, headers, key = await client.stream(
                     "POST",
                     path,
                     json_body=attempt_body,

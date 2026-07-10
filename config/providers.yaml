@@ -1,0 +1,23 @@
+# OpenAI-compatible providers (self-hosted OpenRouter-style)
+#
+# Built-in `nim` is always synced from NIM_BASE_URL / NIM_API_KEYS in .env.
+# Add more providers here or via POST /admin/providers.
+#
+# Example (Groq free tier — get a key at https://console.groq.com):
+# - id: groq
+#   name: Groq
+#   base_url: https://api.groq.com/openai/v1
+#   api_keys_env: GROQ_API_KEYS
+#   enabled: true
+#   rpm_limit: 30
+#   rpd_limit: 14400
+
+providers:
+  - id: nim
+    name: NVIDIA NIM
+    base_url: https://integrate.api.nvidia.com/v1
+    api_keys_env: NIM_API_KEYS
+    enabled: true
+    builtin: true
+    rpm_limit: 40
+    rpd_limit: 2000

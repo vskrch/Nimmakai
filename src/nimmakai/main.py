@@ -13,13 +13,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from nimmakai import __version__
-from nimmakai.balancer import KeyPool
 from nimmakai.catalog import ModelRegistry
+from nimmakai.catalog.hub import ProviderHub
+from nimmakai.catalog.providers import ProviderStore
 from nimmakai.config import Settings, get_settings
 from nimmakai.routes import admin, openai
 from nimmakai.routing import FallbackExecutor, IntentClassifier, ModelSelector, RoutingStats
 from nimmakai.safety import AccountGuard
-from nimmakai.upstream import UpstreamClient
 
 logger = logging.getLogger("nimmakai")
 
@@ -29,19 +29,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        pool = KeyPool(
-            api_keys=list(settings.nim_api_keys),
-            rpm_limit=settings.effective_rpm,
-            cooldown_seconds=settings.nim_cooldown_seconds,
-            rpd_limit=settings.nim_rpd_limit,
-            max_in_flight_per_key=settings.nim_max_in_flight_per_key,
-            auth_fail_threshold=settings.auth_fail_threshold,
-            auth_quarantine_seconds=settings.auth_quarantine_seconds,
-            sticky_boost=settings.sticky_boost,
+        store = ProviderStore.load(
+            settings.providers_config_path,
+            settings.providers_overlay_path,
+            nim_base_url=settings.nim_base_url,
+            nim_api_keys=list(settings.nim_api_keys),
+            nim_rpm=settings.nim_rpm_limit,
+            nim_rpd=settings.nim_rpd_limit,
+            nim_max_in_flight=settings.nim_max_in_flight_per_key,
         )
+        hub = ProviderHub(store, settings)
+        await hub.start()
+
         if not settings.nim_api_keys:
             logger.error(
-                "No NIM_API_KEYS configured. Copy .env.example → .env and add your keys."
+                "No NIM_API_KEYS configured. Copy .env.example → .env and add your keys "
+                "(or add other providers via /admin/providers)."
             )
         if not settings.proxy_api_keys and not settings.allow_insecure_auth:
             logger.warning(
@@ -49,16 +52,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "all client requests will be rejected until you set proxy keys."
             )
 
-        upstream = UpstreamClient(
-            base_url=settings.nim_base_url,
-            pool=pool,
-            timeout=settings.upstream_timeout,
-            user_agent=settings.upstream_user_agent,
-            proxy_url=settings.egress_proxy_url(),
-            retry_backoff_base=settings.retry_backoff_base_seconds,
-            retry_backoff_cap=settings.retry_backoff_cap_seconds,
-        )
-        await upstream.start()
+        upstream = hub.default
+        pool = hub.default_pool
 
         registry: ModelRegistry | None = None
         classifier = IntentClassifier(settings)
@@ -78,11 +73,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         guard = AccountGuard(settings, pool)
 
         if registry is not None:
+            registry.ladder.provider_ids = set(hub.provider_ids)
             selector = ModelSelector(registry, settings)
-            fallback = FallbackExecutor(upstream, registry, settings, stats=routing_stats)
-            if settings.nim_api_keys:
-                await registry.refresh_from_upstream(
-                    upstream,
+            fallback = FallbackExecutor(
+                upstream, registry, settings, stats=routing_stats, hub=hub
+            )
+            has_any_keys = any(
+                rt.config.resolved_keys() for rt in hub.runtimes.values()
+            )
+            if has_any_keys:
+                await registry.refresh_from_hub(
+                    hub,
                     fetch_docs=settings.catalog_fetch_docs,
                     run_probes=settings.catalog_run_probes,
                 )
@@ -94,12 +95,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 while True:
                     await asyncio.sleep(settings.catalog_refresh_seconds)
                     cycle += 1
-                    run_probes = (
-                        settings.catalog_run_probes and cycle % every == 0
-                    )
+                    run_probes = settings.catalog_run_probes and cycle % every == 0
                     try:
-                        await registry.refresh_from_upstream(
-                            upstream,
+                        await registry.refresh_from_hub(
+                            hub,
                             fetch_docs=settings.catalog_fetch_docs,
                             run_probes=run_probes,
                         )
@@ -109,6 +108,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             refresh_task = asyncio.create_task(_refresh_loop())
 
         app.state.settings = settings
+        app.state.hub = hub
         app.state.pool = pool
         app.state.upstream = upstream
         app.state.registry = registry
@@ -119,13 +119,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.routing_stats = routing_stats
 
         logger.info(
-            "Nimmakai v%s ready — %s NIM key(s), effective RPM/key=%.1f, "
-            "routing=%s, upstream=%s",
+            "Nimmakai v%s ready — providers=%s, routing=%s",
             __version__,
-            len(settings.nim_api_keys),
-            settings.effective_rpm,
+            [p.id for p in store.enabled_providers()],
             settings.routing_enabled,
-            settings.nim_base_url,
         )
         try:
             yield
@@ -134,20 +131,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 refresh_task.cancel()
                 with suppress(asyncio.CancelledError):
                     await refresh_task
-            await upstream.stop()
+            await hub.stop()
 
     app = FastAPI(
         title="Nimmakai",
         description=(
-            "OpenAI-compatible multi-key proxy for NVIDIA NIM with intelligent "
-            "model routing. Point Cursor / OpenCode / any OpenAI client at this server."
+            "Self-hosted OpenRouter-style gateway: NVIDIA NIM + any OpenAI-compatible "
+            "providers with intelligent model routing."
         ),
         version=__version__,
         lifespan=lifespan,
     )
 
-    # Credentials + wildcard origins is invalid/browser-rejected; keep open CORS
-    # without credentials for local OpenAI clients that call from browsers.
     cors_origins = [
         o.strip()
         for o in os.environ.get("CORS_ALLOW_ORIGINS", "*").split(",")
@@ -174,6 +169,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "health": "/health",
             "stats": "/stats",
             "catalog": "/catalog",
+            "providers": "/admin/providers",
         }
 
     return app
@@ -189,9 +185,11 @@ def run() -> None:
         level=getattr(logging, settings.log_level.upper(), logging.INFO),
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
-    if not settings.nim_api_keys:
-        raise SystemExit(
-            "NIM_API_KEYS is required. Copy .env.example → .env and add your NVIDIA keys."
+    if not settings.nim_api_keys and not settings.allow_insecure_auth:
+        # Allow start if other providers may be configured in YAML/overlay
+        logger.warning(
+            "NIM_API_KEYS empty — ensure at least one provider has keys "
+            "(NIM or /admin/providers)."
         )
     if not settings.proxy_api_keys and not settings.allow_insecure_auth:
         raise SystemExit(

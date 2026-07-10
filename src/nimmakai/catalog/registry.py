@@ -212,14 +212,22 @@ class ModelRegistry:
         return parse_alias_value(raw)
 
     def is_known(self, model_id: str) -> bool:
+        return self.resolve_live_id(model_id) is not None
+
+    def resolve_live_id(self, model_id: str) -> str | None:
+        """Map client model id to a namespaced live id when possible."""
         mid = normalize_model_name(model_id)
+        if not mid:
+            return None
         if mid in self.live_ids:
-            return True
-        if mid in self.catalog.models:
-            if self.live_ids:
-                return mid in self.live_ids
-            return True
-        return False
+            return mid
+        if mid in self.catalog.models and (not self.live_ids or mid in self.live_ids):
+            return mid
+        for pid in sorted(self.ladder.provider_ids, key=len, reverse=True):
+            cand = f"{pid}/{mid}"
+            if cand in self.live_ids:
+                return cand
+        return None
 
     def context_length_for(self, model_id: str | None) -> int | None:
         if not model_id:
@@ -255,7 +263,7 @@ class ModelRegistry:
         for mid in self.live_ids:
             if mid in self.context_by_model:
                 continue
-            slug = mid.split("/", 1)[-1].lower().replace("_", "-")
+            slug = mid.rsplit("/", 1)[-1].lower().replace("_", "-")
             doc = by_slug.get(slug)
             if doc is None:
                 continue
@@ -452,6 +460,103 @@ class ModelRegistry:
 
         self.last_refresh_at = time.monotonic()
         self.last_refresh_ok = api_ok or bool(self.live_ids)
+        self._persist_snapshot()
+        return self.last_refresh_ok
+
+    async def refresh_from_hub(
+        self,
+        hub: Any,
+        *,
+        fetch_docs: bool = True,
+        run_probes: bool = True,
+    ) -> bool:
+        """Refresh live catalog from all enabled OpenAI-compatible providers."""
+        from nimmakai.catalog.providers import namespace_model
+
+        self.ladder.provider_ids = set(hub.provider_ids)
+        merged: set[str] = set()
+        any_ok = False
+
+        for pid, rt in hub.runtimes.items():
+            if not rt.config.enabled:
+                continue
+            if not rt.config.resolved_keys():
+                logger.warning("provider %s has no API keys — skip catalog fetch", pid)
+                continue
+            try:
+                status, body, _h, _k = await rt.upstream.request_json("GET", "/models")
+                if status >= 400 or not isinstance(body, dict):
+                    logger.warning("provider %s /models → HTTP %s", pid, status)
+                    continue
+                data = body.get("data")
+                if not isinstance(data, list):
+                    continue
+                namespaced_items: list[dict] = []
+                for item in data:
+                    if not isinstance(item, dict) or not item.get("id"):
+                        continue
+                    upstream_id = str(item["id"])
+                    ns = namespace_model(pid, upstream_id)
+                    merged.add(ns)
+                    namespaced_items.append({**item, "id": ns})
+                self._ingest_context_from_api_items(namespaced_items)
+                any_ok = True
+                logger.info(
+                    "provider %s catalog ok — %s model(s)", pid, len(namespaced_items)
+                )
+            except Exception:
+                logger.exception("provider %s catalog refresh failed", pid)
+
+        if merged:
+            self.live_ids = merged
+        elif not self.live_ids:
+            self.last_refresh_ok = False
+            logger.warning("hub catalog refresh degraded — no live models")
+            return False
+
+        if fetch_docs:
+            try:
+                docs = await fetch_models_md(self.docs_url)
+                if docs and self.enrich_doc_details:
+                    docs = await enrich_publishers(docs, limit=30)
+                if docs:
+                    self.doc_models = docs
+                    self.last_docs_ok = True
+            except Exception:
+                logger.exception("docs refresh failed")
+                self.last_docs_ok = False
+
+        self._join_docs_to_ids()
+        self._ingest_context_from_docs()
+        self._rebuild_all_chains()
+
+        if run_probes and self.probe_budget.remaining() > 0:
+            candidates: list[str] = []
+            for intent in ("coding_agentic", "chat_fast"):
+                for mid in self.dynamic_chains.get(intent, [])[:2]:
+                    if mid not in candidates:
+                        candidates.append(mid)
+            for mid in candidates:
+                if self.probe_budget.remaining() <= 0:
+                    break
+                try:
+                    client, _pid, upstream_mid = hub.client_for_model(mid)
+                    results = await probe_models(
+                        client, [upstream_mid], self.probe_budget
+                    )
+                    st = results.get(upstream_mid)
+                    if st in {"ok", "rate_limited"}:
+                        self.probed_ok.add(mid)
+                    elif st == "unavailable":
+                        self.health.record_outcome(
+                            mid, success=False, status_code=404, unavailable=True
+                        )
+                except Exception:
+                    logger.debug("probe failed for %s", mid, exc_info=True)
+            self._rebuild_all_chains()
+
+        self.last_refresh_at = time.monotonic()
+        self.last_refresh_ok = any_ok or bool(self.live_ids)
         self._persist_snapshot()
         return self.last_refresh_ok
 

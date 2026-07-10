@@ -21,6 +21,7 @@ from nimmakai.catalog.families import (
 )
 from nimmakai.catalog.health import ModelHealthStore
 from nimmakai.catalog.learning import LearningStore
+from nimmakai.catalog.providers import scoring_model_id
 
 logger = logging.getLogger(__name__)
 
@@ -139,6 +140,8 @@ class LadderService:
         self.family_boost_by_intent: dict[str, dict[str, float]] = {
             k: dict(v) for k, v in INTENT_FAMILY_BOOST.items()
         }
+        # Known provider prefixes to strip for family/param scoring
+        self.provider_ids: set[str] = {"nim"}
 
     def apply_catalog_policy(
         self,
@@ -222,7 +225,8 @@ class LadderService:
         return out
 
     def score_model(self, model_id: str, intent: str) -> ScoredModel:
-        mid = model_id.lower()
+        bare = scoring_model_id(model_id, self.provider_ids)
+        mid = bare.lower()
         reasons: list[str] = []
         score = 0.0
 
@@ -257,7 +261,7 @@ class LadderService:
             reasons.append(f"params={params}b")
 
         # Version / tier (not param size — that is scored separately)
-        vk = version_key(model_id)
+        vk = version_key(bare)
         ver_tuple = vk[0]
         # Dotted versions like 3.5 beat bare 3
         ver_score = ver_tuple[0] * 3.0
@@ -271,13 +275,13 @@ class LadderService:
         # Family affinity for this intent
         boosts = self.family_boost_by_intent.get(intent, {})
         for fam, boost in boosts.items():
-            if matches_family(model_id, fam):
+            if matches_family(bare, fam):
                 score += boost
                 reasons.append(f"family={fam}+{boost}")
                 break
 
         # Doc description keyword match
-        doc = self._doc_for(model_id)
+        doc = self._doc_for(bare)
         if doc:
             desc = doc.description.lower()
             hits = 0
@@ -318,7 +322,10 @@ class LadderService:
             s = self.score_model(mid, intent)
             if s.score > -1e8:
                 scored.append(s)
-        scored.sort(key=lambda s: (s.score, version_key(s.model_id)), reverse=True)
+        scored.sort(
+            key=lambda s: (s.score, version_key(scoring_model_id(s.model_id, self.provider_ids))),
+            reverse=True,
+        )
 
         # Hard pin: strongest member of the intent's primary family leads,
         # then the rest of the strength-ordered ladder (no duplicates).
@@ -326,7 +333,11 @@ class LadderService:
         ladder: list[str] = []
         if primary_fam:
             primary_candidates = [
-                s for s in scored if matches_family(s.model_id, primary_fam)
+                s
+                for s in scored
+                if matches_family(
+                    scoring_model_id(s.model_id, self.provider_ids), primary_fam
+                )
             ]
             if primary_candidates:
                 ladder.append(primary_candidates[0].model_id)
@@ -343,7 +354,7 @@ class LadderService:
         )
 
     def _doc_for(self, model_id: str) -> DocModel | None:
-        slug = model_id.split("/", 1)[-1].lower().replace("_", "-")
+        slug = model_id.rsplit("/", 1)[-1].lower().replace("_", "-")
         return self._docs_by_slug.get(slug)
 
     @staticmethod

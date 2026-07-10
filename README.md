@@ -1,6 +1,6 @@
 # Nimmakai
 
-**OpenAI-compatible multi-key proxy for [NVIDIA NIM](https://build.nvidia.com/)** with intelligent model routing.
+**OpenAI-compatible multi-provider gateway** (self-hosted OpenRouter-style) for [NVIDIA NIM](https://build.nvidia.com/) plus any third-party OpenAI-compatible API (Groq, Gemini OpenAI endpoint, Cerebras, etc.) with intelligent model routing.
 
 Point Cursor, OpenCode, Pi, Cline, Continue, or any OpenAI SDK client at Nimmakai. It fans out traffic across multiple NIM API keys, picks models by intent (`auto` / Cursor aliases), falls back along quality-ordered chains, and shapes traffic for sustainable personal multi-key use.
 
@@ -28,7 +28,9 @@ Point Cursor, OpenCode, Pi, Cline, Continue, or any OpenAI SDK client at Nimmaka
 | `/v1/models`, `/v1/embeddings`, `/v1/completions`, `/v1/responses` | ✅ |
 | Multi-key RPM window + latency EWMA + 429 cooldown | ✅ |
 | Intent-aware routing (`auto`, aliases like `gpt-4o`) | ✅ |
-| Strength ladder + ordered fallback (power-first) | ✅ |
+| Multi-provider hub (NIM + any OpenAI-compatible `base_url`) | ✅ |
+| Admin API to register providers (`/admin/providers`) | ✅ |
+| Strength ladder + ordered fallback (power-first, cross-provider) | ✅ |
 | Live catalog refresh + NVIDIA docs + budgeted probes | ✅ |
 | Sticky sessions (opt-in headers), jitter, RPD, quarantine | ✅ |
 | Diagnostic headers (`X-Nimmakai-*`) | ✅ |
@@ -68,6 +70,28 @@ uv run nimmakai
 - Docs: http://localhost:8080/docs  
 - Health: http://localhost:8080/health  
 - Stats / catalog / ladder: auth required (`Authorization: Bearer <PROXY_API_KEYS>`)  
+
+## Add a third-party provider (OpenRouter-style)
+
+Any OpenAI-compatible API works (Groq, OpenRouter, Gemini OpenAI mode, Cerebras, local vLLM, …):
+
+```bash
+curl -s http://localhost:8080/admin/providers \
+  -H "Authorization: Bearer sk-nimmakai-local-dev" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "groq",
+    "name": "Groq",
+    "base_url": "https://api.groq.com/openai/v1",
+    "api_keys": ["gsk-your-key"],
+    "rpm_limit": 30,
+    "enabled": true
+  }'
+```
+
+Models appear on `GET /v1/models` as `groq/<model-id>`. Use `nimmakai/auto` to let the ladder pick across **all** providers, or pin `groq/llama-3.3-70b-versatile`.
+
+Or edit `config/providers.yaml` / set `GROQ_API_KEYS` with `api_keys_env: GROQ_API_KEYS`.
 
 ## Use with any OpenAI-compatible app
 

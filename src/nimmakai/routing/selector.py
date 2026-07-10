@@ -115,12 +115,13 @@ class ModelSelector:
             )
 
         if self.registry.is_known(raw) or looks_like_nim_id(raw):
+            resolved = self.registry.resolve_live_id(raw) or raw
             if self.settings.enable_fallback_on_explicit:
                 siblings = self.registry.chain_for_intent(intent_key)
-                chain = [raw] + [m for m in siblings if m != raw]
+                chain = [resolved] + [m for m in siblings if m != resolved]
                 mode: RouteMode = "passthrough_with_fallback"
             else:
-                chain = [raw]
+                chain = [resolved]
                 mode = "passthrough"
             return RouteDecision(
                 chain=self.registry.health_reorder(chain)
