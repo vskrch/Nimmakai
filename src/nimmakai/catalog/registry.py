@@ -10,6 +10,12 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from nimmakai.catalog.aliases import normalize_model_name
+from nimmakai.catalog.context import (
+    enrich_model_dict,
+    extract_context_length,
+    merge_context,
+    parse_context_from_text,
+)
 from nimmakai.catalog.docs_fetcher import DocModel, enrich_publishers, fetch_models_md
 from nimmakai.catalog.health import ModelHealthStore
 from nimmakai.catalog.ladder import LadderService
@@ -51,6 +57,7 @@ class ModelRegistry:
         self.ladder = LadderService(health=self.health, learning=self.learning)
         self._apply_catalog_policy()
         self.live_ids: set[str] = set()
+        self.context_by_model: dict[str, int] = {}
         self.probed_ok: set[str] = set()
         self.doc_models: list[DocModel] = []
         self.dynamic_chains: dict[str, list[str]] = {}
@@ -161,6 +168,13 @@ class ModelRegistry:
         if not data:
             return
         self.live_ids = set(data.get("live_ids") or [])
+        raw_ctx = data.get("context_by_model") or {}
+        if isinstance(raw_ctx, dict):
+            self.context_by_model = {
+                str(k): int(v)
+                for k, v in raw_ctx.items()
+                if isinstance(v, (int, float)) and int(v) > 0
+            }
         self.probed_ok = set(data.get("probed_ok") or [])
         self.dynamic_chains = {
             k: list(v) for k, v in (data.get("dynamic_chains") or {}).items()
@@ -176,6 +190,7 @@ class ModelRegistry:
             self.snapshot_path,
             {
                 "live_ids": sorted(self.live_ids),
+                "context_by_model": dict(sorted(self.context_by_model.items())),
                 "probed_ok": sorted(self.probed_ok),
                 "dynamic_chains": self.dynamic_chains,
                 "saved_at": time.time(),
@@ -205,6 +220,49 @@ class ModelRegistry:
                 return mid in self.live_ids
             return True
         return False
+
+    def context_length_for(self, model_id: str | None) -> int | None:
+        if not model_id:
+            return None
+        mid = normalize_model_name(model_id)
+        return self.context_by_model.get(mid) or self.context_by_model.get(model_id)
+
+    def enrich_model_entry(self, item: dict[str, Any]) -> dict[str, Any]:
+        mid = str(item.get("id") or "")
+        known = self.context_length_for(mid)
+        from_item = extract_context_length(item)
+        final = merge_context(from_item, known)
+        if final is not None and mid:
+            self.context_by_model[mid] = final
+        return enrich_model_dict(item, final)
+
+    def _ingest_context_from_api_items(self, items: list[Any]) -> None:
+        for item in items:
+            if not isinstance(item, dict) or not item.get("id"):
+                continue
+            mid = str(item["id"])
+            got = extract_context_length(item)
+            if got is not None:
+                self.context_by_model[mid] = merge_context(
+                    self.context_by_model.get(mid), got
+                )
+
+    def _ingest_context_from_docs(self) -> None:
+        # Match docs to live ids by slug / guessed api id
+        by_slug: dict[str, DocModel] = {
+            d.slug.lower().replace("_", "-"): d for d in self.doc_models
+        }
+        for mid in self.live_ids:
+            if mid in self.context_by_model:
+                continue
+            slug = mid.split("/", 1)[-1].lower().replace("_", "-")
+            doc = by_slug.get(slug)
+            if doc is None:
+                continue
+            text = f"{doc.description} {doc.slug}"
+            got = parse_context_from_text(text)
+            if got is not None:
+                self.context_by_model[mid] = got
 
     def model_meta(self, model_id: str):
         return self.catalog.models.get(normalize_model_name(model_id))
@@ -337,6 +395,7 @@ class ModelRegistry:
                 ids: set[str] = set()
                 data = body.get("data") if isinstance(body, dict) else None
                 if isinstance(data, list):
+                    self._ingest_context_from_api_items(data)
                     for item in data:
                         if isinstance(item, dict) and item.get("id"):
                             ids.add(str(item["id"]))
@@ -370,6 +429,7 @@ class ModelRegistry:
             return False
 
         self._join_docs_to_ids()
+        self._ingest_context_from_docs()
         self._rebuild_all_chains()
 
         if run_probes and self.probe_budget.remaining() > 0:
@@ -404,6 +464,7 @@ class ModelRegistry:
             "yaml_updated": self.catalog.updated,
             "yaml_path": str(self._yaml_path) if self._yaml_path else None,
             "live_model_count": len(self.live_ids),
+            "context_known_count": len(self.context_by_model),
             "docs_count": len(self.doc_models),
             "docs_ok": self.last_docs_ok,
             "probed_ok_count": len(self.probed_ok),

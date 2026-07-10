@@ -182,7 +182,18 @@ class KeyPool:
                     "All NIM API keys are rate-limited, quarantined, over budget, "
                     "or cooling down. Add more keys or wait."
                 )
-            await asyncio.sleep(0.25)
+            # Sleep until the soonest key may become available (cap 2s) —
+            # avoids 0.25s busy-spin under full cooldown.
+            now2 = time.monotonic()
+            waits = []
+            for k in self._keys:
+                if k.cooldown_until > now2:
+                    waits.append(k.cooldown_until - now2)
+                if k.quarantined_until > now2:
+                    waits.append(k.quarantined_until - now2)
+            sleep_for = min(waits) if waits else 0.25
+            sleep_for = max(0.05, min(2.0, sleep_for))
+            await asyncio.sleep(sleep_for)
 
     async def release(
         self,

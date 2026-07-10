@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from nimmakai.routing.selector import RouteDecision
+from nimmakai.safety.backoff import sleep_backoff
+from nimmakai.upstream import parse_retry_after
 
 if TYPE_CHECKING:
     from nimmakai.balancer import KeyStats
@@ -79,7 +82,38 @@ def _is_retryable_model_error(status: int, body: Any) -> bool:
         msg = str((body.get("error") or {}).get("message") or "").lower()
         if "tool" in msg and ("not support" in msg or "unsupported" in msg):
             return True
-    return False
+    return status in {400, 413} and _is_context_overflow_message(_body_message(body))
+
+
+def _body_message(body: Any) -> str:
+    if isinstance(body, dict):
+        err = body.get("error")
+        if isinstance(err, dict):
+            return str(err.get("message") or "")
+        return str(body)
+    if isinstance(body, str):
+        return body
+    return ""
+
+
+def _is_context_overflow_message(msg: str) -> bool:
+    low = msg.lower()
+    if any(
+        s in low
+        for s in (
+            "context length",
+            "context window",
+            "maximum context",
+            "max context",
+            "too many tokens",
+            "token limit",
+            "prompt is too long",
+        )
+    ):
+        return True
+    return bool(
+        re.search(r"context.*exceed|exceeds.*context|maximum.*tokens", low)
+    )
 
 
 def _is_non_retryable_client_error(status: int, body: Any) -> bool:
@@ -149,6 +183,9 @@ class FallbackExecutor:
             h["X-Nimmakai-Key-Id"] = key_id
         if decision.requested_model:
             h["X-Nimmakai-Requested-Model"] = str(decision.requested_model)
+        ctx_len = self.registry.context_length_for(model)
+        if ctx_len is not None:
+            h["X-Nimmakai-Context-Length"] = str(ctx_len)
         return h
 
     async def execute_json(
@@ -296,6 +333,16 @@ class FallbackExecutor:
                 return last
 
             if _is_retryable_model_error(status, resp_body) and idx < len(chain) - 1:
+                if status in {429, 500, 502, 503, 504}:
+                    ra = parse_retry_after(
+                        headers.get("Retry-After") or headers.get("retry-after")
+                    )
+                    await sleep_backoff(
+                        idx,
+                        base=self.settings.retry_backoff_base_seconds,
+                        cap=self.settings.retry_backoff_cap_seconds,
+                        retry_after=ra if status == 429 else None,
+                    )
                 self.stats.fallback_advances += 1
                 logger.info(
                     "model %s failed status=%s; falling back (%s/%s)",
@@ -308,6 +355,15 @@ class FallbackExecutor:
 
             # 429 after key retries — optionally advance
             if status == 429 and advance_on_pool and idx < len(chain) - 1:
+                ra = parse_retry_after(
+                    headers.get("Retry-After") or headers.get("retry-after")
+                )
+                await sleep_backoff(
+                    idx,
+                    base=self.settings.retry_backoff_base_seconds,
+                    cap=self.settings.retry_backoff_cap_seconds,
+                    retry_after=ra,
+                )
                 self.stats.fallback_advances += 1
                 continue
 
@@ -440,6 +496,16 @@ class FallbackExecutor:
                 intent=decision.intent.value,
             )
             if retryable and idx < len(chain) - 1:
+                if status in {429, 500, 502, 503, 504}:
+                    ra = parse_retry_after(
+                        headers.get("Retry-After") or headers.get("retry-after")
+                    )
+                    await sleep_backoff(
+                        idx,
+                        base=self.settings.retry_backoff_base_seconds,
+                        cap=self.settings.retry_backoff_cap_seconds,
+                        retry_after=ra if status == 429 else None,
+                    )
                 self.stats.fallback_advances += 1
                 logger.info(
                     "stream model %s failed status=%s; falling back",

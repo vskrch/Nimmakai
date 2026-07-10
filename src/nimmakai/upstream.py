@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from nimmakai.balancer import KeyPool, KeyStats
+from nimmakai.safety.backoff import sleep_backoff
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +41,16 @@ class UpstreamClient:
         *,
         user_agent: str | None = None,
         proxy_url: str | None = None,
+        retry_backoff_base: float = 0.5,
+        retry_backoff_cap: float = 16.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.pool = pool
         self.timeout = timeout
         self.user_agent = user_agent
         self.proxy_url = proxy_url
+        self.retry_backoff_base = retry_backoff_base
+        self.retry_backoff_cap = retry_backoff_cap
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -137,9 +142,17 @@ class UpstreamClient:
                 )
 
                 if rate_limited and attempt < max_retries - 1:
+                    delay = await sleep_backoff(
+                        attempt,
+                        base=self.retry_backoff_base,
+                        cap=self.retry_backoff_cap,
+                        retry_after=retry_after,
+                    )
                     logger.info(
-                        "upstream 429 on %s; rotating key (attempt %s)",
+                        "upstream 429 on %s; backoff %.2fs then rotate key "
+                        "(attempt %s)",
                         key.key_id,
+                        delay,
                         attempt + 1,
                     )
                     continue
@@ -150,6 +163,25 @@ class UpstreamClient:
                 else:
                     body = resp.text
 
+                # 5xx: backoff + key rotate before giving up to caller
+                if (
+                    resp.status_code in {500, 502, 503, 504}
+                    and attempt < max_retries - 1
+                ):
+                    delay = await sleep_backoff(
+                        attempt,
+                        base=self.retry_backoff_base,
+                        cap=self.retry_backoff_cap,
+                    )
+                    logger.info(
+                        "upstream HTTP %s on %s; backoff %.2fs (attempt %s)",
+                        resp.status_code,
+                        key.key_id,
+                        delay,
+                        attempt + 1,
+                    )
+                    continue
+
                 return resp.status_code, body, self._filter_headers(resp.headers), key
             except Exception as exc:
                 await self.pool.release(key, success=False, latency=None)
@@ -157,6 +189,16 @@ class UpstreamClient:
                 logger.exception("upstream error on %s: %s", key.key_id, exc)
                 if attempt >= max_retries - 1:
                     raise
+                delay = await sleep_backoff(
+                    attempt,
+                    base=self.retry_backoff_base,
+                    cap=self.retry_backoff_cap,
+                )
+                logger.info(
+                    "upstream transport error; backoff %.2fs (attempt %s)",
+                    delay,
+                    attempt + 1,
+                )
         raise RuntimeError(f"upstream failed after retries: {last_error}")
 
     async def stream(
@@ -197,9 +239,17 @@ class UpstreamClient:
                         retry_after_seconds=retry_after,
                     )
                     if attempt < max_retries - 1:
+                        delay = await sleep_backoff(
+                            attempt,
+                            base=self.retry_backoff_base,
+                            cap=self.retry_backoff_cap,
+                            retry_after=retry_after,
+                        )
                         logger.info(
-                            "upstream stream 429 on %s; rotating (attempt %s)",
+                            "upstream stream 429 on %s; backoff %.2fs then rotate "
+                            "(attempt %s)",
                             key.key_id,
+                            delay,
                             attempt + 1,
                         )
                         continue
@@ -235,6 +285,28 @@ class UpstreamClient:
                         {"content-type": "application/json"},
                         key,
                     )
+
+                if (
+                    resp.status_code in {500, 502, 503, 504}
+                    and attempt < max_retries - 1
+                ):
+                    await resp.aclose()
+                    await self.pool.release(
+                        key, success=False, status_code=resp.status_code
+                    )
+                    delay = await sleep_backoff(
+                        attempt,
+                        base=self.retry_backoff_base,
+                        cap=self.retry_backoff_cap,
+                    )
+                    logger.info(
+                        "upstream stream HTTP %s on %s; backoff %.2fs (attempt %s)",
+                        resp.status_code,
+                        key.key_id,
+                        delay,
+                        attempt + 1,
+                    )
+                    continue
 
                 out_headers = self._filter_headers(resp.headers)
                 status_code = resp.status_code
@@ -274,4 +346,14 @@ class UpstreamClient:
                 logger.exception("upstream stream error on %s: %s", key.key_id, exc)
                 if attempt >= max_retries - 1:
                     raise
+                delay = await sleep_backoff(
+                    attempt,
+                    base=self.retry_backoff_base,
+                    cap=self.retry_backoff_cap,
+                )
+                logger.info(
+                    "upstream stream transport error; backoff %.2fs (attempt %s)",
+                    delay,
+                    attempt + 1,
+                )
         raise RuntimeError(f"upstream stream failed after retries: {last_error}")

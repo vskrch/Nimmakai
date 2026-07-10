@@ -131,7 +131,51 @@ async def test_non_retryable_400_stops() -> None:
 
 
 @pytest.mark.asyncio
-async def test_selector_integration_auto() -> None:
+async def test_context_overflow_advances() -> None:
+    settings = Settings(nim_api_keys=["k"], max_model_fallbacks=3)
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b"}
+    reg.context_by_model = {"model-a": 8192, "model-b": 131072}
+
+    async def fake_json(method, path, **kwargs):
+        body = kwargs.get("json_body") or {}
+        model = body.get("model")
+        if model == "model-a":
+            return (
+                400,
+                {"error": {"message": "This model's maximum context length is 8192 tokens"}},
+                {},
+                _key(),
+            )
+        return (
+            200,
+            {
+                "id": "ok",
+                "model": model,
+                "choices": [{"message": {"content": "ok"}}],
+            },
+            {},
+            _key(1),
+        )
+
+    upstream = AsyncMock()
+    upstream.request_json = fake_json
+    decision = RouteDecision(
+        chain=["model-a", "model-b"],
+        mode="auto",
+        intent=Intent.CODING_AGENTIC,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    result = await ex.execute_json("/chat/completions", {"messages": []}, decision)
+    assert result.status_code == 200
+    assert result.model == "model-b"
+    headers = ex.routing_headers(
+        decision, model=result.model, key_id="key-1", fallback_index=1
+    )
+    assert headers.get("X-Nimmakai-Context-Length") == "131072"
+
     settings = Settings(nim_api_keys=["k"])
     reg = ModelRegistry.from_yaml(YAML)
     all_ids: set[str] = set()

@@ -121,16 +121,18 @@ async def list_models(request: Request) -> JSONResponse:
     status, body, headers, _key = await upstream.request_json("GET", "/models")
 
     registry: ModelRegistry | None = getattr(request.app.state, "registry", None)
-    if (
-        settings.inject_auto_model
-        and isinstance(body, dict)
-        and isinstance(body.get("data"), list)
-        and registry is not None
-    ):
-        auto = registry.synthetic_auto_model()
-        ids = {item.get("id") for item in body["data"] if isinstance(item, dict)}
-        if auto["id"] not in ids:
-            body = {**body, "data": [auto, *body["data"]]}
+    if isinstance(body, dict) and isinstance(body.get("data"), list) and registry is not None:
+        registry._ingest_context_from_api_items(body["data"])
+        enriched = [
+            registry.enrich_model_entry(item) if isinstance(item, dict) else item
+            for item in body["data"]
+        ]
+        body = {**body, "data": enriched}
+        if settings.inject_auto_model:
+            auto = registry.synthetic_auto_model()
+            ids = {item.get("id") for item in body["data"] if isinstance(item, dict)}
+            if auto["id"] not in ids:
+                body = {**body, "data": [auto, *body["data"]]}
 
     return JSONResponse(content=body, status_code=status, headers=headers)
 
@@ -147,6 +149,9 @@ async def get_model(model_id: str, request: Request) -> JSONResponse:
     status, body, headers, _key = await upstream.request_json(
         "GET", f"/models/{model_id}"
     )
+    registry = getattr(request.app.state, "registry", None)
+    if registry is not None and isinstance(body, dict) and status < 400:
+        body = registry.enrich_model_entry(body)
     return JSONResponse(content=body, status_code=status, headers=headers)
 
 

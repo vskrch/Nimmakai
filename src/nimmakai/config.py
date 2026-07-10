@@ -79,6 +79,9 @@ class Settings(BaseSettings):
     allow_insecure_auth: bool = False  # must be true to accept any Bearer when PROXY empty
     request_deadline_seconds: float = 180.0
     probe_every_n_refreshes: int = 6
+    # Backoff only for 429 / transport / 5xx — not for model-not-found ladder steps
+    retry_backoff_base_seconds: float = 0.5
+    retry_backoff_cap_seconds: float = 16.0
     upstream_user_agent: str = (
         f"nimmakai/{__version__} (OpenAI-compatible NIM proxy)"
     )

@@ -55,6 +55,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             timeout=settings.upstream_timeout,
             user_agent=settings.upstream_user_agent,
             proxy_url=settings.egress_proxy_url(),
+            retry_backoff_base=settings.retry_backoff_base_seconds,
+            retry_backoff_cap=settings.retry_backoff_cap_seconds,
         )
         await upstream.start()
 
