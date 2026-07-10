@@ -21,7 +21,6 @@ async def health(request: Request) -> JSONResponse:
     catalog_ok = True
     if registry is not None:
         catalog_ok = registry.last_refresh_ok or not registry.live_ids
-        # ok if never refreshed yet (no keys) or last refresh succeeded / yaml-only
         if registry.last_refresh_at is None:
             catalog_ok = registry.catalog is not None
     return JSONResponse(
@@ -63,8 +62,34 @@ async def stats(request: Request) -> JSONResponse:
             "live_model_count": snap["live_model_count"],
             "last_refresh_age_s": snap["last_refresh_age_s"],
             "last_refresh_ok": snap["last_refresh_ok"],
+            "ladders": snap.get("ladders"),
         }
     return JSONResponse(payload)
+
+
+@router.get("/ladder")
+async def ladder_view(request: Request) -> JSONResponse:
+    """Current intelligent strength ladders per intent (no secrets)."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    registry = getattr(request.app.state, "registry", None)
+    if registry is None:
+        return JSONResponse(
+            {
+                "error": {
+                    "message": "Catalog not loaded",
+                    "code": "nimmakai_catalog_empty",
+                }
+            },
+            status_code=503,
+        )
+    return JSONResponse(
+        {
+            "ladders": registry.ladder.snapshot(),
+            "live_model_count": len(registry.live_ids),
+            "policy": "strongest_available_first_then_ladder",
+        }
+    )
 
 
 @router.get("/catalog")
@@ -74,7 +99,12 @@ async def catalog_view(request: Request) -> JSONResponse:
     registry = getattr(request.app.state, "registry", None)
     if registry is None:
         return JSONResponse(
-            {"error": {"message": "Catalog not loaded", "code": "nimmakai_catalog_empty"}},
+            {
+                "error": {
+                    "message": "Catalog not loaded",
+                    "code": "nimmakai_catalog_empty",
+                }
+            },
             status_code=503,
         )
     return JSONResponse(registry.snapshot())
@@ -88,7 +118,12 @@ async def catalog_refresh(request: Request) -> JSONResponse:
     upstream = getattr(request.app.state, "upstream", None)
     if registry is None or upstream is None:
         return JSONResponse(
-            {"error": {"message": "Catalog not loaded", "code": "nimmakai_catalog_empty"}},
+            {
+                "error": {
+                    "message": "Catalog not loaded",
+                    "code": "nimmakai_catalog_empty",
+                }
+            },
             status_code=503,
         )
     ok = await registry.refresh_from_upstream(upstream)

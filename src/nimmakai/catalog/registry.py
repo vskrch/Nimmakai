@@ -11,11 +11,8 @@ import yaml
 
 from nimmakai.catalog.aliases import normalize_model_name
 from nimmakai.catalog.docs_fetcher import DocModel, enrich_publishers, fetch_models_md
-from nimmakai.catalog.families import (
-    SHARED_FALLBACKS,
-    latest_in_family,
-)
 from nimmakai.catalog.health import ModelHealthStore
+from nimmakai.catalog.ladder import LadderService
 from nimmakai.catalog.prober import ProbeBudget, load_snapshot, probe_models, save_snapshot
 from nimmakai.catalog.schema import (
     AliasTarget,
@@ -45,6 +42,7 @@ class ModelRegistry:
         self.catalog = catalog
         self.strict_catalog = strict_catalog
         self.health = health or ModelHealthStore()
+        self.ladder = LadderService(health=self.health)
         self.live_ids: set[str] = set()
         self.probed_ok: set[str] = set()
         self.doc_models: list[DocModel] = []
@@ -58,6 +56,10 @@ class ModelRegistry:
         self.probe_budget = ProbeBudget(probe_budget_per_hour)
         self.enrich_doc_details = enrich_doc_details
         self._load_disk_snapshot()
+        if self.live_ids:
+            self.ladder.set_docs(self.doc_models)
+            self.ladder.rebuild(self.live_ids)
+            self._sync_chains_from_ladder()
 
     @classmethod
     def from_yaml(
@@ -165,12 +167,12 @@ class ModelRegistry:
 
     def chain_for_intent(self, intent: str) -> list[str]:
         if self.catalog.defaults.dynamic_families:
+            # Intelligent ladder: strongest available → next → …
+            ladder = self.ladder.ladder_for(intent)
+            if ladder:
+                return self._filter_available(ladder)
             if intent in self.dynamic_chains and self.dynamic_chains[intent]:
                 return self._filter_available(list(self.dynamic_chains[intent]))
-            # Build on the fly from current live_ids
-            chain = self._build_dynamic(intent)
-            if chain:
-                return self._filter_available(chain)
 
         entry = self.catalog.intents.get(intent)
         if entry is None:
@@ -179,45 +181,25 @@ class ModelRegistry:
             return []
         return self._filter_available(list(entry.chain))
 
-    def _primary_family_for(self, intent: str) -> str:
-        entry = self.catalog.intents.get(intent)
-        if entry and entry.primary_family:
-            return entry.primary_family
-        fams = self.catalog.families
-        if intent in {"coding_agentic", "long_horizon"}:
-            return fams.coding_primary
-        if intent == "vision":
-            return fams.coding_primary  # qwen VL when present
-        return fams.chat_primary
+    def _sync_chains_from_ladder(self) -> None:
+        intents = list(self.catalog.intents.keys()) or [
+            "coding_agentic",
+            "chat_fast",
+            "reasoning",
+            "long_horizon",
+            "vision",
+        ]
+        for intent in intents:
+            self.dynamic_chains[intent] = self.ladder.ladder_for(intent)
 
-    def _build_dynamic(self, intent: str) -> list[str]:
-        from nimmakai.catalog.families import all_in_family
-
-        primary = self._primary_family_for(intent)
-        fallbacks = tuple(self.catalog.families.fallbacks) or SHARED_FALLBACKS
-
-        ids = self.live_ids or set()
-        if not ids and self.dynamic_chains.get(intent):
-            return list(self.dynamic_chains[intent])
-
-        chain: list[str] = []
-        head = latest_in_family(ids, primary)
-        if head:
-            chain.append(head)
-        for fam in fallbacks:
-            mid = latest_in_family(ids, fam)
-            if mid and mid not in chain:
-                chain.append(mid)
-
-        # Soft: add next-best same-family variants as deeper fallbacks
-        for fam in (primary, *fallbacks):
-            for mid in all_in_family(ids, fam)[1:3]:
-                if mid not in chain:
-                    chain.append(mid)
-
-        # Power-first: never reorder by probe confirmation — probes only
-        # mark unavailable models via health cooldown, they get demoted later.
-        return chain
+    def _rebuild_all_chains(self) -> None:
+        self.ladder.set_docs(self.doc_models)
+        self.ladder.rebuild(self.live_ids)
+        self._sync_chains_from_ladder()
+        logger.info(
+            "intelligent ladders rebuilt: %s",
+            {k: v[:3] for k, v in self.dynamic_chains.items()},
+        )
 
     def _filter_available(self, chain: list[str]) -> list[str]:
         if not self.live_ids:
@@ -278,21 +260,6 @@ class ModelRegistry:
                 matched.add(guess)
         # Always keep full live set for resolution; docs enrich descriptions only
         return set(self.live_ids)
-
-    def _rebuild_all_chains(self) -> None:
-        intents = list(self.catalog.intents.keys()) or [
-            "coding_agentic",
-            "chat_fast",
-            "reasoning",
-            "long_horizon",
-            "vision",
-        ]
-        for intent in intents:
-            self.dynamic_chains[intent] = self._build_dynamic(intent)
-        logger.info(
-            "dynamic chains rebuilt: %s",
-            {k: v[:3] for k, v in self.dynamic_chains.items()},
-        )
 
     async def refresh_from_upstream(
         self,
@@ -385,6 +352,7 @@ class ModelRegistry:
             "last_refresh_ok": self.last_refresh_ok,
             "dynamic_families": self.catalog.defaults.dynamic_families,
             "families": self.catalog.families.model_dump(),
+            "ladders": self.ladder.snapshot(),
             "dynamic_chains": dict(self.dynamic_chains),
             "intents": {
                 name: {

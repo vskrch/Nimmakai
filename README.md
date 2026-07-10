@@ -105,16 +105,14 @@ print(r.choices[0].message.content)
 
 ## How routing works
 
-1. **Classify** the request (tools / agent fingerprints → `coding_agentic`; short Q&A → `chat_fast`; …).
-2. **Resolve families dynamically** from NVIDIA `models.md` docs + live `GET /v1/models`:
-   - Generic/chat → **latest Nemotron** (chat LLMs only)
-   - Coding/agentic → **latest Qwen**
-   - Fallbacks: **GLM 5.2 → Step 3.7 → MiniMax M3**
-3. **Always try the strongest model first**; fall back only if it is unavailable or errors (never because a weaker model is faster).
-4. **Gentle probes** (tiny `max_tokens`, hourly budget) confirm hosts without clogging RPM.
-5. **Fail-safe** disk snapshot if docs/API are down.
+1. **Classify** the request (tools / agent → `coding_agentic`; short Q&A → `chat_fast`; …).
+2. **`LadderService` (automatic)** refreshes from NVIDIA docs + live `/v1/models`, scores every available model for that task (family affinity, size/tier, doc keywords), and builds a **strength ladder**.
+3. **Always try the strongest available model first**; on unavailable/error, walk to the next strongest on the ladder (not a flaky one-step hop).
+4. **Gentle probes** + disk snapshot keep this resilient without clogging RPM.
 
-Disable routing entirely with `ROUTING_ENABLED=false`.
+Inspect live ladders: `GET /ladder` (auth required).
+
+Disable routing with `ROUTING_ENABLED=false`.
 
 ## Account safety & responsibility
 

@@ -16,7 +16,8 @@ NEMOTRON_EXCLUDE = re.compile(
 QWEN_EXCLUDE = re.compile(r"(image|edit|vlb?$|vision)", re.I)
 
 VERSION_RE = re.compile(
-    r"(?:^|[^0-9])(\d+(?:\.\d+){0,3})(?:[^0-9]|$)|(?:^|-)v(\d+(?:\.\d+)*)",
+    r"(?:^|[^0-9])(\d+(?:\.\d+){1,3})(?:[^0-9b]|$)|(?:^|-)v(\d+(?:\.\d+)*)|"
+    r"(?:^|[^0-9])(\d{1,2})(?:-[a-z]|$)",
     re.I,
 )
 
@@ -57,13 +58,15 @@ FAMILIES: dict[str, FamilySpec] = {
 
 def version_key(model_id: str) -> tuple:
     """
-    Sort key: higher version first. Falls back to string length / name.
+    Sort key: higher version first. Ignores bare Nb parameter tokens (120b).
     Examples: nemotron-3-super > nemotron-3-nano; qwen3.5 > qwen3.
     """
     mid = model_id.lower()
+    # Strip param-size tokens so 397b / 120b are not treated as versions
+    stripped = re.sub(r"\d{1,4}b\b", "", mid)
     versions: list[tuple[int, ...]] = []
-    for m in VERSION_RE.finditer(mid):
-        raw = m.group(1) or m.group(2)
+    for m in VERSION_RE.finditer(stripped):
+        raw = m.group(1) or m.group(2) or m.group(3)
         if not raw:
             continue
         parts = []
@@ -72,17 +75,15 @@ def version_key(model_id: str) -> tuple:
                 parts.append(int(p))
             except ValueError:
                 break
-        if parts:
+        if parts and parts[0] < 100:  # real version majors, not junk
             versions.append(tuple(parts))
-    # Prefer the "largest" version tuple found
     best = max(versions) if versions else (0,)
-    # Prefer larger / "super" / "ultra" / "pro" as mild tie-break
     tier = 0
     if "ultra" in mid:
         tier = 3
     elif "super" in mid:
         tier = 2
-    elif "pro" in mid or "397b" in mid or "122b" in mid:
+    elif "pro" in mid:
         tier = 1
     return (best, tier, len(mid))
 

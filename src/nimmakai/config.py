@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     routing_enabled: bool = True
     classify_mode: Literal["rules_only", "rules_then_llm"] = "rules_only"
     enable_fallback_on_explicit: bool = True
-    max_model_fallbacks: int = 3
+    max_model_fallbacks: int = 6
     catalog_refresh_seconds: int = 300
     strict_catalog: bool = False
     inject_auto_model: bool = True
