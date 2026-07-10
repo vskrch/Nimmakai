@@ -1,0 +1,36 @@
+# Lessons
+
+## User Specified Lessons
+
+- You have a python venv in ./venv. Use it.
+- Include info useful for debugging in the program output.
+- Read the file before you try to edit it.
+- Due to Cursor's limit, when you use `git` and `gh` and need to submit a multiline commit message, first write the message in a file, and then use `git commit -F <filename>` or similar command to commit. And then remove the file. Include "[Cursor] " in the commit message and PR title.
+
+## Cursor learned
+
+- For search results, ensure proper handling of different character encodings (UTF-8) for international queries
+- Add debug information to stderr while keeping the main output clean in stdout for better pipeline integration
+- When using seaborn styles in matplotlib, use 'seaborn-v0_8' instead of 'seaborn' as the style name due to recent seaborn version changes
+- Use 'gpt-4o' as the model name for OpenAI's GPT-4 with vision capabilities
+- ALWAYS ask clarifying questions via Spokenly `ask_user_dictation`, never as plain text
+- User may cancel Spokenly recording; still give a useful summary and wait for next instruction
+
+# Scratchpad
+
+## Current task
+User referenced `@docs/design-intelligent-router.md` without a specific ask (2026-07-10).
+
+## Context
+- Draft design: Intelligent Model Router + Account-Safe Multi-Key Proxy
+- Extends bootstrap KeyPool / UpstreamClient / OpenAI routes
+- Three pillars: intent routing, ordered fallback, account safety
+- 8-PR delivery plan in the doc
+
+## Progress
+[X] Read design doc overview + structure
+[X] Asked via Spokenly what to do (cancelled twice)
+[ ] Await user direction: summarize / review / plan / implement
+
+## Next
+Wait for user to specify: review, implementation plan, or start PR 1 (catalog schema + YAML).

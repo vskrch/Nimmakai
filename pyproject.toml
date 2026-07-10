@@ -1,7 +1,7 @@
 [project]
 name = "nimmakai"
-version = "0.1.0"
-description = "OpenAI-compatible multi-key proxy for NVIDIA NIM with smart rate balancing"
+version = "0.2.0"
+description = "OpenAI-compatible multi-key proxy for NVIDIA NIM with intelligent routing"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -16,6 +16,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "orjson>=3.10.0",
     "sse-starlette>=2.1.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

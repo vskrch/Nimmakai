@@ -8,6 +8,9 @@ import random
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+
+from nimmakai.safety.budgets import utc_day_key
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,12 @@ class KeyStats:
     # Monotonic time until which this key is cooling down (after 429)
     cooldown_until: float = 0.0
     in_flight: int = 0
+    # Account-safety extensions
+    auth_failures: int = 0
+    quarantined_until: float = 0.0
+    daily_count: int = 0
+    daily_window_start: str = ""  # UTC YYYY-MM-DD
+    last_request_at: float = 0.0
 
     def mask(self) -> str:
         k = self.api_key
@@ -44,6 +53,7 @@ class KeyPool:
     1. Never pick a key that would exceed RPM (with safety factor).
     2. Prefer keys with lower recent latency / fewer failures (response-rate aware).
     3. Spread load (shuffle + weighted pick) so no single account is hammered.
+    4. Skip quarantined / over daily budget / over max in-flight keys.
     """
 
     def __init__(
@@ -52,6 +62,12 @@ class KeyPool:
         rpm_limit: float = 36.0,
         cooldown_seconds: float = 60.0,
         window_seconds: float = 60.0,
+        *,
+        rpd_limit: int = 2000,
+        max_in_flight_per_key: int = 3,
+        auth_fail_threshold: int = 2,
+        auth_quarantine_seconds: float = 3600.0,
+        sticky_boost: float = 3.0,
     ) -> None:
         if not api_keys:
             raise ValueError("At least one NIM API key is required (NIM_API_KEYS)")
@@ -59,11 +75,15 @@ class KeyPool:
         self.rpm_limit = rpm_limit
         self.cooldown_seconds = cooldown_seconds
         self.window_seconds = window_seconds
+        self.rpd_limit = rpd_limit
+        self.max_in_flight_per_key = max_in_flight_per_key
+        self.auth_fail_threshold = auth_fail_threshold
+        self.auth_quarantine_seconds = auth_quarantine_seconds
+        self.sticky_boost = sticky_boost
         self._lock = asyncio.Lock()
         self._keys: list[KeyStats] = [
             KeyStats(key_id=f"key-{i}", api_key=k) for i, k in enumerate(api_keys)
         ]
-        # Round-robin offset for fair first-pick when scores tie
         self._rr = 0
 
     def __len__(self) -> int:
@@ -74,6 +94,12 @@ class KeyPool:
         while stats.request_times and stats.request_times[0] < cutoff:
             stats.request_times.popleft()
 
+    def _roll_daily(self, stats: KeyStats) -> None:
+        today = utc_day_key(datetime.now(UTC))
+        if stats.daily_window_start != today:
+            stats.daily_window_start = today
+            stats.daily_count = 0
+
     def _rpm_used(self, stats: KeyStats, now: float) -> int:
         self._prune(stats, now)
         return len(stats.request_times)
@@ -81,60 +107,73 @@ class KeyPool:
     def _is_available(self, stats: KeyStats, now: float) -> bool:
         if now < stats.cooldown_until:
             return False
+        if now < stats.quarantined_until:
+            return False
+        self._roll_daily(stats)
+        if self.rpd_limit > 0 and stats.daily_count >= self.rpd_limit:
+            return False
+        if stats.in_flight >= self.max_in_flight_per_key:
+            return False
         return self._rpm_used(stats, now) < self.rpm_limit
 
-    def _score(self, stats: KeyStats, now: float) -> float:
-        """
-        Higher is better.
-        Factors: remaining RPM headroom, inverse latency, low error rate, low in-flight.
-        """
+    def _score(
+        self, stats: KeyStats, now: float, *, preferred_key_id: str | None = None
+    ) -> float:
         used = self._rpm_used(stats, now)
         headroom = max(0.0, self.rpm_limit - used - stats.in_flight * 0.5)
-        # Latency: prefer faster keys (cap to avoid division blowups)
         latency = max(0.05, stats.ewma_latency)
         latency_score = 1.0 / latency
 
         total = stats.success_count + stats.error_count
         success_rate = (stats.success_count / total) if total else 1.0
-
-        # Soft penalty for in-flight concurrency on the same key
         concurrency_penalty = 1.0 / (1.0 + stats.in_flight)
 
-        return headroom * latency_score * (0.3 + 0.7 * success_rate) * concurrency_penalty
+        score = headroom * latency_score * (0.3 + 0.7 * success_rate) * concurrency_penalty
+        if preferred_key_id and stats.key_id == preferred_key_id:
+            score *= self.sticky_boost
+        return score
 
-    async def acquire(self, max_wait: float = 30.0) -> KeyStats:
-        """
-        Pick the best available key. Waits briefly if all keys are at RPM limit.
-        Raises RuntimeError if nothing becomes available within max_wait.
-        """
+    def available_count(self) -> int:
+        now = time.monotonic()
+        return sum(1 for k in self._keys if self._is_available(k, now))
+
+    async def acquire(
+        self,
+        max_wait: float = 30.0,
+        *,
+        preferred_key_id: str | None = None,
+    ) -> KeyStats:
         deadline = time.monotonic() + max_wait
         while True:
             async with self._lock:
                 now = time.monotonic()
                 available = [k for k in self._keys if self._is_available(k, now)]
                 if available:
-                    # Weighted random over all available keys (score = headroom ×
-                    # inverse latency × success × concurrency). Equal scores →
-                    # uniform shuffle; healthier / faster keys get more weight.
-                    weights = [max(0.01, self._score(k, now)) for k in available]
+                    weights = [
+                        max(0.01, self._score(k, now, preferred_key_id=preferred_key_id))
+                        for k in available
+                    ]
                     pick = random.choices(available, weights=weights, k=1)[0]
                     pick.in_flight += 1
                     pick.request_times.append(now)
+                    pick.last_request_at = now
+                    self._roll_daily(pick)
+                    pick.daily_count += 1
                     logger.debug(
-                        "acquired %s rpm=%s/%s in_flight=%s score=%.3f",
+                        "acquired %s rpm=%s/%s in_flight=%s daily=%s score=%.3f",
                         pick.key_id,
                         self._rpm_used(pick, now),
                         self.rpm_limit,
                         pick.in_flight,
-                        self._score(pick, now),
+                        pick.daily_count,
+                        self._score(pick, now, preferred_key_id=preferred_key_id),
                     )
                     return pick
 
-            # All saturated — wait for the next window slot
             if time.monotonic() >= deadline:
                 raise RuntimeError(
-                    "All NIM API keys are rate-limited or cooling down. "
-                    "Add more keys or wait for the RPM window to free up."
+                    "All NIM API keys are rate-limited, quarantined, over budget, "
+                    "or cooling down. Add more keys or wait."
                 )
             await asyncio.sleep(0.25)
 
@@ -146,26 +185,46 @@ class KeyPool:
         latency: float | None = None,
         rate_limited: bool = False,
         status_code: int | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         async with self._lock:
             stats.in_flight = max(0, stats.in_flight - 1)
+
+            if status_code in {401, 403}:
+                stats.auth_failures += 1
+                stats.error_count += 1
+                if stats.auth_failures >= self.auth_fail_threshold:
+                    stats.quarantined_until = (
+                        time.monotonic() + self.auth_quarantine_seconds
+                    )
+                    logger.error(
+                        "%s quarantined for %.0fs after %s auth failures (%s)",
+                        stats.key_id,
+                        self.auth_quarantine_seconds,
+                        stats.auth_failures,
+                        stats.mask(),
+                    )
+                return
+
             if rate_limited or status_code == 429:
                 stats.rate_limit_hits += 1
                 stats.error_count += 1
-                stats.cooldown_until = time.monotonic() + self.cooldown_seconds
-                # Undo the RPM slot we reserved so we don't over-count after cooldown
-                # (keep history accurate — the request did happen)
+                cooldown = self.cooldown_seconds
+                if retry_after_seconds is not None and retry_after_seconds > 0:
+                    cooldown = max(cooldown, retry_after_seconds)
+                stats.cooldown_until = max(
+                    stats.cooldown_until, time.monotonic() + cooldown
+                )
                 logger.warning(
                     "%s hit rate limit; cooling down %.0fs",
                     stats.key_id,
-                    self.cooldown_seconds,
+                    cooldown,
                 )
                 return
 
             if success:
                 stats.success_count += 1
                 if latency is not None:
-                    # EWMA with alpha=0.3
                     stats.ewma_latency = 0.7 * stats.ewma_latency + 0.3 * latency
             else:
                 stats.error_count += 1
@@ -175,6 +234,7 @@ class KeyPool:
         out = []
         for k in self._keys:
             self._prune(k, now)
+            self._roll_daily(k)
             out.append(
                 {
                     "id": k.key_id,
@@ -189,6 +249,14 @@ class KeyPool:
                     "cooling_down": now < k.cooldown_until,
                     "cooldown_remaining_s": max(0.0, round(k.cooldown_until - now, 1)),
                     "available": self._is_available(k, now),
+                    "auth_failures": k.auth_failures,
+                    "quarantined": now < k.quarantined_until,
+                    "quarantine_remaining_s": max(
+                        0.0, round(k.quarantined_until - now, 1)
+                    ),
+                    "daily_count": k.daily_count,
+                    "daily_limit": self.rpd_limit,
+                    "daily_window": k.daily_window_start,
                 }
             )
         return out

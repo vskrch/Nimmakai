@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import AsyncIterator
+from email.utils import parsedate_to_datetime
 from typing import Any
 
 import httpx
@@ -14,24 +15,49 @@ from nimmakai.balancer import KeyPool, KeyStats
 logger = logging.getLogger(__name__)
 
 
+def parse_retry_after(value: str | None) -> float | None:
+    """Parse Retry-After header to seconds."""
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    try:
+        dt = parsedate_to_datetime(value)
+        return max(0.0, dt.timestamp() - time.time())
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
 class UpstreamClient:
     def __init__(
         self,
         base_url: str,
         pool: KeyPool,
         timeout: float = 300.0,
+        *,
+        user_agent: str | None = None,
+        proxy_url: str | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.pool = pool
         self.timeout = timeout
+        self.user_agent = user_agent
+        self.proxy_url = proxy_url
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
-        self._client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=httpx.Timeout(self.timeout, connect=30.0),
-            follow_redirects=True,
-        )
+        kwargs: dict[str, Any] = {
+            "base_url": self.base_url,
+            "timeout": httpx.Timeout(self.timeout, connect=30.0),
+            "follow_redirects": True,
+        }
+        if self.proxy_url:
+            kwargs["proxy"] = self.proxy_url
+            logger.info("upstream using egress proxy %s", self.proxy_url.split("@")[-1])
+        self._client = httpx.AsyncClient(**kwargs)
 
     async def stop(self) -> None:
         if self._client is not None:
@@ -50,8 +76,9 @@ class UpstreamClient:
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
+        if self.user_agent:
+            h["User-Agent"] = self.user_agent
         if extra:
-            # Do not forward client Authorization upstream
             for k, v in extra.items():
                 if k.lower() in {"authorization", "host", "content-length"}:
                     continue
@@ -78,14 +105,17 @@ class UpstreamClient:
         params: dict[str, Any] | None = None,
         forward_headers: dict[str, str] | None = None,
         max_retries: int = 3,
-    ) -> tuple[int, Any, dict[str, str]]:
+        preferred_key_id: str | None = None,
+    ) -> tuple[int, Any, dict[str, str], KeyStats]:
         """
         Non-streaming request with key rotation + retry on 429.
-        Returns (status_code, body_json_or_text, response_headers).
+        Returns (status_code, body_json_or_text, response_headers, key).
         """
         last_error: Exception | None = None
+        last_key: KeyStats | None = None
         for attempt in range(max_retries):
-            key = await self.pool.acquire()
+            key = await self.pool.acquire(preferred_key_id=preferred_key_id)
+            last_key = key
             started = time.monotonic()
             try:
                 resp = await self.client.request(
@@ -98,12 +128,14 @@ class UpstreamClient:
                 latency = time.monotonic() - started
                 rate_limited = resp.status_code == 429
                 success = 200 <= resp.status_code < 300
+                retry_after = parse_retry_after(resp.headers.get("Retry-After"))
                 await self.pool.release(
                     key,
                     success=success,
                     latency=latency if success else None,
                     rate_limited=rate_limited,
                     status_code=resp.status_code,
+                    retry_after_seconds=retry_after,
                 )
 
                 if rate_limited and attempt < max_retries - 1:
@@ -120,7 +152,7 @@ class UpstreamClient:
                 else:
                     body = resp.text
 
-                return resp.status_code, body, self._filter_headers(resp.headers)
+                return resp.status_code, body, self._filter_headers(resp.headers), key
             except Exception as exc:
                 await self.pool.release(key, success=False, latency=None)
                 last_error = exc
@@ -137,6 +169,7 @@ class UpstreamClient:
         json_body: Any | None = None,
         forward_headers: dict[str, str] | None = None,
         max_retries: int = 3,
+        preferred_key_id: str | None = None,
     ) -> tuple[int, AsyncIterator[bytes], dict[str, str], KeyStats]:
         """
         Open a streaming response. Caller must consume the iterator fully
@@ -144,7 +177,7 @@ class UpstreamClient:
         """
         last_error: Exception | None = None
         for attempt in range(max_retries):
-            key = await self.pool.acquire()
+            key = await self.pool.acquire(preferred_key_id=preferred_key_id)
             started = time.monotonic()
             try:
                 req = self.client.build_request(
@@ -156,9 +189,14 @@ class UpstreamClient:
                 resp = await self.client.send(req, stream=True)
 
                 if resp.status_code == 429:
+                    retry_after = parse_retry_after(resp.headers.get("Retry-After"))
                     await resp.aclose()
                     await self.pool.release(
-                        key, success=False, rate_limited=True, status_code=429
+                        key,
+                        success=False,
+                        rate_limited=True,
+                        status_code=429,
+                        retry_after_seconds=retry_after,
                     )
                     if attempt < max_retries - 1:
                         logger.info(
@@ -180,9 +218,28 @@ class UpstreamClient:
                         key,
                     )
 
+                if resp.status_code in {401, 403}:
+                    await resp.aclose()
+                    await self.pool.release(
+                        key, success=False, status_code=resp.status_code
+                    )
+                    if attempt < max_retries - 1:
+                        continue
+
+                    async def empty_auth() -> AsyncIterator[bytes]:
+                        if False:  # pragma: no cover
+                            yield b""
+                        return
+
+                    return (
+                        resp.status_code,
+                        empty_auth(),
+                        {"content-type": "application/json"},
+                        key,
+                    )
+
                 out_headers = self._filter_headers(resp.headers)
                 status_code = resp.status_code
-                # Bind loop vars for the generator (avoid B023 / late binding)
                 bound_key = key
                 bound_resp = resp
                 bound_started = started
