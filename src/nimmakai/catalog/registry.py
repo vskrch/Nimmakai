@@ -49,6 +49,7 @@ class ModelRegistry:
         )
         self.learning.load()
         self.ladder = LadderService(health=self.health, learning=self.learning)
+        self._apply_catalog_policy()
         self.live_ids: set[str] = set()
         self.probed_ok: set[str] = set()
         self.doc_models: list[DocModel] = []
@@ -92,24 +93,61 @@ class ModelRegistry:
         reg._yaml_path = p
         return reg
 
+    def _apply_catalog_policy(self) -> None:
+        """Push YAML family / primary_family prefs into LadderService."""
+        fam = self.catalog.families
+        primary: dict[str, str] = {
+            "chat_fast": fam.chat_primary,
+            "coding_agentic": fam.coding_primary,
+            "reasoning": fam.chat_primary,
+            "long_horizon": fam.coding_primary,
+            "vision": fam.coding_primary,
+            "embeddings": fam.chat_primary,
+        }
+        for intent, ic in self.catalog.intents.items():
+            if ic.primary_family:
+                primary[intent] = ic.primary_family
+        self.ladder.apply_catalog_policy(
+            primary_by_intent=primary,
+            fallback_families=list(fam.fallbacks),
+        )
+
     @classmethod
     def from_settings(cls, settings: Any) -> ModelRegistry:
         path = Path(settings.models_config_path)
-        if not path.is_absolute():
-            candidates = [
-                path,
-                Path.cwd() / path,
-                Path(__file__).resolve().parents[3] / path,
-            ]
-            for c in candidates:
+        candidates = [
+            path,
+            Path.cwd() / path,
+            Path(__file__).resolve().parents[3] / path,
+            # Packaged default shipped inside the wheel
+            Path(__file__).resolve().parent / "data" / "models.yaml",
+        ]
+        try:
+            from importlib import resources
+
+            pkg = resources.files("nimmakai") / "data" / "models.yaml"
+            if pkg.is_file():
+                candidates.insert(0, Path(str(pkg)))
+        except Exception:
+            pass
+        resolved = None
+        for c in candidates:
+            try:
                 if c.is_file():
-                    path = c
+                    resolved = c
                     break
+            except Exception:
+                continue
+        if resolved is None:
+            raise FileNotFoundError(
+                f"models catalog not found (tried {settings.models_config_path} "
+                "and packaged nimmakai/data/models.yaml)"
+            )
         snap = Path(
             getattr(settings, "catalog_snapshot_path", ".nimmakai/catalog_snapshot.json")
         )
         return cls.from_yaml(
-            path,
+            resolved,
             strict_catalog=settings.strict_catalog,
             snapshot_path=snap,
             docs_url=getattr(
@@ -257,12 +295,6 @@ class ModelRegistry:
                 had_tools=had_tools,
                 tool_ok=tool_ok,
             )
-            # Persist occasionally — every outcome is fine for personal proxy scale
-            try:
-                self.learning.save()
-            except Exception:
-                logger.debug("learning save failed", exc_info=True)
-            # ladder_for re-scores live; keep dynamic_chains in sync cheaply
             self._sync_chains_from_ladder()
 
     def _join_docs_to_ids(self) -> set[str]:

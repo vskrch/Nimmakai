@@ -134,6 +134,41 @@ class LadderService:
         self.live_ids: set[str] = set()
         # Capability hints learned from probes / docs: model_id → flags
         self.capabilities: dict[str, dict[str, bool]] = {}
+        # Overridable from config/models.yaml (defaults = INTENT_* constants)
+        self.primary_by_intent: dict[str, str] = dict(INTENT_PRIMARY_FAMILY)
+        self.family_boost_by_intent: dict[str, dict[str, float]] = {
+            k: dict(v) for k, v in INTENT_FAMILY_BOOST.items()
+        }
+
+    def apply_catalog_policy(
+        self,
+        *,
+        primary_by_intent: dict[str, str] | None = None,
+        fallback_families: list[str] | None = None,
+    ) -> None:
+        """Wire soft family policy from models.yaml into scoring / pinning."""
+        if primary_by_intent:
+            self.primary_by_intent.update(
+                {k: v for k, v in primary_by_intent.items() if v}
+            )
+        if fallback_families:
+            # Re-weight non-primary families by YAML fallback order (first = strongest)
+            ordered = [f for f in fallback_families if f]
+            for intent, boosts in self.family_boost_by_intent.items():
+                primary = self.primary_by_intent.get(intent)
+                primary_boost = boosts.get(primary, 40.0) if primary else 40.0
+                for i, fam in enumerate(ordered):
+                    if fam == primary:
+                        continue
+                    # 25, 20, 15, … declining
+                    boosts[fam] = max(8.0, 25.0 - i * 5.0)
+                if primary:
+                    boosts[primary] = primary_boost
+            logger.info(
+                "ladder policy applied: primary=%s fallbacks=%s",
+                self.primary_by_intent,
+                ordered,
+            )
 
     def set_docs(self, docs: list[DocModel]) -> None:
         self._docs_by_slug = {d.slug.lower().replace("_", "-"): d for d in docs}
@@ -234,7 +269,7 @@ class LadderService:
             reasons.append(f"tier={vk[1]}")
 
         # Family affinity for this intent
-        boosts = INTENT_FAMILY_BOOST.get(intent, {})
+        boosts = self.family_boost_by_intent.get(intent, {})
         for fam, boost in boosts.items():
             if matches_family(model_id, fam):
                 score += boost
@@ -287,7 +322,7 @@ class LadderService:
 
         # Hard pin: strongest member of the intent's primary family leads,
         # then the rest of the strength-ordered ladder (no duplicates).
-        primary_fam = INTENT_PRIMARY_FAMILY.get(intent)
+        primary_fam = self.primary_by_intent.get(intent)
         ladder: list[str] = []
         if primary_fam:
             primary_candidates = [

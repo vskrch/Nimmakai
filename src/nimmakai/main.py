@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
@@ -29,7 +30,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pool = KeyPool(
-            api_keys=settings.nim_api_keys or ["placeholder-unconfigured"],
+            api_keys=list(settings.nim_api_keys),
             rpm_limit=settings.effective_rpm,
             cooldown_seconds=settings.nim_cooldown_seconds,
             rpd_limit=settings.nim_rpd_limit,
@@ -41,6 +42,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not settings.nim_api_keys:
             logger.error(
                 "No NIM_API_KEYS configured. Copy .env.example → .env and add your keys."
+            )
+        if not settings.proxy_api_keys and not settings.allow_insecure_auth:
+            logger.warning(
+                "PROXY_API_KEYS is empty and ALLOW_INSECURE_AUTH is false — "
+                "all client requests will be rejected until you set proxy keys."
             )
 
         upstream = UpstreamClient(
@@ -81,14 +87,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             async def _refresh_loop() -> None:
                 assert registry is not None
+                cycle = 0
+                every = max(1, int(settings.probe_every_n_refreshes))
                 while True:
                     await asyncio.sleep(settings.catalog_refresh_seconds)
+                    cycle += 1
+                    run_probes = (
+                        settings.catalog_run_probes and cycle % every == 0
+                    )
                     try:
                         await registry.refresh_from_upstream(
                             upstream,
                             fetch_docs=settings.catalog_fetch_docs,
-                            # Probes only occasionally — every refresh would burn RPM
-                            run_probes=settings.catalog_run_probes,
+                            run_probes=run_probes,
                         )
                     except Exception:
                         logger.exception("periodic catalog refresh failed")
@@ -133,10 +144,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Credentials + wildcard origins is invalid/browser-rejected; keep open CORS
+    # without credentials for local OpenAI clients that call from browsers.
+    cors_origins = [
+        o.strip()
+        for o in os.environ.get("CORS_ALLOW_ORIGINS", "*").split(",")
+        if o.strip()
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -170,8 +188,12 @@ def run() -> None:
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
     if not settings.nim_api_keys:
-        logger.error(
-            "No NIM_API_KEYS configured. Copy .env.example → .env and add your keys."
+        raise SystemExit(
+            "NIM_API_KEYS is required. Copy .env.example → .env and add your NVIDIA keys."
+        )
+    if not settings.proxy_api_keys and not settings.allow_insecure_auth:
+        raise SystemExit(
+            "PROXY_API_KEYS is empty. Set proxy keys, or ALLOW_INSECURE_AUTH=true for local dev."
         )
     uvicorn.run(
         "nimmakai.main:app",

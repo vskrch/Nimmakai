@@ -46,33 +46,23 @@ class StickySessionStore:
     ) -> str | None:
         def _h(name: str) -> str | None:
             if hasattr(headers, "get"):
-                # case-insensitive for Starlette Headers
                 v = headers.get(name) or headers.get(name.lower())
                 if v:
                     return str(v)
-                # try title variants
                 for k in getattr(headers, "keys", lambda: [])():
                     if str(k).lower() == name.lower():
                         return str(headers[k])
             return None
 
+        # Only sticky when the client opts in — never pin all traffic to one
+        # NIM key via the shared proxy API key (that defeats multi-key balance).
         explicit = _h("x-nimmakai-session")
         if explicit:
             return explicit
 
         chat_id = _h("x-cursor-chat-id") or _h("x-chat-id")
-        if proxy_token and chat_id:
-            return hashlib.sha256(f"{proxy_token}:{chat_id}".encode()).hexdigest()[:32]
+        if chat_id:
+            basis = f"{proxy_token or 'anon'}:{chat_id}"
+            return hashlib.sha256(basis.encode()).hexdigest()[:32]
 
-        if proxy_token:
-            return hashlib.sha256(proxy_token.encode()).hexdigest()[:32]
-
-        if body:
-            messages = body.get("messages")
-            if isinstance(messages, list) and messages:
-                first = messages[0]
-                if isinstance(first, dict) and first.get("role") == "system":
-                    content = first.get("content") or ""
-                    if isinstance(content, str) and content:
-                        return hashlib.sha256(content[:512].encode()).hexdigest()[:32]
         return None

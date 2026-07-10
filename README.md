@@ -28,11 +28,15 @@ Point Cursor, OpenCode, Pi, Cline, Continue, or any OpenAI SDK client at Nimmaka
 | `/v1/models`, `/v1/embeddings`, `/v1/completions`, `/v1/responses` | ✅ |
 | Multi-key RPM window + latency EWMA + 429 cooldown | ✅ |
 | Intent-aware routing (`auto`, aliases like `gpt-4o`) | ✅ |
-| Ordered model fallback (quality chains in `config/models.yaml`) | ✅ |
-| Live catalog refresh (`GET /v1/models`) | ✅ |
-| Sticky sessions, jitter, daily RPD, 401/403 quarantine | ✅ |
+| Strength ladder + ordered fallback (power-first) | ✅ |
+| Live catalog refresh + NVIDIA docs + budgeted probes | ✅ |
+| Sticky sessions (opt-in headers), jitter, RPD, quarantine | ✅ |
 | Diagnostic headers (`X-Nimmakai-*`) | ✅ |
 | `ROUTING_ENABLED=false` bootstrap passthrough | ✅ |
+
+## Honest scope
+
+Nimmakai is a solid personal NIM router — not a closed-loop “best engine in the world.” Scoring is heuristic (family, size, docs, online learning); the classifier is mostly rules; probes are budgeted. Expect to tune `config/models.yaml` and watch `/ladder` + learning as NVIDIA’s catalog changes.
 
 ## Quick start
 
@@ -53,6 +57,8 @@ cp .env.example .env
 
 Set `NIM_API_KEYS` to your NVIDIA keys from [build.nvidia.com](https://build.nvidia.com/).
 
+Set `PROXY_API_KEYS` to the Bearer token(s) your clients will send. Empty `PROXY_API_KEYS` is rejected unless `ALLOW_INSECURE_AUTH=true` (local/dev only).
+
 ### 3. Run
 
 ```bash
@@ -61,8 +67,7 @@ uv run nimmakai
 
 - Docs: http://localhost:8080/docs  
 - Health: http://localhost:8080/health  
-- Stats: http://localhost:8080/stats  
-- Catalog: http://localhost:8080/catalog  
+- Stats / catalog / ladder: auth required (`Authorization: Bearer <PROXY_API_KEYS>`)  
 
 ## Use with any OpenAI-compatible app
 

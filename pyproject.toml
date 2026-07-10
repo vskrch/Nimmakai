@@ -1,12 +1,12 @@
 [project]
 name = "nimmakai"
-version = "0.3.0"
+version = "0.3.1"
 description = "OpenAI-compatible multi-key proxy for NVIDIA NIM with intelligent routing"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Nimmakai" }]
-keywords = ["nvidia", "nim", "openai", "proxy", "load-balancer", "fastapi"]
+authors = [{ name = "Nimmakai contributors" }]
+keywords = ["nvidia", "nim", "openai", "proxy", "load-balancer", "fastapi", "router"]
 dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
@@ -14,10 +14,13 @@ dependencies = [
     "pydantic>=2.10.0",
     "pydantic-settings>=2.6.0",
     "python-dotenv>=1.0.0",
-    "orjson>=3.10.0",
-    "sse-starlette>=2.1.0",
     "pyyaml>=6.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/nimmakai/nimmakai"
+Documentation = "https://github.com/nimmakai/nimmakai#readme"
+Issues = "https://github.com/nimmakai/nimmakai/issues"
 
 [project.optional-dependencies]
 dev = [
@@ -37,8 +40,18 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/nimmakai"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/nimmakai/data/models.yaml" = "nimmakai/data/models.yaml"
+
 [tool.hatch.build.targets.sdist]
-include = ["src/nimmakai"]
+include = [
+    "src/nimmakai",
+    "config/models.yaml",
+    "LICENSE",
+    "README.md",
+    "docs",
+    "tests",
+]
 
 [tool.ruff]
 line-length = 100

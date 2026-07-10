@@ -46,7 +46,10 @@ class LearningStore:
     """Persisted per-(intent, model) learning signals."""
 
     path: Path = field(default_factory=lambda: Path(".nimmakai/learning.json"))
+    save_debounce_seconds: float = 10.0
     _data: dict[str, dict[str, ModelLearningStats]] = field(default_factory=dict)
+    _dirty: bool = False
+    _last_save_at: float = 0.0
 
     def _key(self, intent: str, model_id: str) -> tuple[str, str]:
         return intent, model_id
@@ -74,8 +77,7 @@ class LearningStore:
             s.unavailable += 1
             s.failures += 1
             s.ewma_quality = 0.7 * s.ewma_quality + 0.3 * (-1.0)
-            return
-        if success:
+        elif success:
             s.successes += 1
             q = 1.0
             if empty_reply:
@@ -92,6 +94,8 @@ class LearningStore:
         else:
             s.failures += 1
             s.ewma_quality = 0.7 * s.ewma_quality + 0.3 * (-1.0)
+        self._dirty = True
+        self.save_if_due()
 
     def score_delta(self, intent: str, model_id: str) -> float:
         if intent not in self._data or model_id not in self._data[intent]:
@@ -120,6 +124,18 @@ class LearningStore:
         except Exception:
             logger.exception("failed to load learning store")
 
+    def save_if_due(self, *, force: bool = False) -> None:
+        if not self._dirty and not force:
+            return
+        now = time.time()
+        if (
+            not force
+            and self._last_save_at
+            and now - self._last_save_at < self.save_debounce_seconds
+        ):
+            return
+        self.save()
+
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
@@ -145,6 +161,8 @@ class LearningStore:
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         tmp.replace(self.path)
+        self._dirty = False
+        self._last_save_at = time.time()
 
     def snapshot(self) -> dict:
         return {

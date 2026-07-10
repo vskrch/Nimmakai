@@ -6,7 +6,7 @@ from __future__ import annotations
 def normalize_model_name(name: str | None) -> str:
     if name is None:
         return ""
-    return str(name).strip()
+    return str(name).strip().lower()
 
 
 def looks_like_nim_id(name: str) -> bool:

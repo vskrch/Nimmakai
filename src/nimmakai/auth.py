@@ -25,7 +25,7 @@ def extract_bearer(request: Request) -> str | None:
 def require_proxy_auth(request: Request, settings: Settings) -> str:
     """
     Validate the client API key against PROXY_API_KEYS.
-    If PROXY_API_KEYS is empty, accept any non-empty key (dev convenience).
+    Empty PROXY_API_KEYS only accepted when ALLOW_INSECURE_AUTH=true.
     """
     token = extract_bearer(request)
     if not token:
@@ -42,6 +42,21 @@ def require_proxy_auth(request: Request, settings: Settings) -> str:
 
     if settings.accept_any_proxy_key:
         return token
+
+    if not settings.proxy_api_keys:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": {
+                    "message": (
+                        "PROXY_API_KEYS is empty. Set keys or ALLOW_INSECURE_AUTH=true "
+                        "for local dev."
+                    ),
+                    "type": "invalid_request_error",
+                    "code": "proxy_auth_not_configured",
+                }
+            },
+        )
 
     if token not in settings.proxy_api_keys:
         raise HTTPException(

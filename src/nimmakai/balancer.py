@@ -69,9 +69,6 @@ class KeyPool:
         auth_quarantine_seconds: float = 3600.0,
         sticky_boost: float = 3.0,
     ) -> None:
-        if not api_keys:
-            raise ValueError("At least one NIM API key is required (NIM_API_KEYS)")
-
         self.rpm_limit = rpm_limit
         self.cooldown_seconds = cooldown_seconds
         self.window_seconds = window_seconds
@@ -81,9 +78,15 @@ class KeyPool:
         self.auth_quarantine_seconds = auth_quarantine_seconds
         self.sticky_boost = sticky_boost
         self._lock = asyncio.Lock()
+        # Empty pool is allowed so the app can boot and return clear 503s;
+        # acquire() fails closed until NIM_API_KEYS is configured.
         self._keys: list[KeyStats] = [
             KeyStats(key_id=f"key-{i}", api_key=k) for i, k in enumerate(api_keys)
         ]
+        if not self._keys:
+            logger.error(
+                "KeyPool has zero NIM keys — all upstream requests will fail closed"
+            )
         self._rr = 0
 
     def __len__(self) -> int:
@@ -143,6 +146,10 @@ class KeyPool:
         *,
         preferred_key_id: str | None = None,
     ) -> KeyStats:
+        if not self._keys:
+            raise RuntimeError(
+                "No NIM API keys configured. Set NIM_API_KEYS in the environment."
+            )
         deadline = time.monotonic() + max_wait
         while True:
             async with self._lock:
@@ -224,6 +231,7 @@ class KeyPool:
 
             if success:
                 stats.success_count += 1
+                stats.auth_failures = 0  # clear latch so quarantine is time-boxed only
                 if latency is not None:
                     stats.ewma_latency = 0.7 * stats.ewma_latency + 0.3 * latency
             else:

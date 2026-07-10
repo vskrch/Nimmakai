@@ -61,6 +61,53 @@ async def test_fallback_advances_on_404() -> None:
 
 
 @pytest.mark.asyncio
+async def test_soft_fail_empty_reply_advances() -> None:
+    settings = Settings(nim_api_keys=["k"], max_model_fallbacks=3)
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b"}
+
+    async def fake_json(method, path, **kwargs):
+        body = kwargs.get("json_body") or {}
+        model = body.get("model")
+        if model == "model-a":
+            return (
+                200,
+                {"id": "empty", "model": model, "choices": [{"message": {"content": ""}}]},
+                {},
+                _key(),
+            )
+        return (
+            200,
+            {
+                "id": "ok",
+                "model": model,
+                "choices": [{"message": {"content": "hello"}}],
+            },
+            {},
+            _key(1),
+        )
+
+    upstream = AsyncMock()
+    upstream.request_json = fake_json
+    decision = RouteDecision(
+        chain=["model-a", "model-b"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    result = await ex.execute_json(
+        "/chat/completions",
+        {"messages": [{"role": "user", "content": "hi"}]},
+        decision,
+    )
+    assert result.status_code == 200
+    assert result.model == "model-b"
+    assert result.fallback_index == 1
+
+
+@pytest.mark.asyncio
 async def test_non_retryable_400_stops() -> None:
     settings = Settings(nim_api_keys=["k"], max_model_fallbacks=3)
     reg = ModelRegistry.from_yaml(YAML)

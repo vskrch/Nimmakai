@@ -80,12 +80,15 @@ async def test_jitter_enabled() -> None:
     assert delay >= 0.0
 
 
-def test_sticky_session_store() -> None:
+def test_sticky_requires_explicit_session() -> None:
     store = StickySessionStore(ttl_seconds=60)
-    sid = store.resolve_session_id({"x-nimmakai-session": "abc"})
-    assert sid == "abc"
-    store.put(sid, "key-0")
-    assert store.get(sid) == "key-0"
+    # Shared proxy token alone must NOT create sticky affinity
+    assert store.resolve_session_id({}, proxy_token="sk-shared") is None
+    assert store.resolve_session_id({"authorization": "Bearer x"}, proxy_token="x") is None
+    sid = store.resolve_session_id({"x-nimmakai-session": "s1"}, proxy_token="x")
+    assert sid == "s1"
+    chat = store.resolve_session_id({"x-cursor-chat-id": "c1"}, proxy_token="tok")
+    assert chat is not None and len(chat) == 32
 
 
 def test_parse_retry_after_seconds() -> None:

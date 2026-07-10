@@ -180,14 +180,20 @@ async def _chat_like(
                     key_id=result.key.key_id if result.key else None,
                     fallback_index=result.fallback_index,
                 )
-                await guard.after_request(
-                    ctx,
-                    key_id=result.key.key_id if result.key else None,
-                    success=200 <= result.status_code < 300,
-                )
                 media = result.headers.get("content-type", "text/event-stream")
+                upstream_iter = result.byte_iter
+                key_id = result.key.key_id if result.key else None
+                ok = 200 <= result.status_code < 300
+
+                async def _gated_stream() -> Any:
+                    try:
+                        async for chunk in upstream_iter:
+                            yield chunk
+                    finally:
+                        await guard.after_request(ctx, key_id=key_id, success=ok)
+
                 return StreamingResponse(
-                    result.byte_iter,
+                    _gated_stream(),
                     status_code=result.status_code,
                     media_type=media,
                     headers={
@@ -228,12 +234,19 @@ async def _chat_like(
                 json_body=body,
                 preferred_key_id=preferred,
             )
-            await guard.after_request(
-                ctx, key_id=key.key_id, success=200 <= status < 300
-            )
             media = headers.get("content-type", "text/event-stream")
+            key_id = key.key_id
+            ok = 200 <= status < 300
+
+            async def _gated_passthrough() -> Any:
+                try:
+                    async for chunk in byte_iter:
+                        yield chunk
+                finally:
+                    await guard.after_request(ctx, key_id=key_id, success=ok)
+
             return StreamingResponse(
-                byte_iter,
+                _gated_passthrough(),
                 status_code=status,
                 media_type=media,
                 headers={

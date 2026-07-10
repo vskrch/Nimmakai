@@ -76,9 +76,11 @@ class Settings(BaseSettings):
     sticky_sessions_enabled: bool = True
     sticky_session_ttl_seconds: float = 1800.0
     sticky_boost: float = 3.0
+    allow_insecure_auth: bool = False  # must be true to accept any Bearer when PROXY empty
+    request_deadline_seconds: float = 180.0
+    probe_every_n_refreshes: int = 6
     upstream_user_agent: str = (
-        f"nimmakai/{__version__} "
-        "(+https://github.com/nimmakai/nimmakai; OpenAI-compatible proxy)"
+        f"nimmakai/{__version__} (OpenAI-compatible NIM proxy)"
     )
 
     # Optional egress proxies (corporate networking — not for ban evasion)
@@ -98,7 +100,7 @@ class Settings(BaseSettings):
 
     @property
     def accept_any_proxy_key(self) -> bool:
-        return len(self.proxy_api_keys) == 0
+        return len(self.proxy_api_keys) == 0 and self.allow_insecure_auth
 
     def egress_proxy_url(self) -> str | None:
         """First configured egress proxy, if any."""

@@ -42,6 +42,8 @@ async def health(request: Request) -> JSONResponse:
 @router.get("/stats")
 async def stats(request: Request) -> JSONResponse:
     """Per-key RPM / latency / cooldown snapshot (no secret values)."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
     pool = request.app.state.pool
     routing_stats = getattr(request.app.state, "routing_stats", None)
     registry = getattr(request.app.state, "registry", None)

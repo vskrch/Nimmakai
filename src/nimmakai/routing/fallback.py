@@ -258,6 +258,16 @@ class FallbackExecutor:
                 self.registry.ladder.set_capability(model, supports_tools=False)
 
             if success:
+                soft_fail = (had_tools and tool_ok is False) or empty_reply
+                if soft_fail and idx < len(chain) - 1:
+                    self.stats.fallback_advances += 1
+                    logger.info(
+                        "model %s soft-fail (empty=%s tool_ok=%s); falling back",
+                        model,
+                        empty_reply,
+                        tool_ok,
+                    )
+                    continue
                 if isinstance(resp_body, dict) and "model" in resp_body:
                     resp_body = {**resp_body, "model": model}
                 self.stats.record(decision.intent.value, model, advanced=idx > 0)
@@ -399,30 +409,53 @@ class FallbackExecutor:
                     decision=decision,
                 )
 
-            # Consume/close failed stream attempt (upstream already released on 429 empty)
-            if status == 429 or status >= 500 or status == 404:
-                try:
-                    async for _ in byte_iter:
-                        pass
-                except Exception:
-                    pass
-                self.registry.record_outcome(
-                    model,
-                    key.key_id if key else None,
-                    success=False,
-                    status_code=status,
-                    unavailable=status == 404,
-                    intent=decision.intent.value,
-                )
-                if idx < len(chain) - 1:
-                    self.stats.fallback_advances += 1
-                    continue
+            # Failed stream open — advance on same retryable set as JSON path
+            err_raw = b""
+            try:
+                async for chunk in byte_iter:
+                    err_raw += chunk
+                    if len(err_raw) > 8192:
+                        break
+            except Exception:
+                pass
 
-            # Non-retryable or last attempt — return error stream as-is
+            err_body: Any = None
+            if err_raw:
+                import json as _json
+
+                try:
+                    err_body = _json.loads(err_raw.decode("utf-8", errors="replace"))
+                except Exception:
+                    err_body = err_raw.decode("utf-8", errors="replace")
+
+            retryable = status in {404, 429, 500, 502, 503, 504} or (
+                status == 400 and _is_retryable_model_error(status, err_body)
+            )
+            self.registry.record_outcome(
+                model,
+                key.key_id if key else None,
+                success=False,
+                status_code=status,
+                unavailable=status == 404,
+                intent=decision.intent.value,
+            )
+            if retryable and idx < len(chain) - 1:
+                self.stats.fallback_advances += 1
+                logger.info(
+                    "stream model %s failed status=%s; falling back",
+                    model,
+                    status,
+                )
+                continue
+
+            async def err_bytes(payload: bytes = err_raw) -> AsyncIterator[bytes]:
+                if payload:
+                    yield payload
+
             self.stats.record(decision.intent.value, model, advanced=idx > 0)
             return StreamResult(
                 status_code=status,
-                byte_iter=byte_iter,
+                byte_iter=err_bytes(),
                 headers=headers,
                 key=key,
                 model=model,
