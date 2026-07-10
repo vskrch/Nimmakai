@@ -88,6 +88,30 @@ def _is_non_retryable_client_error(status: int, body: Any) -> bool:
     return False
 
 
+def _analyze_success_body(body: Any, *, had_tools: bool) -> tuple[bool, bool | None]:
+    """
+    Returns (empty_reply, tool_ok).
+    tool_ok is None when tools were not requested.
+    """
+    if not isinstance(body, dict):
+        return False, None if not had_tools else False
+    choices = body.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return True, False if had_tools else None
+    msg = choices[0].get("message") if isinstance(choices[0], dict) else None
+    if not isinstance(msg, dict):
+        return True, False if had_tools else None
+    content = msg.get("content")
+    tool_calls = msg.get("tool_calls") or msg.get("function_call")
+    empty = content in (None, "", []) and not tool_calls
+    if not had_tools:
+        return empty, None
+    if tool_calls:
+        return empty, True
+    # Tools requested but none returned — soft fail signal
+    return empty, False
+
+
 class FallbackExecutor:
     def __init__(
         self,
@@ -199,13 +223,39 @@ class FallbackExecutor:
             key_id = key.key_id if key else None
             unavailable = _is_model_not_found(status, resp_body)
             success = 200 <= status < 300
+            had_tools = bool(
+                (body.get("tools") or body.get("functions"))
+                or body.get("tool_choice") not in (None, "none", "None")
+            )
+            empty_reply = False
+            tool_ok: bool | None = None
+            if success:
+                empty_reply, tool_ok = _analyze_success_body(
+                    resp_body, had_tools=had_tools
+                )
             self.registry.record_outcome(
                 model,
                 key_id,
                 success=success,
                 status_code=status,
                 unavailable=unavailable,
+                intent=decision.intent.value,
+                empty_reply=empty_reply,
+                had_tools=had_tools,
+                tool_ok=tool_ok,
             )
+            if had_tools and tool_ok is True:
+                self.registry.ladder.set_capability(model, supports_tools=True)
+            elif had_tools and tool_ok is False and success:
+                # Don't mark unsupported on empty once — wait for learning demotion
+                pass
+            body_l = str(resp_body).lower()
+            if (
+                (unavailable or status == 400)
+                and "tool" in body_l
+                and "support" in body_l
+            ):
+                self.registry.ladder.set_capability(model, supports_tools=False)
 
             if success:
                 if isinstance(resp_body, dict) and "model" in resp_body:
@@ -331,7 +381,14 @@ class FallbackExecutor:
 
             if 200 <= status < 300:
                 self.stats.record(decision.intent.value, model, advanced=idx > 0)
-                # Wrap iterator to record health on completion — release already in upstream
+                self.registry.record_outcome(
+                    model,
+                    key.key_id if key else None,
+                    success=True,
+                    status_code=status,
+                    intent=decision.intent.value,
+                    had_tools=bool(body.get("tools") or body.get("functions")),
+                )
                 return StreamResult(
                     status_code=status,
                     byte_iter=byte_iter,
@@ -344,7 +401,6 @@ class FallbackExecutor:
 
             # Consume/close failed stream attempt (upstream already released on 429 empty)
             if status == 429 or status >= 500 or status == 404:
-                # Drain empty iterators
                 try:
                     async for _ in byte_iter:
                         pass
@@ -356,6 +412,7 @@ class FallbackExecutor:
                     success=False,
                     status_code=status,
                     unavailable=status == 404,
+                    intent=decision.intent.value,
                 )
                 if idx < len(chain) - 1:
                     self.stats.fallback_advances += 1

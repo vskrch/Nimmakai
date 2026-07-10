@@ -20,6 +20,7 @@ from nimmakai.catalog.families import (
     version_key,
 )
 from nimmakai.catalog.health import ModelHealthStore
+from nimmakai.catalog.learning import LearningStore
 
 logger = logging.getLogger(__name__)
 
@@ -121,11 +122,18 @@ class LadderService:
     Routing: call `ladder_for(intent)` to get strongest → next available order.
     """
 
-    def __init__(self, health: ModelHealthStore | None = None) -> None:
+    def __init__(
+        self,
+        health: ModelHealthStore | None = None,
+        learning: LearningStore | None = None,
+    ) -> None:
         self.health = health or ModelHealthStore()
+        self.learning = learning or LearningStore()
         self._ladders: dict[str, LadderSnapshot] = {}
         self._docs_by_slug: dict[str, DocModel] = {}
         self.live_ids: set[str] = set()
+        # Capability hints learned from probes / docs: model_id → flags
+        self.capabilities: dict[str, dict[str, bool]] = {}
 
     def set_docs(self, docs: list[DocModel]) -> None:
         self._docs_by_slug = {d.slug.lower().replace("_", "-"): d for d in docs}
@@ -152,13 +160,17 @@ class LadderService:
     def ladder_for(self, intent: str, *, max_n: int | None = None) -> list[str]:
         """
         Strength-ordered available models for intent.
+        Re-scores on each call so online learning applies immediately.
         Unhealthy / cooldown models are skipped (walk to next strongest).
         """
-        snap = self._ladders.get(intent)
-        if snap is None:
-            # Lazy build if intent unseen
+        if self.live_ids:
             snap = self._build_ladder(intent)
             self._ladders[intent] = snap
+        else:
+            snap = self._ladders.get(intent)
+            if snap is None:
+                snap = self._build_ladder(intent)
+                self._ladders[intent] = snap
 
         out: list[str] = []
         for mid in snap.ladder:
@@ -170,7 +182,6 @@ class LadderService:
             if max_n is not None and len(out) >= max_n:
                 break
 
-        # If everything unhealthy, still return preference order so fallback can try
         if not out and snap.ladder:
             out = list(snap.ladder[: max_n or len(snap.ladder)])
         return out
@@ -241,6 +252,28 @@ class LadderService:
             if hits:
                 score += hits * 4.0
                 reasons.append(f"doc_keywords={hits}")
+            # Explicit capability language in NVIDIA docs
+            if intent == "coding_agentic" and (
+                "tool" in desc or "function calling" in desc or "agent" in desc
+            ):
+                score += 8.0
+                reasons.append("doc_tools_agent")
+
+        # Learned online adjustments (failures, empty replies, tool quality)
+        learned = self.learning.score_delta(intent, model_id)
+        if learned:
+            score += learned
+            reasons.append(f"learned={learned:+.1f}")
+
+        # Capability registry (from probes)
+        caps = self.capabilities.get(model_id) or {}
+        if intent == "coding_agentic":
+            if caps.get("supports_tools") is True:
+                score += 10.0
+                reasons.append("tools_confirmed")
+            elif caps.get("supports_tools") is False:
+                score -= 20.0
+                reasons.append("tools_unsupported")
 
         return ScoredModel(model_id=model_id, score=score, reasons=reasons)
 
@@ -298,3 +331,7 @@ class LadderService:
             }
             for intent, snap in self._ladders.items()
         }
+
+    def set_capability(self, model_id: str, **flags: bool) -> None:
+        cur = self.capabilities.setdefault(model_id, {})
+        cur.update(flags)

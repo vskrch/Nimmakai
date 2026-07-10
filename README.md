@@ -64,13 +64,12 @@ uv run nimmakai
 - Stats: http://localhost:8080/stats  
 - Catalog: http://localhost:8080/catalog  
 
-## Use with coding agents
+## Use with any OpenAI-compatible app
 
-| Setting | Value |
-|--------|--------|
-| **Base URL** | `http://localhost:8080/v1` |
-| **API Key** | value from `PROXY_API_KEYS` |
-| **Model** | `nimmakai/auto` (or `auto`, `gpt-4o`, or a real `org/model` id) |
+See **[docs/integration.md](docs/integration.md)** — drop-in `base_url` + `api_key` for Cursor, OpenCode, Continue, SDKs, curl, etc.
+
+Recommended model id: `nimmakai/auto`.
+
 
 Routing headers on responses:
 

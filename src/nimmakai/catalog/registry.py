@@ -13,6 +13,7 @@ from nimmakai.catalog.aliases import normalize_model_name
 from nimmakai.catalog.docs_fetcher import DocModel, enrich_publishers, fetch_models_md
 from nimmakai.catalog.health import ModelHealthStore
 from nimmakai.catalog.ladder import LadderService
+from nimmakai.catalog.learning import LearningStore
 from nimmakai.catalog.prober import ProbeBudget, load_snapshot, probe_models, save_snapshot
 from nimmakai.catalog.schema import (
     AliasTarget,
@@ -42,7 +43,12 @@ class ModelRegistry:
         self.catalog = catalog
         self.strict_catalog = strict_catalog
         self.health = health or ModelHealthStore()
-        self.ladder = LadderService(health=self.health)
+        self.learning = LearningStore(
+            path=(snapshot_path or Path(".nimmakai/catalog_snapshot.json")).parent
+            / "learning.json"
+        )
+        self.learning.load()
+        self.ladder = LadderService(health=self.health, learning=self.learning)
         self.live_ids: set[str] = set()
         self.probed_ok: set[str] = set()
         self.doc_models: list[DocModel] = []
@@ -224,6 +230,11 @@ class ModelRegistry:
         status_code: int | None = None,
         unavailable: bool = False,
         tokens: int | None = None,
+        *,
+        intent: str | None = None,
+        empty_reply: bool = False,
+        had_tools: bool = False,
+        tool_ok: bool | None = None,
     ) -> None:
         self.health.record_outcome(
             model,
@@ -236,6 +247,23 @@ class ModelRegistry:
         )
         if success:
             self.probed_ok.add(model)
+        if intent:
+            self.learning.record(
+                intent=intent,
+                model_id=model,
+                success=success,
+                unavailable=unavailable,
+                empty_reply=empty_reply,
+                had_tools=had_tools,
+                tool_ok=tool_ok,
+            )
+            # Persist occasionally — every outcome is fine for personal proxy scale
+            try:
+                self.learning.save()
+            except Exception:
+                logger.debug("learning save failed", exc_info=True)
+            # ladder_for re-scores live; keep dynamic_chains in sync cheaply
+            self._sync_chains_from_ladder()
 
     def _join_docs_to_ids(self) -> set[str]:
         """Map doc slugs/publishers onto live API ids."""
@@ -353,6 +381,7 @@ class ModelRegistry:
             "dynamic_families": self.catalog.defaults.dynamic_families,
             "families": self.catalog.families.model_dump(),
             "ladders": self.ladder.snapshot(),
+            "learning": self.learning.snapshot(),
             "dynamic_chains": dict(self.dynamic_chains),
             "intents": {
                 name: {
