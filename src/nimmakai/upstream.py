@@ -1,0 +1,222 @@
+"""HTTP client that forwards OpenAI-compatible requests to NVIDIA NIM."""
+
+from __future__ import annotations
+
+import logging
+import time
+from collections.abc import AsyncIterator
+from typing import Any
+
+import httpx
+
+from nimmakai.balancer import KeyPool, KeyStats
+
+logger = logging.getLogger(__name__)
+
+
+class UpstreamClient:
+    def __init__(
+        self,
+        base_url: str,
+        pool: KeyPool,
+        timeout: float = 300.0,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.pool = pool
+        self.timeout = timeout
+        self._client: httpx.AsyncClient | None = None
+
+    async def start(self) -> None:
+        self._client = httpx.AsyncClient(
+            base_url=self.base_url,
+            timeout=httpx.Timeout(self.timeout, connect=30.0),
+            follow_redirects=True,
+        )
+
+    async def stop(self) -> None:
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            raise RuntimeError("UpstreamClient not started")
+        return self._client
+
+    def _headers(self, key: KeyStats, extra: dict[str, str] | None = None) -> dict[str, str]:
+        h = {
+            "Authorization": f"Bearer {key.api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        if extra:
+            # Do not forward client Authorization upstream
+            for k, v in extra.items():
+                if k.lower() in {"authorization", "host", "content-length"}:
+                    continue
+                h[k] = v
+        return h
+
+    @staticmethod
+    def _filter_headers(headers: httpx.Headers) -> dict[str, str]:
+        skip = {
+            "content-encoding",
+            "transfer-encoding",
+            "connection",
+            "keep-alive",
+            "content-length",
+        }
+        return {k: v for k, v in headers.items() if k.lower() not in skip}
+
+    async def request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: Any | None = None,
+        params: dict[str, Any] | None = None,
+        forward_headers: dict[str, str] | None = None,
+        max_retries: int = 3,
+    ) -> tuple[int, Any, dict[str, str]]:
+        """
+        Non-streaming request with key rotation + retry on 429.
+        Returns (status_code, body_json_or_text, response_headers).
+        """
+        last_error: Exception | None = None
+        for attempt in range(max_retries):
+            key = await self.pool.acquire()
+            started = time.monotonic()
+            try:
+                resp = await self.client.request(
+                    method,
+                    path,
+                    json=json_body,
+                    params=params,
+                    headers=self._headers(key, forward_headers),
+                )
+                latency = time.monotonic() - started
+                rate_limited = resp.status_code == 429
+                success = 200 <= resp.status_code < 300
+                await self.pool.release(
+                    key,
+                    success=success,
+                    latency=latency if success else None,
+                    rate_limited=rate_limited,
+                    status_code=resp.status_code,
+                )
+
+                if rate_limited and attempt < max_retries - 1:
+                    logger.info(
+                        "upstream 429 on %s; rotating key (attempt %s)",
+                        key.key_id,
+                        attempt + 1,
+                    )
+                    continue
+
+                content_type = resp.headers.get("content-type", "")
+                if "application/json" in content_type:
+                    body: Any = resp.json()
+                else:
+                    body = resp.text
+
+                return resp.status_code, body, self._filter_headers(resp.headers)
+            except Exception as exc:
+                await self.pool.release(key, success=False, latency=None)
+                last_error = exc
+                logger.exception("upstream error on %s: %s", key.key_id, exc)
+                if attempt >= max_retries - 1:
+                    raise
+        raise RuntimeError(f"upstream failed after retries: {last_error}")
+
+    async def stream(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: Any | None = None,
+        forward_headers: dict[str, str] | None = None,
+        max_retries: int = 3,
+    ) -> tuple[int, AsyncIterator[bytes], dict[str, str], KeyStats]:
+        """
+        Open a streaming response. Caller must consume the iterator fully
+        so the key is released (wrapper handles release on completion/error).
+        """
+        last_error: Exception | None = None
+        for attempt in range(max_retries):
+            key = await self.pool.acquire()
+            started = time.monotonic()
+            try:
+                req = self.client.build_request(
+                    method,
+                    path,
+                    json=json_body,
+                    headers=self._headers(key, forward_headers),
+                )
+                resp = await self.client.send(req, stream=True)
+
+                if resp.status_code == 429:
+                    await resp.aclose()
+                    await self.pool.release(
+                        key, success=False, rate_limited=True, status_code=429
+                    )
+                    if attempt < max_retries - 1:
+                        logger.info(
+                            "upstream stream 429 on %s; rotating (attempt %s)",
+                            key.key_id,
+                            attempt + 1,
+                        )
+                        continue
+
+                    async def empty_429() -> AsyncIterator[bytes]:
+                        if False:  # pragma: no cover
+                            yield b""
+                        return
+
+                    return (
+                        429,
+                        empty_429(),
+                        {"content-type": "application/json"},
+                        key,
+                    )
+
+                out_headers = self._filter_headers(resp.headers)
+                status_code = resp.status_code
+                # Bind loop vars for the generator (avoid B023 / late binding)
+                bound_key = key
+                bound_resp = resp
+                bound_started = started
+                bound_status = status_code
+
+                async def byte_iter(
+                    key: KeyStats = bound_key,
+                    resp: httpx.Response = bound_resp,
+                    started: float = bound_started,
+                    status: int = bound_status,
+                ) -> AsyncIterator[bytes]:
+                    success = 200 <= status < 300
+                    try:
+                        async for chunk in resp.aiter_bytes():
+                            yield chunk
+                    except Exception:
+                        success = False
+                        raise
+                    finally:
+                        latency = time.monotonic() - started
+                        await resp.aclose()
+                        await self.pool.release(
+                            key,
+                            success=success,
+                            latency=latency if success else None,
+                            rate_limited=status == 429,
+                            status_code=status,
+                        )
+
+                return status_code, byte_iter(), out_headers, key
+            except Exception as exc:
+                await self.pool.release(key, success=False)
+                last_error = exc
+                logger.exception("upstream stream error on %s: %s", key.key_id, exc)
+                if attempt >= max_retries - 1:
+                    raise
+        raise RuntimeError(f"upstream stream failed after retries: {last_error}")
