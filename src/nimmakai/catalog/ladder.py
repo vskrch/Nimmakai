@@ -23,6 +23,16 @@ from nimmakai.catalog.health import ModelHealthStore
 
 logger = logging.getLogger(__name__)
 
+# Intent → hard primary family (must lead ladder when any member is live)
+INTENT_PRIMARY_FAMILY: dict[str, str] = {
+    "coding_agentic": "qwen",
+    "chat_fast": "nemotron",
+    "reasoning": "nemotron",
+    "long_horizon": "qwen",
+    "vision": "qwen",
+    "embeddings": "nemotron",
+}
+
 # Rough parameter-size extraction: 397b, 120b, 70b, 30b-a3b, etc.
 PARAM_RE = re.compile(r"(?:^|[^a-z0-9])(\d{1,4})b(?:[^a-z0-9]|$)", re.I)
 
@@ -241,7 +251,21 @@ class LadderService:
             if s.score > -1e8:
                 scored.append(s)
         scored.sort(key=lambda s: (s.score, version_key(s.model_id)), reverse=True)
-        ladder = [s.model_id for s in scored]
+
+        # Hard pin: strongest member of the intent's primary family leads,
+        # then the rest of the strength-ordered ladder (no duplicates).
+        primary_fam = INTENT_PRIMARY_FAMILY.get(intent)
+        ladder: list[str] = []
+        if primary_fam:
+            primary_candidates = [
+                s for s in scored if matches_family(s.model_id, primary_fam)
+            ]
+            if primary_candidates:
+                ladder.append(primary_candidates[0].model_id)
+        for s in scored:
+            if s.model_id not in ladder:
+                ladder.append(s.model_id)
+
         scores = {s.model_id: round(s.score, 2) for s in scored}
         return LadderSnapshot(
             intent=intent,
