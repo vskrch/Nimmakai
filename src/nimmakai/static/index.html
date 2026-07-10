@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nimmakai Dashboard</title>
+<style>
+:root{--bg:#0f0f11;--card:#1a1a1f;--border:#2a2a32;--accent:#6366f1;--accent2:#818cf8;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--text:#e5e7eb;--dim:#9ca3af;--surface:#23232b}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.topbar{background:var(--card);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:10}
+.topbar h1{font-size:18px;font-weight:600}.topbar .version{color:var(--dim);font-size:13px}
+.topbar nav{margin-left:auto;display:flex;gap:16px}
+.topbar nav a{font-size:13px;color:var(--dim);text-decoration:none}.topbar nav a:hover,.topbar nav a.active{color:var(--accent2)}
+.container{max-width:1100px;margin:0 auto;padding:24px}
+.section{margin-bottom:32px}.section h2{font-size:16px;font-weight:600;margin-bottom:12px;color:var(--accent2)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:12px}
+.card-header{display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap}
+.badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.badge.green{background:rgba(34,197,94,.15);color:var(--green)}
+.badge.red{background:rgba(239,68,68,.15);color:var(--red)}
+.badge.yellow{background:rgba(234,179,8,.15);color:var(--yellow)}
+.badge.blue{background:rgba(99,102,241,.15);color:var(--accent2)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:8px 12px;color:var(--dim);border-bottom:1px solid var(--border);font-weight:500}
+td{padding:8px 12px;border-bottom:1px solid var(--border)}
+.pill{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:16px;background:var(--surface);border:1px solid var(--border);font-size:12px;margin:2px}
+.pill .x{cursor:pointer;color:var(--dim);margin-left:4px}.pill .x:hover{color:var(--red)}
+.ladder-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.input-row{display:flex;gap:8px;margin-top:6px;flex-wrap:wrap}
+input,select{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:4px;font-size:13px}
+input:focus{outline:none;border-color:var(--accent)}
+button{background:var(--accent);color:#fff;border:none;padding:6px 14px;border-radius:4px;font-size:13px;cursor:pointer;font-weight:500}
+button:hover{opacity:.9}
+button.secondary{background:var(--surface);border:1px solid var(--border);color:var(--text)}
+button.danger{background:rgba(239,68,68,.15);color:var(--red);border:1px solid rgba(239,68,68,.3)}
+.model-list{max-height:400px;overflow-y:auto}
+.empty{color:var(--dim);font-style:italic;padding:20px;text-align:center}
+.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:4px}
+.status-dot.ok{background:var(--green)}.status-dot.err{background:var(--red)}
+.grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+@media(max-width:768px){.grid{grid-template-columns:1fr}}
+.stat{text-align:center}.stat .val{font-size:28px;font-weight:700;color:var(--accent2)}.stat .lbl{font-size:12px;color:var(--dim)}
+.provider-form{display:grid;grid-template-columns:1fr 1fr;gap:8px}.provider-form .full{grid-column:1/-1}
+.toast{position:fixed;bottom:24px;right:24px;background:var(--card);border:1px solid var(--accent);padding:12px 20px;border-radius:8px;font-size:13px;z-index:100;display:none}
+.toast.show{display:block;animation:fadeIn .2s}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <h1>Nimmakai</h1>
+  <span class="version" id="version"></span>
+  <nav>
+    <a href="#providers" class="active" onclick="showTab('providers')">Providers</a>
+    <a href="#models" onclick="showTab('models')">Models</a>
+    <a href="#ladder" onclick="showTab('ladder')">Routing</a>
+  </nav>
+</div>
+<div class="container">
+  <div id="tab-providers" class="tab">
+    <div class="section"><h2>Overview</h2><div class="grid" id="provider-stats"></div></div>
+    <div class="section">
+      <div class="card">
+        <h2 style="margin-bottom:12px">Add Provider</h2>
+        <form id="add-provider-form" class="provider-form" onsubmit="addProvider(event)">
+          <input name="id" placeholder="Provider ID (e.g. groq)" required>
+          <input name="name" placeholder="Display Name">
+          <input name="base_url" placeholder="Base URL (e.g. https://api.groq.com/openai/v1)" class="full" required>
+          <input name="api_keys" placeholder="API Keys (comma-separated)" class="full">
+          <input name="rpm_limit" type="number" value="40" min="1">
+          <input name="rpd_limit" type="number" value="2000" min="1">
+          <div class="full" style="text-align:right"><button type="submit">Add Provider</button></div>
+        </form>
+      </div>
+      <div id="providers-list"></div>
+    </div>
+  </div>
+  <div id="tab-models" class="tab" style="display:none">
+    <div class="section">
+      <h2>Live Model Catalog</h2>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input id="model-search" placeholder="Filter models..." oninput="filterModels()" style="flex:1">
+        <button onclick="refreshCatalog()" class="secondary">Refresh Catalog</button>
+      </div>
+      <div class="card model-list" id="models-list"></div>
+    </div>
+  </div>
+  <div id="tab-ladder" class="tab" style="display:none">
+    <div class="section">
+      <h2>Intent Routing</h2>
+      <p style="font-size:13px;color:var(--dim);margin-bottom:16px">Pin specific models for each intent. If empty, the intelligent ladder handles it.</p>
+      <div id="ladder-editor"></div>
+    </div>
+    <div class="section">
+      <h2>Active Ladders (intelligent routing)</h2>
+      <div id="ladder-view"></div>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+var API='',INTENTS={coding_agentic:{label:'Coding / Agentic',desc:'Tools, multi-file, agent harnesses'},chat_fast:{label:'Chat / Q&A',desc:'Plain conversation, summaries'},reasoning:{label:'Reasoning',desc:'Math, logic, deep multi-step'},long_horizon:{label:'Long Context',desc:'Large context, planning'},vision:{label:'Vision',desc:'Image + text VLM'},embeddings:{label:'Embeddings',desc:'Embedding models only'}};
+var allModels=[],providers=[],preferences=[],_chainState={};
+function getAuth(){var k=localStorage.getItem('nimmakai_key');if(!k){k=prompt('Enter your Nimmakai API key:');if(k)localStorage.setItem('nimmakai_key',k)}return k||''}
+function headers(){return{'Authorization':'Bearer '+getAuth(),'Content-Type':'application/json'}}
+function showTab(name){document.querySelectorAll('.tab').forEach(function(t){t.style.display='none'});document.getElementById('tab-'+name).style.display='';document.querySelectorAll('.topbar nav a').forEach(function(a){a.classList.toggle('active',a.getAttribute('href')==='#'+name)});if(name==='models')loadModels();if(name==='ladder')loadLadder()}
+function toast(msg){var el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');setTimeout(function(){el.classList.remove('show')},3000)}
+async function loadProviders(){try{var r=await fetch(API+'/admin/providers',{headers:headers()});var d=await r.json();providers=d.providers||[];renderProviders();renderProviderStats()}catch(e){console.error(e)}}
+function renderProviderStats(){var el=document.getElementById('provider-stats');var total=providers.length,en=providers.filter(function(p){return p.enabled}).length,tk=providers.reduce(function(s,p){return s+(p.key_count||0)},0);el.innerHTML=[{val:total,lbl:'Providers'},{val:en,lbl:'Enabled'},{val:tk,lbl:'API Keys'}].map(function(s){return'<div class="card stat"><div class="val">'+s.val+'</div><div class="lbl">'+s.lbl+'</div></div>'}).join('')}
+function renderProviders(){var el=document.getElementById('providers-list');if(!providers.length){el.innerHTML='<div class="card empty">No providers configured.</div>';return}el.innerHTML=providers.map(function(p){return'<div class="card"><div class="card-header"><span class="status-dot '+(p.enabled?'ok':'err')+'"></span><strong>'+(p.name||p.id)+'</strong><span class="badge blue">'+p.id+'</span>'+(p.builtin?'<span class="badge green">built-in</span>':'')+'<span style="margin-left:auto">'+(p.enabled?'<button class="danger" onclick="toggleProvider(\''+p.id+'\',false)">Disable</button>':'<button onclick="toggleProvider(\''+p.id+'\',true)">Enable</button>')+(!p.builtin?' <button class="danger" onclick="deleteProvider(\''+p.id+'\')" style="margin-left:4px">Remove</button>':'')+'</span></div><div style="font-size:12px;color:var(--dim)">'+p.base_url+' &middot; '+p.key_count+' key(s) &middot; RPM '+p.rpm_limit+' &middot; RPD '+p.rpd_limit+(p.keys_masked&&p.keys_masked.length?' &middot; Keys: '+p.keys_masked.join(', '):'')+'</div></div>'}).join('')}
+async function addProvider(e){e.preventDefault();var f=new FormData(e.target);var body={id:f.get('id').trim(),name:(f.get('name')||f.get('id')).trim(),base_url:f.get('base_url').trim(),api_keys:f.get('api_keys')?f.get('api_keys').split(',').map(function(s){return s.trim()}).filter(Boolean):[],rpm_limit:Number(f.get('rpm_limit'))||40,rpd_limit:Number(f.get('rpd_limit'))||2000,enabled:true};var r=await fetch(API+'/admin/providers',{method:'POST',headers:headers(),body:JSON.stringify(body)});var d=await r.json();if(d.ok){toast('Provider added');e.target.reset();loadProviders()}else{toast('Error: '+(d.error&&d.error.message||'unknown'))}}
+async function toggleProvider(id,en){var p=providers.find(function(x){return x.id===id});if(!p)return;var body={id:p.id,name:p.name,base_url:p.base_url,enabled:en,rpm_limit:p.rpm_limit,rpd_limit:p.rpd_limit};var r=await fetch(API+'/admin/providers',{method:'POST',headers:headers(),body:JSON.stringify(body)});var d=await r.json();if(d.ok){toast(en?'Enabled':'Disabled');loadProviders()}}
+async function deleteProvider(id){if(!confirm('Remove provider '+id+'?'))return;var r=await fetch(API+'/admin/providers/'+id,{method:'DELETE',headers:headers()});var d=await r.json();if(d.ok){toast('Removed');loadProviders()}}
+async function loadModels(){try{var r=await fetch(API+'/v1/models',{headers:headers()});var d=await r.json();allModels=(d.data||[]).filter(function(m){return m.id!=='nimmakai/auto'});renderModels(allModels)}catch(e){console.error(e)}}
+function renderModels(models){var el=document.getElementById('models-list');if(!models.length){el.innerHTML='<div class="empty">No models found.</div>';return}var h='<table><thead><tr><th>Model ID</th><th>Provider</th><th>Context</th></tr></thead><tbody>';models.forEach(function(m){var parts=m.id.split('/'),prov=parts[0],mid=parts.slice(1).join('/'),ctx=m.context_length||m.max_model_len||'\u2014';if(typeof ctx==='number')ctx=ctx.toLocaleString();h+='<tr><td><strong>'+mid+'</strong></td><td><span class="badge blue">'+prov+'</span></td><td>'+ctx+'</td></tr>'});el.innerHTML=h+'</tbody></table>'}
+function filterModels(){var q=document.getElementById('model-search').value.toLowerCase();renderModels(allModels.filter(function(m){return m.id.toLowerCase().indexOf(q)!==-1}))}
+async function refreshCatalog(){toast('Refreshing...');var r=await fetch(API+'/admin/catalog/refresh',{method:'POST',headers:headers()});var d=await r.json();if(d.ok){toast('Catalog refreshed');loadModels()}else{toast('Refresh failed')}}
+async function loadLadder(){await Promise.all([loadPreferences(),loadLadders()])}
+async function loadPreferences(){try{var r=await fetch(API+'/preferences',{headers:headers()});var d=await r.json();preferences=d.preferences||[];_chainState={};renderLadderEditor()}catch(e){console.error(e)}}
+function renderLadderEditor(){var el=document.getElementById('ladder-editor'),h='';Object.keys(INTENTS).forEach(function(key){var meta=INTENTS[key],pref=preferences.find(function(p){return p.intent===key}),chain=_chainState[key]||(pref?pref.chain:[]),strict=pref?pref.strict:false;h+='<div class="card"><div class="card-header"><strong>'+meta.label+'</strong><span style="color:var(--dim);font-size:12px">'+meta.desc+'</span>'+(pref?'<span class="badge green">user-configured</span>':'<span class="badge yellow">intelligent</span>')+'</div><div class="ladder-row">';if(chain.length){chain.forEach(function(m,i){h+='<span class="pill">'+m+' <span class="x" onclick="removeFromChain(\''+key+'\','+i+')">&times;</span></span>'})}else{h+='<span style="color:var(--dim);font-size:12px">Empty \u2014 intelligent ladder handles this intent</span>'}h+='</div><div class="input-row"><input id="add-'+key+'" placeholder="Add model (provider/model-id)" style="flex:1" onkeydown="if(event.key===\'Enter\'){event.preventDefault();addToChain(\''+key+'\')}"><button onclick="addToChain(\''+key+'\')">Add</button><label style="font-size:12px;color:var(--dim);display:flex;align-items:center;gap:4px"><input type="checkbox" id="strict-'+key+'" '+(strict?'checked':'')+'> Strict</label><button onclick="saveChain(\''+key+'\')" class="secondary">Save</button>';if(pref)h+=' <button onclick="clearPreference(\''+key+'\')" class="danger">Reset</button>';h+='</div></div>'});el.innerHTML=h}
+function addToChain(intent){var input=document.getElementById('add-'+intent),val=input.value.trim();if(!val)return;if(!_chainState[intent]){var pref=preferences.find(function(p){return p.intent===intent});_chainState[intent]=pref?pref.chain.slice():[]}_chainState[intent].push(val);input.value='';renderLadderEditor()}
+function removeFromChain(intent,idx){if(!_chainState[intent]){var pref=preferences.find(function(p){return p.intent===intent});_chainState[intent]=pref?pref.chain.slice():[]}_chainState[intent].splice(idx,1);renderLadderEditor()}
+async function saveChain(intent){var pref=preferences.find(function(p){return p.intent===intent}),chain=_chainState[intent]||(pref?pref.chain.slice():[]),strict=document.getElementById('strict-'+intent)&&document.getElementById('strict-'+intent).checked;if(!chain.length){await clearPreference(intent);return}var r=await fetch(API+'/preferences',{method:'POST',headers:headers(),body:JSON.stringify({intent:intent,chain:chain,strict:strict})});var d=await r.json();if(d.ok){toast('Saved '+INTENTS[intent].label);delete _chainState[intent];loadPreferences()}}
+async function clearPreference(intent){var r=await fetch(API+'/preferences/'+intent,{method:'DELETE',headers:headers()});var d=await r.json();if(d.ok){toast('Reset to intelligent routing');delete _chainState[intent];loadPreferences()}}
+async function loadLadders(){try{var r=await fetch(API+'/ladder',{headers:headers()});var d=await r.json();var el=document.getElementById('ladder-view'),ladders=d.ladders||{},keys=Object.keys(ladders);if(!keys.length){el.innerHTML='<div class="card empty">No ladder data yet. Refresh catalog first.</div>';return}var h='';keys.forEach(function(intent){var snap=ladders[intent],meta=INTENTS[intent]||{label:intent};h+='<div class="card"><div class="card-header"><strong>'+meta.label+'</strong><span class="badge blue">'+snap.ladder_len+' models</span><span style="color:var(--dim);font-size:12px">'+snap.built_from_live+' live</span></div><div class="ladder-row">';(snap.ladder_head||[]).forEach(function(m,i){h+='<span class="pill">'+(i===0?'\u{1F451} ':'' )+m+' <small style="color:var(--dim)">'+(snap.scores_head&&snap.scores_head[m]!=null?snap.scores_head[m]:'')+'</small></span>'});if(snap.ladder_len>5)h+='<span style="color:var(--dim);font-size:12px">... +'+(snap.ladder_len-5)+' more</span>';h+='</div></div>'});el.innerHTML=h}catch(e){console.error(e)}}
+(function(){getAuth();fetch(API+'/health',{headers:headers()}).then(function(r){return r.json()}).then(function(d){document.getElementById('version').textContent='v'+(d.version||'?')}).catch(function(){});loadProviders()})();
+</script>
+</body>
+</html>

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from nimmakai.catalog.aliases import looks_like_nim_id, normalize_model_name
 from nimmakai.routing.intents import Intent, IntentResult
@@ -33,9 +33,15 @@ class RouteDecision:
 
 
 class ModelSelector:
-    def __init__(self, registry: ModelRegistry, settings: Settings) -> None:
+    def __init__(
+        self,
+        registry: ModelRegistry,
+        settings: Settings,
+        preferences: Any | None = None,
+    ) -> None:
         self.registry = registry
         self.settings = settings
+        self.preferences = preferences
 
     def resolve(
         self,
@@ -64,8 +70,24 @@ class ModelSelector:
                 requested_model=model_field,
             )
 
-        # Map UNKNOWN embeddings etc.
+        # Check user preferences first — if user pinned models for this intent, use them
         intent_key = intent.value
+        if self.preferences is not None and self.preferences.has_preference(intent_key):
+            pref = self.preferences.get(intent_key)
+            if pref is not None and pref.chain:
+                mode: RouteMode = "passthrough" if pref.strict else "passthrough_with_fallback"
+                chain = list(pref.chain)
+                if not pref.strict:
+                    siblings = self.registry.chain_for_intent(intent_key)
+                    chain = chain + [m for m in siblings if m not in chain]
+                return RouteDecision(
+                    chain=self.registry.health_reorder(chain),
+                    mode=mode,
+                    intent=intent,
+                    rule_id=f"user_pref:{intent_key}",
+                    requested_model=model_field,
+                )
+
         if intent == Intent.EMBEDDINGS:
             chain = self.registry.chain_for_intent("embeddings")
             if not chain and raw and looks_like_nim_id(raw):

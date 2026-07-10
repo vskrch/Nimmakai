@@ -254,3 +254,94 @@ async def refresh_provider(provider_id: str, request: Request) -> JSONResponse:
         )
     ok = await registry.refresh_from_hub(hub, fetch_docs=False, run_probes=False)
     return JSONResponse({"ok": ok, "catalog": registry.snapshot()})
+
+
+# ── User Preferences (per-intent model overrides) ────────────────────
+
+
+@router.get("/preferences")
+async def list_preferences(request: Request) -> JSONResponse:
+    """List all user intent preferences."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    prefs = getattr(request.app.state, "preferences", None)
+    if prefs is None:
+        return JSONResponse({"preferences": []})
+    return JSONResponse({"preferences": prefs.list_all()})
+
+
+@router.post("/preferences")
+async def set_preference(request: Request) -> JSONResponse:
+    """
+    Set or update an intent preference.
+    Body: {intent, chain[], strict?, note?}
+    """
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    prefs = getattr(request.app.state, "preferences", None)
+    if prefs is None:
+        return JSONResponse(
+            {"error": {"message": "Preferences not ready", "code": "nimmakai_no_prefs"}},
+            status_code=503,
+        )
+    body: dict[str, Any] = await request.json()
+    intent = str(body.get("intent") or "")
+    chain = body.get("chain") or []
+    if not intent or not isinstance(chain, list) or len(chain) == 0:
+        return JSONResponse(
+            {
+                "error": {
+                    "message": "intent and non-empty chain are required",
+                    "code": "invalid_request",
+                }
+            },
+            status_code=400,
+        )
+    try:
+        pref = prefs.set(
+            intent,
+            chain,
+            strict=bool(body.get("strict", False)),
+            note=str(body.get("note") or ""),
+        )
+    except ValueError as exc:
+        return JSONResponse(
+            {"error": {"message": str(exc), "code": "invalid_intent"}},
+            status_code=400,
+        )
+    return JSONResponse({"ok": True, "preference": pref.to_dict()})
+
+
+@router.delete("/preferences/{intent}")
+async def delete_preference(intent: str, request: Request) -> JSONResponse:
+    """Remove a user intent preference (reverts to intelligent routing)."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    prefs = getattr(request.app.state, "preferences", None)
+    if prefs is None:
+        return JSONResponse(
+            {"error": {"message": "Preferences not ready", "code": "nimmakai_no_prefs"}},
+            status_code=503,
+        )
+    ok = prefs.clear(intent)
+    if not ok:
+        return JSONResponse(
+            {"error": {"message": "Preference not found", "code": "not_found"}},
+            status_code=404,
+        )
+    return JSONResponse({"ok": True, "preferences": prefs.list_all()})
+
+
+@router.delete("/preferences")
+async def clear_all_preferences(request: Request) -> JSONResponse:
+    """Remove all user intent preferences (reverts everything to intelligent routing)."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    prefs = getattr(request.app.state, "preferences", None)
+    if prefs is None:
+        return JSONResponse(
+            {"error": {"message": "Preferences not ready", "code": "nimmakai_no_prefs"}},
+            status_code=503,
+        )
+    prefs.clear_all()
+    return JSONResponse({"ok": True, "preferences": []})

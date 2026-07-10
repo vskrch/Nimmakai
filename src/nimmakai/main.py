@@ -7,14 +7,17 @@ import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
 from nimmakai import __version__
 from nimmakai.catalog import ModelRegistry
 from nimmakai.catalog.hub import ProviderHub
+from nimmakai.catalog.preferences import UserPreferences
 from nimmakai.catalog.providers import ProviderStore
 from nimmakai.config import Settings, get_settings
 from nimmakai.routes import admin, openai
@@ -72,9 +75,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         guard = AccountGuard(settings, pool)
 
+        # Load user preferences (per-intent model overrides)
+        preferences = UserPreferences()
+        preferences.load()
+
         if registry is not None:
             registry.ladder.provider_ids = set(hub.provider_ids)
-            selector = ModelSelector(registry, settings)
+            selector = ModelSelector(registry, settings, preferences=preferences)
             fallback = FallbackExecutor(
                 upstream, registry, settings, stats=routing_stats, hub=hub
             )
@@ -117,6 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.fallback = fallback
         app.state.guard = guard
         app.state.routing_stats = routing_stats
+        app.state.preferences = preferences
 
         logger.info(
             "Nimmakai v%s ready — providers=%s, routing=%s",
@@ -159,11 +167,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin.router)
     app.include_router(openai.router)
 
+    @app.get("/dashboard", response_class=HTMLResponse)
+    async def dashboard() -> HTMLResponse:
+        """Serve the web dashboard."""
+        html_path = Path(__file__).parent / "static" / "index.html"
+        if html_path.is_file():
+            return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+        return HTMLResponse(content="<h1>Dashboard not found</h1>", status_code=404)
+
     @app.get("/")
     async def root() -> dict:
         return {
             "name": "nimmakai",
             "version": __version__,
+            "dashboard": "/dashboard",
             "openai_base_url": "/v1",
             "docs": "/docs",
             "health": "/health",
