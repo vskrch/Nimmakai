@@ -13,6 +13,8 @@ class ModelHealth:
     error_count: int = 0
     unavailable_count: int = 0
     cooldown_until: float = 0.0  # monotonic
+    # Rough token throughput proxy: chars_or_tokens / latency when known
+    ewma_tok_per_s: float = 0.0
 
     @property
     def error_rate(self) -> float:
@@ -25,6 +27,10 @@ class ModelHealth:
         now = now if now is not None else time.monotonic()
         return now < self.cooldown_until
 
+    @property
+    def samples(self) -> int:
+        return self.success_count + self.error_count
+
 
 @dataclass
 class ModelHealthStore:
@@ -33,6 +39,7 @@ class ModelHealthStore:
     error_rate_threshold: float = 0.5
     min_samples: int = 3
     model_cooldown_seconds: float = 600.0
+    slow_factor: float = 3.0  # demote head if this much slower than next
     _by_model: dict[str, ModelHealth] = field(default_factory=dict)
     _by_pair: dict[tuple[str, str], ModelHealth] = field(default_factory=dict)
 
@@ -50,6 +57,7 @@ class ModelHealthStore:
         latency: float | None = None,
         status_code: int | None = None,
         unavailable: bool = False,
+        tokens: int | None = None,
     ) -> None:
         h = self._model(model_id)
         if unavailable or status_code == 404:
@@ -58,8 +66,14 @@ class ModelHealthStore:
             h.cooldown_until = time.monotonic() + self.model_cooldown_seconds
         elif success:
             h.success_count += 1
-            if latency is not None:
+            if latency is not None and latency > 0:
                 h.ewma_latency = 0.7 * h.ewma_latency + 0.3 * latency
+                if tokens is not None and tokens > 0:
+                    tps = tokens / latency
+                    if h.ewma_tok_per_s <= 0:
+                        h.ewma_tok_per_s = tps
+                    else:
+                        h.ewma_tok_per_s = 0.7 * h.ewma_tok_per_s + 0.3 * tps
         else:
             h.error_count += 1
 
@@ -88,17 +102,36 @@ class ModelHealthStore:
 
     def health_reorder(self, chain: list[str]) -> list[str]:
         """
-        Preserve quality order primarily. Bubble a later model ahead only if
-        an earlier one is unhealthy (cooldown or high error rate).
+        Preserve preference order primarily.
+        1) Demote unhealthy / cooldown models to the end (stable).
+        2) If head is catastrophically slower than next healthy peer
+           (enough samples), swap once — speed-aware without random shuffle.
         """
         if len(chain) <= 1:
             return list(chain)
 
-        result = list(chain)
-        # Stable: move unhealthy heads toward the end while keeping relative order
-        healthy = [m for m in result if not self.is_unhealthy(m)]
-        unhealthy = [m for m in result if self.is_unhealthy(m)]
-        return healthy + unhealthy
+        healthy = [m for m in chain if not self.is_unhealthy(m)]
+        unhealthy = [m for m in chain if self.is_unhealthy(m)]
+        result = healthy + unhealthy
+
+        if len(healthy) >= 2:
+            head, nxt = healthy[0], healthy[1]
+            h0 = self._by_model.get(head)
+            h1 = self._by_model.get(nxt)
+            if (
+                h0
+                and h1
+                and h0.success_count >= self.min_samples
+                and h1.success_count >= self.min_samples
+            ):
+                # Prefer higher tok/s when available; else lower latency
+                if h0.ewma_tok_per_s > 0 and h1.ewma_tok_per_s > 0:
+                    if h1.ewma_tok_per_s >= h0.ewma_tok_per_s * self.slow_factor:
+                        result = [nxt, head, *healthy[2:], *unhealthy]
+                elif h0.ewma_latency >= h1.ewma_latency * self.slow_factor:
+                    result = [nxt, head, *healthy[2:], *unhealthy]
+
+        return result
 
     def snapshot(self) -> dict[str, dict]:
         now = time.monotonic()
@@ -106,6 +139,7 @@ class ModelHealthStore:
         for mid, h in self._by_model.items():
             out[mid] = {
                 "ewma_latency_s": round(h.ewma_latency, 3),
+                "ewma_tok_per_s": round(h.ewma_tok_per_s, 2),
                 "success_count": h.success_count,
                 "error_count": h.error_count,
                 "unavailable_count": h.unavailable_count,

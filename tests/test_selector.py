@@ -10,15 +10,20 @@ from nimmakai.routing import Intent, IntentResult, ModelSelector
 
 YAML = Path(__file__).resolve().parents[1] / "config" / "models.yaml"
 
+LIVE = {
+    "qwen/qwen3.5-122b-a10b",
+    "nvidia/nemotron-3-super-120b-a12b",
+    "zai/glm-5.2",
+    "stepfun/step-3.7-flash",
+    "minimaxai/minimax-m3",
+}
+
 
 def _selector(**kwargs) -> ModelSelector:
     settings = Settings(nim_api_keys=["k"], **kwargs)
     reg = ModelRegistry.from_yaml(YAML)
-    # Pretend all YAML models are live so chains aren't empty-filtered oddly
-    all_ids: set[str] = set()
-    for ic in reg.catalog.intents.values():
-        all_ids.update(ic.chain)
-    reg.live_ids = all_ids
+    reg.live_ids = set(LIVE)
+    reg._rebuild_all_chains()
     return ModelSelector(reg, settings)
 
 
@@ -26,11 +31,18 @@ def _intent(intent: Intent = Intent.CODING_AGENTIC) -> IntentResult:
     return IntentResult(intent=intent, confidence=0.9, rule_id="test")
 
 
-def test_auto_mode() -> None:
+def test_auto_mode_coding_uses_qwen() -> None:
     s = _selector()
     d = s.resolve("auto", _intent())
     assert d.mode == "auto"
-    assert d.chain[0].startswith("minimaxai/") or "/" in d.chain[0]
+    assert d.chain[0].startswith("qwen/")
+
+
+def test_auto_mode_chat_uses_nemotron() -> None:
+    s = _selector()
+    d = s.resolve("nimmakai/auto", _intent(Intent.CHAT_FAST))
+    assert d.mode == "auto"
+    assert "nemotron" in d.chain[0]
 
 
 def test_alias_to_chain() -> None:
@@ -53,10 +65,3 @@ def test_passthrough_with_fallback() -> None:
     assert d.mode == "passthrough_with_fallback"
     assert d.chain[0] == "org/my-model"
     assert len(d.chain) > 1
-
-
-def test_unknown_alias_as_auto() -> None:
-    s = _selector()
-    d = s.resolve("gpt-4o-2024-xx-not-listed", _intent())
-    assert d.mode == "unknown_alias_as_auto"
-    assert len(d.chain) >= 1

@@ -73,14 +73,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             selector = ModelSelector(registry, settings)
             fallback = FallbackExecutor(upstream, registry, settings, stats=routing_stats)
             if settings.nim_api_keys:
-                await registry.refresh_from_upstream(upstream)
+                await registry.refresh_from_upstream(
+                    upstream,
+                    fetch_docs=settings.catalog_fetch_docs,
+                    run_probes=settings.catalog_run_probes,
+                )
 
             async def _refresh_loop() -> None:
                 assert registry is not None
                 while True:
                     await asyncio.sleep(settings.catalog_refresh_seconds)
                     try:
-                        await registry.refresh_from_upstream(upstream)
+                        await registry.refresh_from_upstream(
+                            upstream,
+                            fetch_docs=settings.catalog_fetch_docs,
+                            # Probes only occasionally — every refresh would burn RPM
+                            run_probes=settings.catalog_run_probes,
+                        )
                     except Exception:
                         logger.exception("periodic catalog refresh failed")
 

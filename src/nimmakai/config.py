@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     strict_catalog: bool = False
     inject_auto_model: bool = True
     fallback_on_pool_exhaust: bool = True
+    catalog_docs_url: str = "https://build.nvidia.com/models.md"
+    catalog_snapshot_path: str = ".nimmakai/catalog_snapshot.json"
+    probe_budget_per_hour: int = 8
+    catalog_fetch_docs: bool = True
+    catalog_run_probes: bool = True
     long_context_chars: int = 48000
     short_chat_chars: int = 800
     llm_classify_threshold: float = 0.55

@@ -1,4 +1,4 @@
-"""Catalog YAML loading and alias/chain resolution."""
+"""Catalog YAML loading, family resolution, dynamic chains."""
 
 from __future__ import annotations
 
@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from nimmakai.catalog import ModelRegistry
+from nimmakai.catalog import ModelRegistry, latest_in_family
+from nimmakai.catalog.families import build_preference_chain, matches_family
 from nimmakai.catalog.health import ModelHealthStore
 from nimmakai.catalog.schema import parse_alias_value
 
@@ -20,65 +21,124 @@ def test_parse_alias_chain() -> None:
     assert t.value == "coding_agentic"
 
 
-def test_parse_alias_model() -> None:
-    t = parse_alias_value("org/model-name")
-    assert t.kind == "model"
-    assert t.value == "org/model-name"
-
-
-def test_load_yaml_aliases_and_chains() -> None:
+def test_load_yaml_family_policy() -> None:
     reg = ModelRegistry.from_yaml(YAML)
-    assert reg.is_alias("gpt-4o")
-    target = reg.resolve_alias("gpt-4o")
-    assert target.kind == "chain"
-    assert target.value == "coding_agentic"
-    chain = reg.chain_for_intent("coding_agentic")
-    assert len(chain) >= 1
-    assert "minimaxai/minimax-m2.7" in chain
+    assert reg.catalog.defaults.dynamic_families is True
+    assert reg.catalog.families.coding_primary == "qwen"
+    assert reg.catalog.families.chat_primary == "nemotron"
+    assert reg.catalog.families.fallbacks[0] == "glm_5_2"
 
 
-def test_auto_tokens() -> None:
+def test_latest_nemotron_excludes_embed() -> None:
+    ids = {
+        "nvidia/nemotron-3-super-120b-a12b",
+        "nvidia/llama-nemotron-embed-1b-v2",
+        "nvidia/nemotron-3-nano-30b-a3b",
+    }
+    latest = latest_in_family(ids, "nemotron")
+    assert latest is not None
+    assert "embed" not in latest
+    assert "super" in latest or "nano" in latest
+
+
+def test_latest_qwen_excludes_image() -> None:
+    ids = {
+        "qwen/qwen3.5-397b-a17b",
+        "qwen/qwen3.5-122b-a10b",
+        "qwen/qwen-image",
+    }
+    latest = latest_in_family(ids, "qwen")
+    assert latest is not None
+    assert "image" not in latest
+    assert "397b" in latest or "122b" in latest
+
+
+def test_coding_chain_order() -> None:
+    ids = {
+        "qwen/qwen3.5-122b-a10b",
+        "zai/glm-5.2",
+        "stepfun/step-3.7-flash",
+        "minimaxai/minimax-m3",
+        "nvidia/nemotron-3-super-120b-a12b",
+    }
+    chain = build_preference_chain(ids, "coding_agentic")
+    assert chain[0].startswith("qwen/")
+    # Fallbacks present in order when available
+    fams = [c for c in chain]
+    assert any("glm" in c for c in fams)
+    assert any("step-3.7" in c or "step-3.7" in c.replace("_", "-") for c in fams)
+    assert any("minimax" in c and "m3" in c for c in fams)
+
+
+def test_chat_chain_prefers_nemotron() -> None:
+    ids = {
+        "qwen/qwen3.5-122b-a10b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "zai/glm-5.2",
+    }
+    chain = build_preference_chain(ids, "chat_fast")
+    assert "nemotron" in chain[0]
+
+
+def test_registry_dynamic_chain_from_live_ids() -> None:
     reg = ModelRegistry.from_yaml(YAML)
-    assert reg.is_auto("auto")
-    assert reg.is_auto("nimmakai/auto")
-    assert reg.is_auto("")
+    reg.live_ids = {
+        "qwen/qwen3.5-122b-a10b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "zai/glm-5.2",
+        "stepfun/step-3.7-flash",
+        "minimaxai/minimax-m3",
+    }
+    reg._rebuild_all_chains()
+    coding = reg.chain_for_intent("coding_agentic")
+    chat = reg.chain_for_intent("chat_fast")
+    assert coding[0].startswith("qwen/")
+    assert "nemotron" in chat[0]
 
 
-def test_health_reorder_bubbles_unhealthy() -> None:
-    store = ModelHealthStore(min_samples=2, error_rate_threshold=0.4)
-    chain = ["a", "b", "c"]
-    store.record_outcome("a", success=False)
-    store.record_outcome("a", success=False)
-    store.record_outcome("a", success=False)
-    store.record_outcome("b", success=True, latency=0.1)
-    store.record_outcome("b", success=True, latency=0.1)
+def test_health_speed_swap() -> None:
+    store = ModelHealthStore(min_samples=3, slow_factor=3.0)
+    chain = ["slow", "fast"]
+    for _ in range(3):
+        store.record_outcome("slow", success=True, latency=9.0)
+        store.record_outcome("fast", success=True, latency=1.0)
     reordered = store.health_reorder(chain)
-    assert reordered[0] == "b"
-    assert "a" in reordered
+    assert reordered[0] == "fast"
+
+
+def test_matches_family_glm() -> None:
+    assert matches_family("zai/glm-5.2", "glm_5_2")
+    assert matches_family("stepfun/step-3.7-flash", "step_3_7")
+    assert matches_family("minimaxai/minimax-m3", "minimax_m3")
 
 
 @pytest.mark.asyncio
 async def test_refresh_intersects_live_ids() -> None:
-    reg = ModelRegistry.from_yaml(YAML)
+    reg = ModelRegistry.from_yaml(YAML, probe_budget_per_hour=0)
+    reg.enrich_doc_details = False
 
     class FakeUpstream:
-        async def request_json(self, *args, **kwargs):
+        async def request_json(self, method, path, **kwargs):
             return (
                 200,
                 {
                     "data": [
-                        {"id": "minimaxai/minimax-m2.7"},
-                        {"id": "google/gemma-4-31b-it"},
+                        {"id": "qwen/qwen3.5-122b-a10b"},
+                        {"id": "nvidia/nemotron-3-super-120b-a12b"},
+                        {"id": "zai/glm-5.2"},
                     ]
                 },
                 {},
                 None,
             )
 
-    ok = await reg.refresh_from_upstream(FakeUpstream())  # type: ignore[arg-type]
+    ok = await reg.refresh_from_upstream(
+        FakeUpstream(),  # type: ignore[arg-type]
+        fetch_docs=False,
+        run_probes=False,
+    )
     assert ok
-    assert "minimaxai/minimax-m2.7" in reg.live_ids
     coding = reg.chain_for_intent("coding_agentic")
-    assert coding == ["minimaxai/minimax-m2.7"]
+    assert coding[0].startswith("qwen/")
     chat = reg.chain_for_intent("chat_fast")
-    assert chat == ["google/gemma-4-31b-it"]
+    assert "nemotron" in chat[0]

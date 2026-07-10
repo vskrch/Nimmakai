@@ -1,4 +1,4 @@
-version: 1
+version: 2
 updated: "2026-07-10"
 defaults:
   auto_mode_model_tokens:
@@ -6,8 +6,19 @@ defaults:
     - nimmakai/auto
     - ""
   passthrough_if_known: true
-  max_fallback_attempts: 3
+  max_fallback_attempts: 4
   classify_mode: rules_only
+  # Resolve families against live NVIDIA docs + /v1/models (no hardcoded best ids)
+  dynamic_families: true
+
+# Soft family policy — concrete ids resolved at runtime
+families:
+  chat_primary: nemotron
+  coding_primary: qwen
+  fallbacks:
+    - glm_5_2
+    - step_3_7
+    - minimax_m3
 
 aliases:
   gpt-4o: chain:coding_agentic
@@ -27,75 +38,26 @@ aliases:
 intents:
   coding_agentic:
     description: "Tools, multi-file, agent harnesses, repo coding"
-    chain:
-      - minimaxai/minimax-m2.7
-      - minimaxai/minimax-m2.5
-      - moonshotai/kimi-k2.5
-      - deepseek-ai/deepseek-v3.1
-      - openai/gpt-oss-120b
-      - nvidia/nemotron-3-super
+    primary_family: qwen
+    chain: []  # filled dynamically
   chat_fast:
-    description: "Plain Q&A, summaries, short chat"
-    chain:
-      - google/gemma-4-31b-it
-      - openai/gpt-oss-20b
-      - deepseek-ai/deepseek-v3-flash
+    description: "Plain Q&A, summaries, short chat — latest Nemotron"
+    primary_family: nemotron
+    chain: []
   reasoning:
     description: "Math, logic, deep multi-step reasoning"
-    chain:
-      - openai/gpt-oss-120b
-      - moonshotai/kimi-k2-thinking
-      - zai/glm-5.1
-      - openai/gpt-oss-20b
+    primary_family: nemotron
+    chain: []
   long_horizon:
     description: "Long agentic planning / large context engineering"
-    chain:
-      - moonshotai/kimi-k2.6
-      - moonshotai/kimi-k2.5
-      - zai/glm-5.1
-      - nvidia/nemotron-3-super
+    primary_family: qwen
+    chain: []
   vision:
     description: "Image + text VLM"
-    chain:
-      - qwen/qwen2.5-vl-72b-instruct
-      - moonshotai/kimi-k2.5
+    primary_family: qwen
+    chain: []
   embeddings:
     description: "Embedding models only"
     chain: []
 
-models:
-  minimaxai/minimax-m2.7:
-    tiers: [coding, agentic, tools]
-    quality_rank: 100
-    supports_tools: true
-    supports_vision: false
-  minimaxai/minimax-m2.5:
-    tiers: [coding, agentic, tools]
-    quality_rank: 95
-    supports_tools: true
-    supports_vision: false
-  moonshotai/kimi-k2.5:
-    tiers: [coding, agentic, tools]
-    quality_rank: 90
-    supports_tools: true
-    supports_vision: true
-  google/gemma-4-31b-it:
-    tiers: [chat, fast]
-    quality_rank: 40
-    supports_tools: true
-    supports_vision: false
-  openai/gpt-oss-120b:
-    tiers: [reasoning, coding]
-    quality_rank: 85
-    supports_tools: true
-    supports_vision: false
-  openai/gpt-oss-20b:
-    tiers: [chat, fast]
-    quality_rank: 35
-    supports_tools: true
-    supports_vision: false
-  qwen/qwen2.5-vl-72b-instruct:
-    tiers: [vision]
-    quality_rank: 80
-    supports_tools: true
-    supports_vision: true
+models: {}

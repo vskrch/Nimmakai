@@ -45,3 +45,6 @@ uv.lock
 # Logs
 *.log
 logs/
+
+# Runtime catalog cache
+.nimmakai/

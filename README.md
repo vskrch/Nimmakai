@@ -105,10 +105,14 @@ print(r.choices[0].message.content)
 
 ## How routing works
 
-1. **Classify** the request (tools / agent fingerprints → `coding_agentic`; short Q&A → `chat_fast`; images → `vision`; …). Rule path is CPU-only; optional `CLASSIFY_MODE=rules_then_llm` for low-confidence cases.
-2. **Select** a quality-ordered chain from `config/models.yaml`, intersected with live `GET /v1/models`.
-3. **Execute** with key rotation on 429; on model 404/5xx advance to the next chain entry (never mid-stream).
-4. **Shape** traffic: soft RPD, jitter, sticky key bias, auth quarantine, Retry-After.
+1. **Classify** the request (tools / agent fingerprints → `coding_agentic`; short Q&A → `chat_fast`; …).
+2. **Resolve families dynamically** from NVIDIA `models.md` docs + live `GET /v1/models`:
+   - Generic/chat → **latest Nemotron** (chat LLMs only)
+   - Coding/agentic → **latest Qwen**
+   - Fallbacks: **GLM 5.2 → Step 3.7 → MiniMax M3**
+3. **Rank live** by health, latency / token speed, and upstream errors (skip sick heads).
+4. **Gentle probes** (tiny `max_tokens`, hourly budget) confirm hosts without clogging RPM.
+5. **Fail-safe** disk snapshot if docs/API are down.
 
 Disable routing entirely with `ROUTING_ENABLED=false`.
 
