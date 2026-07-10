@@ -4,7 +4,7 @@
 |-------|-------|
 | **Author** | TBD |
 | **Date** | 2026-07-10 |
-| **Status** | Draft |
+| **Status** | Implemented (v0.2.0) |
 | **Workspace** | `/Users/venkatasai/CascadeProjects/Nimmakai` |
 | **Related** | Bootstrap proxy (`KeyPool`, `UpstreamClient`, OpenAI routes) |
 

@@ -1,37 +1,38 @@
 # Nimmakai
 
-**OpenAI-compatible multi-key proxy for [NVIDIA NIM](https://build.nvidia.com/).**
+**OpenAI-compatible multi-key proxy for [NVIDIA NIM](https://build.nvidia.com/)** with intelligent model routing.
 
-Point Cursor, OpenCode, Pi, Cline, Continue, or any OpenAI SDK client at Nimmakai. It fans out traffic across multiple NIM API keys, respects per-key rate limits (~40 RPM free tier), and balances on live response rates so agentic workloads avoid `429` storms.
+Point Cursor, OpenCode, Pi, Cline, Continue, or any OpenAI SDK client at Nimmakai. It fans out traffic across multiple NIM API keys, picks models by intent (`auto` / Cursor aliases), falls back along quality-ordered chains, and shapes traffic for sustainable personal multi-key use.
 
 ```
   Cursor / OpenCode / agents
             │
             │  Base URL: http://localhost:8080/v1
-            │  API key:  any key you set (PROXY_API_KEYS)
+            │  API key:  PROXY_API_KEYS
+            │  Model:    nimmakai/auto  (or gpt-4o / org/model)
             ▼
-       ┌─────────────┐
-       │  Nimmakai   │  ← key shuffle + RPM window + latency EWMA
-       └──────┬──────┘
-              │
-    ┌─────────┼─────────┬─────────┐
-    ▼         ▼         ▼         ▼
-  NIM key1  key2      key3      key4   →  integrate.api.nvidia.com
+       ┌──────────────────────────────────┐
+       │  Nimmakai                        │
+       │  intent → chain → key pool       │
+       │  RPM + RPD + sticky + quarantine │
+       └──────────────┬───────────────────┘
+                      │
+            integrate.api.nvidia.com/v1
 ```
 
-## Features (bootstrap)
+## Features
 
 | Feature | Status |
 |--------|--------|
 | OpenAI `/v1/chat/completions` (stream + tools) | ✅ |
-| `/v1/models`, `/v1/embeddings`, `/v1/completions` | ✅ |
-| `/v1/responses` passthrough (newer agent SDKs) | ✅ |
-| Multi-key rotation + weighted shuffle | ✅ |
-| Per-key RPM sliding window (default 40 × 0.9) | ✅ |
-| Auto cooldown + retry on upstream `429` | ✅ |
-| Response-rate / latency-aware balancing | ✅ |
-| Client API key gate (`PROXY_API_KEYS`) | ✅ |
-| `/health` + `/stats` observability | ✅ |
+| `/v1/models`, `/v1/embeddings`, `/v1/completions`, `/v1/responses` | ✅ |
+| Multi-key RPM window + latency EWMA + 429 cooldown | ✅ |
+| Intent-aware routing (`auto`, aliases like `gpt-4o`) | ✅ |
+| Ordered model fallback (quality chains in `config/models.yaml`) | ✅ |
+| Live catalog refresh (`GET /v1/models`) | ✅ |
+| Sticky sessions, jitter, daily RPD, 401/403 quarantine | ✅ |
+| Diagnostic headers (`X-Nimmakai-*`) | ✅ |
+| `ROUTING_ENABLED=false` bootstrap passthrough | ✅ |
 
 ## Quick start
 
@@ -44,57 +45,46 @@ cd Nimmakai
 uv sync
 ```
 
-Or with pip:
-
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
-```
-
 ### 2. Configure
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
-
-```env
-# Keys your IDE / agent will send (comma-separated). Empty = accept any key.
-PROXY_API_KEYS=sk-nimmakai-local-dev
-
-# Your NVIDIA NIM keys (one per account), comma-separated
-NIM_API_KEYS=nvapi-xxxx,nvapi-yyyy,nvapi-zzzz,nvapi-wwww
-
-NIM_RPM_LIMIT=40
-NIM_RPM_SAFETY_FACTOR=0.9
-HOST=0.0.0.0
-PORT=8080
-```
-
-Get NIM keys at [build.nvidia.com](https://build.nvidia.com/) → account → API keys (phone verification required for free tier).
+Set `NIM_API_KEYS` to your NVIDIA keys from [build.nvidia.com](https://build.nvidia.com/).
 
 ### 3. Run
 
 ```bash
 uv run nimmakai
-# or
-uv run uvicorn nimmakai.main:app --host 0.0.0.0 --port 8080
 ```
 
-- API docs: http://localhost:8080/docs  
+- Docs: http://localhost:8080/docs  
 - Health: http://localhost:8080/health  
-- Pool stats: http://localhost:8080/stats  
+- Stats: http://localhost:8080/stats  
+- Catalog: http://localhost:8080/catalog  
 
 ## Use with coding agents
-
-### Cursor / any OpenAI-compatible client
 
 | Setting | Value |
 |--------|--------|
 | **Base URL** | `http://localhost:8080/v1` |
-| **API Key** | `sk-nimmakai-local-dev` (or whatever you set in `PROXY_API_KEYS`) |
-| **Model** | Any NIM model id, e.g. `meta/llama-3.1-70b-instruct`, `deepseek-ai/deepseek-r1` |
+| **API Key** | value from `PROXY_API_KEYS` |
+| **Model** | `nimmakai/auto` (or `auto`, `gpt-4o`, or a real `org/model` id) |
+
+Routing headers on responses:
+
+- `X-Nimmakai-Model` — upstream model used  
+- `X-Nimmakai-Intent` — e.g. `coding_agentic`, `chat_fast`  
+- `X-Nimmakai-Key-Id` — which pool key served the request  
+- `X-Nimmakai-Route-Mode` — `auto` / `alias` / `passthrough` / …  
+- `X-Nimmakai-Fallback-Index` — `0` unless a later chain model was used  
+
+Optional request headers:
+
+- `X-Nimmakai-Session` — sticky session id  
+- `X-Nimmakai-Disable-Route: 1` — force passthrough of `model`  
+- `X-Nimmakai-Intent: reasoning` — force intent  
 
 ### OpenAI Python SDK
 
@@ -107,47 +97,40 @@ client = OpenAI(
 )
 
 r = client.chat.completions.create(
-    model="meta/llama-3.1-70b-instruct",
+    model="nimmakai/auto",
     messages=[{"role": "user", "content": "Hello from Nimmakai"}],
 )
 print(r.choices[0].message.content)
 ```
 
-### curl
+## How routing works
 
-```bash
-curl http://localhost:8080/v1/chat/completions \
-  -H "Authorization: Bearer sk-nimmakai-local-dev" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "meta/llama-3.1-70b-instruct",
-    "messages": [{"role": "user", "content": "ping"}]
-  }'
-```
+1. **Classify** the request (tools / agent fingerprints → `coding_agentic`; short Q&A → `chat_fast`; images → `vision`; …). Rule path is CPU-only; optional `CLASSIFY_MODE=rules_then_llm` for low-confidence cases.
+2. **Select** a quality-ordered chain from `config/models.yaml`, intersected with live `GET /v1/models`.
+3. **Execute** with key rotation on 429; on model 404/5xx advance to the next chain entry (never mid-stream).
+4. **Shape** traffic: soft RPD, jitter, sticky key bias, auth quarantine, Retry-After.
 
-## How balancing works
+Disable routing entirely with `ROUTING_ENABLED=false`.
 
-1. **RPM window** — each key tracks request timestamps in a 60s sliding window. Effective limit = `NIM_RPM_LIMIT × NIM_RPM_SAFETY_FACTOR` (default **36**/min) so we leave headroom before NVIDIA’s hard 40.
-2. **Selection** — among keys under the limit (and not cooling down), score by remaining headroom × inverse EWMA latency × success rate × concurrency penalty, then weighted-random pick from the top half (shuffle + prefer healthy keys).
-3. **429 handling** — that key enters cooldown (`NIM_COOLDOWN_SECONDS`, default 60s); the request is retried on another key automatically.
-4. **Streaming** — SSE chunks are proxied byte-for-byte so tool calls / agentic streams stay intact.
+## Account safety & responsibility
 
-With **4 keys × ~36 RPM** you get on the order of **~144 RPM** aggregate capacity before the pool waits for window slots.
+Multi-account free-tier aggregation may violate NVIDIA’s terms. Nimmakai implements **legitimate traffic shaping** (budgets, jitter, sticky sessions, quarantine) — not ban-evasion tooling (no residential proxy farms, CAPTCHA solving, or identity automation).
+
+For production capacity, prefer NVIDIA AI Enterprise or self-hosted NIM. Optional `NIM_EGRESS_PROXIES` is for corporate egress only; you are responsible for lawful use.
 
 ## Project layout
 
 ```
+config/models.yaml          # aliases + intent chains
 src/nimmakai/
-  main.py          # FastAPI app + lifespan
-  config.py        # pydantic-settings
-  auth.py          # client Bearer validation
-  balancer.py      # KeyPool (RPM + EWMA + cooldown)
-  upstream.py      # httpx forwarder with retry
-  routes/
-    openai.py      # /v1/* OpenAI surface
-    admin.py       # /health, /stats
-tests/
-  test_balancer.py
+  catalog/                  # YAML registry + live refresh + health
+  routing/                  # classifier, selector, fallback
+  safety/                   # jitter, sticky, concurrency, guard
+  balancer.py               # KeyPool (RPM + RPD + quarantine)
+  upstream.py               # httpx forwarder
+  routes/openai.py          # /v1/*
+  routes/admin.py           # /health, /stats, /catalog
+docs/design-intelligent-router.md
 ```
 
 ## Development
@@ -157,14 +140,6 @@ uv sync --all-extras
 uv run pytest
 uv run ruff check src tests
 ```
-
-## Roadmap (next)
-
-- [ ] Model-level routing / fallback aliases (map `gpt-4o` → NIM model)
-- [ ] Persistent metrics (Prometheus)
-- [ ] Optional Redis shared state for multi-instance deploys
-- [ ] Request queue with fair scheduling per client
-- [ ] Admin UI for live key health
 
 ## License
 

@@ -19,18 +19,16 @@
 # Scratchpad
 
 ## Current task
-User referenced `@docs/design-intelligent-router.md` without a specific ask (2026-07-10).
-
-## Context
-- Draft design: Intelligent Model Router + Account-Safe Multi-Key Proxy
-- Extends bootstrap KeyPool / UpstreamClient / OpenAI routes
-- Three pillars: intent routing, ordered fallback, account safety
-- 8-PR delivery plan in the doc
+Build intelligent router end-to-end from `docs/design-intelligent-router.md` (2026-07-10).
 
 ## Progress
-[X] Read design doc overview + structure
-[X] Asked via Spokenly what to do (cancelled twice)
-[ ] Await user direction: summarize / review / plan / implement
+[X] Explore bootstrap + design PR plan
+[X] Catalog (schema, YAML, registry, health)
+[X] Safety (KeyPool extensions, guard, sticky, jitter, concurrency)
+[X] Routing (classifier, selector, fallback)
+[X] Wire main / openai / admin + settings
+[X] Tests + README + .env.example
+[X] Run pytest + ruff; fix failures — 36 passed, ruff clean
 
-## Next
-Wait for user to specify: review, implementation plan, or start PR 1 (catalog schema + YAML).
+## Done
+Intelligent router v0.2.0 on branch `feat/intelligent-router`. Await user for commit/PR.

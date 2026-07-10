@@ -293,11 +293,12 @@ class IntentClassifier:
         body: dict[str, Any],
         features: dict[str, Any],
     ) -> Intent | None:
+        feat_keys = ("has_tools", "has_image", "char_len", "fence_count")
         prompt = (
             "Classify the user request into one intent label. "
             "Reply with ONLY one of: coding_agentic, chat_fast, reasoning, "
             "long_horizon, vision.\n"
-            f"features={json.dumps({k: features[k] for k in ('has_tools','has_image','char_len','fence_count') if k in features})}\n"
+            f"features={json.dumps({k: features[k] for k in feat_keys if k in features})}\n"
             f"last_user={str(features.get('last_user') or '')[:400]}"
         )
         status, resp, _headers, _key = await upstream.request_json(

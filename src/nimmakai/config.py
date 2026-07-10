@@ -71,7 +71,10 @@ class Settings(BaseSettings):
     sticky_sessions_enabled: bool = True
     sticky_session_ttl_seconds: float = 1800.0
     sticky_boost: float = 3.0
-    upstream_user_agent: str = f"nimmakai/{__version__} (+https://github.com/nimmakai/nimmakai; OpenAI-compatible proxy)"
+    upstream_user_agent: str = (
+        f"nimmakai/{__version__} "
+        "(+https://github.com/nimmakai/nimmakai; OpenAI-compatible proxy)"
+    )
 
     # Optional egress proxies (corporate networking — not for ban evasion)
     nim_egress_proxies: Annotated[list[str], NoDecode] = Field(default_factory=list)

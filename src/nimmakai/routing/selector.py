@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from nimmakai.catalog.aliases import looks_like_nim_id, normalize_model_name
 from nimmakai.routing.intents import Intent, IntentResult

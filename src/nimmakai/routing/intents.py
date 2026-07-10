@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 
-class Intent(str, Enum):
+class Intent(StrEnum):
     CODING_AGENTIC = "coding_agentic"
     CHAT_FAST = "chat_fast"
     REASONING = "reasoning"

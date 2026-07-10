@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import uvicorn
 from fastapi import FastAPI
@@ -15,8 +15,8 @@ from nimmakai import __version__
 from nimmakai.balancer import KeyPool
 from nimmakai.catalog import ModelRegistry
 from nimmakai.config import Settings, get_settings
-from nimmakai.routing import FallbackExecutor, IntentClassifier, ModelSelector, RoutingStats
 from nimmakai.routes import admin, openai
+from nimmakai.routing import FallbackExecutor, IntentClassifier, ModelSelector, RoutingStats
 from nimmakai.safety import AccountGuard
 from nimmakai.upstream import UpstreamClient
 
@@ -110,10 +110,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         finally:
             if refresh_task is not None:
                 refresh_task.cancel()
-                try:
+                with suppress(asyncio.CancelledError):
                     await refresh_task
-                except asyncio.CancelledError:
-                    pass
             await upstream.stop()
 
     app = FastAPI(

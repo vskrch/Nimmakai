@@ -11,7 +11,7 @@ from nimmakai.balancer import KeyPool
 async def test_acquire_rotates_across_keys() -> None:
     pool = KeyPool(api_keys=["k1", "k2", "k3"], rpm_limit=100)
     seen: set[str] = set()
-    for _ in range(12):
+    for _ in range(60):
         key = await pool.acquire()
         seen.add(key.api_key)
         await pool.release(key, success=True, latency=0.1)

@@ -155,7 +155,6 @@ async def _chat_like(
     *,
     upstream_path: str,
 ) -> JSONResponse | StreamingResponse:
-    settings = _settings(request)
     upstream = _upstream(request)
     guard: AccountGuard = request.app.state.guard
     body = await request.json()
@@ -252,7 +251,7 @@ async def _chat_like(
         )
         await guard.after_request(ctx, key_id=key.key_id, success=200 <= status < 300)
         return JSONResponse(content=resp_body, status_code=status, headers=headers)
-    except RuntimeError as exc:
+    except RuntimeError:
         await guard.after_request(ctx, success=False)
         return JSONResponse(content=guard.pool_exhausted_error(), status_code=503)
     except Exception:
@@ -272,7 +271,6 @@ async def completions(request: Request) -> JSONResponse | StreamingResponse:
 
 @router.post("/embeddings")
 async def embeddings(request: Request) -> JSONResponse:
-    settings = _settings(request)
     upstream = _upstream(request)
     guard: AccountGuard = request.app.state.guard
     body = await request.json()

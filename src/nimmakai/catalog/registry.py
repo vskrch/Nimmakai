@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from nimmakai.catalog.aliases import looks_like_nim_id, normalize_model_name
+from nimmakai.catalog.aliases import normalize_model_name
 from nimmakai.catalog.health import ModelHealthStore
 from nimmakai.catalog.schema import (
     AliasTarget,

@@ -112,10 +112,8 @@ class UpstreamClient:
         Returns (status_code, body_json_or_text, response_headers, key).
         """
         last_error: Exception | None = None
-        last_key: KeyStats | None = None
         for attempt in range(max_retries):
             key = await self.pool.acquire(preferred_key_id=preferred_key_id)
-            last_key = key
             started = time.monotonic()
             try:
                 resp = await self.client.request(

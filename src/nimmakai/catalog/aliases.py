@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from nimmakai.catalog.schema import AliasTarget, parse_alias_value
-
 
 def normalize_model_name(name: str | None) -> str:
     if name is None:

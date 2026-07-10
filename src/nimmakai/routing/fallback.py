@@ -59,10 +59,7 @@ def _is_model_not_found(status: int, body: Any) -> bool:
     text = ""
     if isinstance(body, dict):
         err = body.get("error")
-        if isinstance(err, dict):
-            text = str(err.get("message") or "")
-        else:
-            text = str(body)
+        text = str(err.get("message") or "") if isinstance(err, dict) else str(body)
     elif isinstance(body, str):
         text = body
     low = text.lower()
