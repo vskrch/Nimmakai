@@ -129,28 +129,21 @@ def build_preference_chain(
     probed_ok: set[str] | None = None,
 ) -> list[str]:
     """
-    Build ordered chain: primary latest + fallbacks.
-    If probed_ok is set, prefer ids in that set; still include unprobed live ids after.
+    Build ordered chain: strongest primary + fallbacks.
+    probed_ok is ignored for ordering (power-first); unavailability is handled
+    via health cooldown demotion, not by preferring probed weaker models.
     """
+    del probed_ok  # retained for call-site compatibility
     ids = set(live_ids)
-    if probed_ok is not None:
-        # Prefer confirmed; keep unconfirmed as soft tail
-        preferred_pool = ids & probed_ok if probed_ok else ids
-        if not preferred_pool:
-            preferred_pool = ids
-    else:
-        preferred_pool = ids
 
     chain: list[str] = []
     primary_fam = INTENT_PRIMARY.get(intent, "nemotron")
-    primary = latest_in_family(preferred_pool, primary_fam)
-    if primary is None:
-        primary = latest_in_family(ids, primary_fam)
+    primary = latest_in_family(ids, primary_fam)
     if primary:
         chain.append(primary)
 
     for fam in SHARED_FALLBACKS:
-        mid = latest_in_family(preferred_pool, fam) or latest_in_family(ids, fam)
+        mid = latest_in_family(ids, fam)
         if mid and mid not in chain:
             chain.append(mid)
 

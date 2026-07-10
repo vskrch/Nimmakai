@@ -18,7 +18,9 @@ Stop hardcoding a single “best” coding/chat model id. At runtime, resolve fa
 - “Latest” = highest semantic version among matching family ids present in live catalog.
 - Exclude non-chat Nemotron (embed, OCR, ASR, safety, rerank) from text default.
 - Exclude Qwen image-only models from coding primary.
-- Live EWMA latency, success/error counts, and cooldowns may skip or demote an unhealthy head; they do not randomly invert the preference skeleton while the preferred family is healthy.
+- Live EWMA latency is recorded for observability only.
+- **Power-first:** never demote a stronger model because a weaker one is faster.
+- Fall back only when the head is unavailable, in error cooldown, or the request gets a retryable upstream failure.
 
 ## Data sources
 

@@ -215,12 +215,8 @@ class ModelRegistry:
                 if mid not in chain:
                     chain.append(mid)
 
-        if self.probed_ok:
-            confirmed = [m for m in chain if m in self.probed_ok]
-            rest = [m for m in chain if m not in self.probed_ok]
-            if confirmed:
-                chain = confirmed + rest
-
+        # Power-first: never reorder by probe confirmation — probes only
+        # mark unavailable models via health cooldown, they get demoted later.
         return chain
 
     def _filter_available(self, chain: list[str]) -> list[str]:

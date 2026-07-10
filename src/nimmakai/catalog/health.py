@@ -39,7 +39,6 @@ class ModelHealthStore:
     error_rate_threshold: float = 0.5
     min_samples: int = 3
     model_cooldown_seconds: float = 600.0
-    slow_factor: float = 3.0  # demote head if this much slower than next
     _by_model: dict[str, ModelHealth] = field(default_factory=dict)
     _by_pair: dict[tuple[str, str], ModelHealth] = field(default_factory=dict)
 
@@ -76,6 +75,12 @@ class ModelHealthStore:
                         h.ewma_tok_per_s = 0.7 * h.ewma_tok_per_s + 0.3 * tps
         else:
             h.error_count += 1
+            # Sustained hard failures (5xx) also cool down the model briefly
+            if status_code is not None and status_code >= 500:
+                h.cooldown_until = max(
+                    h.cooldown_until,
+                    time.monotonic() + min(120.0, self.model_cooldown_seconds / 5),
+                )
 
         if key_id:
             pair = self._by_pair.setdefault((model_id, key_id), ModelHealth())
@@ -90,6 +95,7 @@ class ModelHealthStore:
                 pair.error_count += 1
 
     def is_unhealthy(self, model_id: str) -> bool:
+        """True only when unavailable / cooldown / high error rate — never for slowness."""
         h = self._by_model.get(model_id)
         if h is None:
             return False
@@ -102,36 +108,16 @@ class ModelHealthStore:
 
     def health_reorder(self, chain: list[str]) -> list[str]:
         """
-        Preserve preference order primarily.
-        1) Demote unhealthy / cooldown models to the end (stable).
-        2) If head is catastrophically slower than next healthy peer
-           (enough samples), swap once — speed-aware without random shuffle.
+        Power-first: keep preference order.
+        Only demote models that are unavailable, in cooldown, or erroring.
+        Never demote a stronger model because a weaker one is faster.
         """
         if len(chain) <= 1:
             return list(chain)
 
         healthy = [m for m in chain if not self.is_unhealthy(m)]
         unhealthy = [m for m in chain if self.is_unhealthy(m)]
-        result = healthy + unhealthy
-
-        if len(healthy) >= 2:
-            head, nxt = healthy[0], healthy[1]
-            h0 = self._by_model.get(head)
-            h1 = self._by_model.get(nxt)
-            if (
-                h0
-                and h1
-                and h0.success_count >= self.min_samples
-                and h1.success_count >= self.min_samples
-            ):
-                # Prefer higher tok/s when available; else lower latency
-                if h0.ewma_tok_per_s > 0 and h1.ewma_tok_per_s > 0:
-                    if h1.ewma_tok_per_s >= h0.ewma_tok_per_s * self.slow_factor:
-                        result = [nxt, head, *healthy[2:], *unhealthy]
-                elif h0.ewma_latency >= h1.ewma_latency * self.slow_factor:
-                    result = [nxt, head, *healthy[2:], *unhealthy]
-
-        return result
+        return healthy + unhealthy
 
     def snapshot(self) -> dict[str, dict]:
         now = time.monotonic()

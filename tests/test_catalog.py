@@ -96,14 +96,25 @@ def test_registry_dynamic_chain_from_live_ids() -> None:
     assert "nemotron" in chat[0]
 
 
-def test_health_speed_swap() -> None:
-    store = ModelHealthStore(min_samples=3, slow_factor=3.0)
-    chain = ["slow", "fast"]
+def test_health_keeps_powerful_head_despite_slowness() -> None:
+    """Slowness must NOT demote the strongest model — only errors/unavailability."""
+    store = ModelHealthStore(min_samples=3)
+    chain = ["powerful-slow", "weaker-fast"]
     for _ in range(3):
-        store.record_outcome("slow", success=True, latency=9.0)
-        store.record_outcome("fast", success=True, latency=1.0)
+        store.record_outcome("powerful-slow", success=True, latency=9.0)
+        store.record_outcome("weaker-fast", success=True, latency=1.0)
     reordered = store.health_reorder(chain)
-    assert reordered[0] == "fast"
+    assert reordered[0] == "powerful-slow"
+
+
+def test_health_demotes_unavailable_only() -> None:
+    store = ModelHealthStore(min_samples=2)
+    chain = ["primary", "fallback"]
+    store.record_outcome("primary", success=False, status_code=404, unavailable=True)
+    store.record_outcome("fallback", success=True, latency=0.5)
+    reordered = store.health_reorder(chain)
+    assert reordered[0] == "fallback"
+    assert reordered[-1] == "primary"
 
 
 def test_matches_family_glm() -> None:

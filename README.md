@@ -110,7 +110,7 @@ print(r.choices[0].message.content)
    - Generic/chat → **latest Nemotron** (chat LLMs only)
    - Coding/agentic → **latest Qwen**
    - Fallbacks: **GLM 5.2 → Step 3.7 → MiniMax M3**
-3. **Rank live** by health, latency / token speed, and upstream errors (skip sick heads).
+3. **Always try the strongest model first**; fall back only if it is unavailable or errors (never because a weaker model is faster).
 4. **Gentle probes** (tiny `max_tokens`, hourly budget) confirm hosts without clogging RPM.
 5. **Fail-safe** disk snapshot if docs/API are down.
 
