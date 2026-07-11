@@ -807,10 +807,10 @@ Nimmakai runs on Heroku with zero configuration beyond setting environment varia
 # Login to Heroku
 heroku login
 
-# Create the app
+# Create the app (auto-detects Python buildpack)
 heroku create your-nimmakai-name
 
-# Set required environment variables (no .env on Heroku)
+# Set required environment variables (no .env file on Heroku)
 heroku config:set PROXY_API_KEYS=sk-your-secret-key
 heroku config:set NIM_API_KEYS=nvapi-your-nim-key
 heroku config:set ALLOW_INSECURE_AUTH=false
@@ -818,7 +818,7 @@ heroku config:set ALLOW_INSECURE_AUTH=false
 # Optional: add more providers via env
 heroku config:set GROQ_API_KEYS=gsk-your-groq-key
 
-# Optional: set a different CORS origin for your dashboard
+# Optional: restrict CORS to your app domain
 heroku config:set CORS_ALLOW_ORIGINS=https://your-nimmakai-name.herokuapp.com
 
 # Deploy
@@ -841,11 +841,11 @@ The dashboard is at `https://your-nimmakai-name.herokuapp.com/dashboard`.
 
 ### Heroku-specific notes
 
-- The `Procfile` and `runtime.txt` are included in the repo
-- Python 3.13.2 is the default runtime (change `runtime.txt` if needed)
+- Python version is set via `.python-version` (uv buildpack) or auto-detected from `requirements.txt` (classic buildpack) — both provided
 - All config goes through environment variables (no `.env` file on Heroku)
-- Persistent state (`.nimmakai/`) lives on the ephemeral filesystem and resets on each dyno restart — this is fine for learning/cache data
-- For production, consider a [Heroku Postgres](https://elements.heroku.com/addons/heroku-postgresql) or [Redis](https://elements.heroku.com/addons/heroku-redis) addon for persistent state across restarts
+- Runs via `gunicorn` with `uvicorn` workers for production concurrency
+- Persistent state (`.nimmakai/`) lives on the ephemeral filesystem and resets on each dyno restart — learning data resets are normal
+- For production use with persistent state across restarts, consider [Heroku Postgres](https://elements.heroku.com/addons/heroku-postgresql) or [Heroku Redis](https://elements.heroku.com/addons/heroku-redis)
 
 ---
 

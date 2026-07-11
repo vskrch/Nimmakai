@@ -1,23 +1,26 @@
 # Scratchpad
 
 ## Current task
-Gap closing DONE. 97 tests, ruff clean, pushed to development.
+All done — merged to main, Heroku-ready, 97 tests.
 
 ## Branches
-- `main` @ a718dd0 — stable published
-- `development` @ 30908d4 — active (all work)
+- `main` @ 162ddf3 — stable published (default), Heroku-deployable
+- `development` @ 162ddf3 — active (same tip as main)
 
-## What was built (v0.4.0)
-- [X] ProviderStore + ProviderHub (multi-provider OpenAI-compatible)
-- [X] Namespaced model ids (provider/model-id)
-- [X] Admin CRUD /admin/providers
-- [X] Web dashboard at /dashboard (providers, models, routing)
-- [X] Per-intent user preferences (pin models per intent)
-- [X] Intelligent ladder fallback when no preferences set
-- [X] Context window discovery + advertise
-- [X] Exponential backoff on 429/5xx
-- [X] 97 tests pass, ruff clean
+## Final state (v0.4.0)
+- [X] Multi-provider OpenRouter-style gateway (NIM + any OpenAI-compatible)
+- [X] Provider CRUD API + web dashboard
+- [X] Per-intent user preferences + intelligent ladder fallback
+- [X] Context window discovery, exponential backoff, online learning
+- [X] 97 tests, ruff clean
+- [X] Heroku Procfile + runtime.txt
+- [X] Dead code cleanup (circuit.py removed)
+- [X] CORS through Settings model
+- [X] Comprehensive README with architecture, setup, troubleshooting, Heroku guide
 
-## Remaining work
-- [ ] Live smoke test with real provider keys
-- [ ] Scoring refinement for non-NIM providers
+## How to deploy
+```bash
+heroku create my-nimmakai
+heroku config:set PROXY_API_KEYS=sk-key NIM_API_KEYS=nvapi-key
+git push heroku main
+```
