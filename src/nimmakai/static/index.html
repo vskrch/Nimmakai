@@ -3,417 +3,339 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Nimmakai Gateway</title>
+<title>Nimmakai — Gateway</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+:root{--bg:#09090b;--bg2:#0f0f13;--card:#18181b;--card2:#1f1f23;--border:#27272a;--accent:#8b5cf6;--accent2:#a78bfa;--accent3:#c4b5fd;--green:#22c55e;--red:#ef4444;--yellow:#eab308;--blue:#3b82f6;--text:#fafafa;--dim:#a1a1aa;--muted:#71717a;--surface:#141416}
 *{margin:0;padding:0;box-sizing:border-box}
-:root{--bg:#0a0a0f;--bg2:#111118;--card:#16161e;--card2:#1e1e28;--border:#2a2a35;--accent:#7c5cfc;--accent2:#a78bfa;--accent3:#c4b5fd;--green:#34d399;--red:#f87171;--yellow:#fbbf24;--blue:#60a5fa;--text:#e2e8f0;--dim:#8892a8;--surface:#1a1a24;--input:#1a1a24}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
-::selection{background:var(--accent);color:#fff}
-::-webkit-scrollbar{width:6px}
-::-webkit-scrollbar-track{background:var(--bg)}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);height:100vh;overflow:hidden}
+::selection{background:var(--accent)}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 
-/* Layout */
-.sidebar{position:fixed;left:0;top:0;bottom:0;width:240px;background:var(--bg2);border-right:1px solid var(--border);z-index:20;display:flex;flex-direction:column}
-.sidebar .logo{padding:20px 20px 16px;display:flex;align-items:center;gap:10px}
-.sidebar .logo svg{width:28px;height:28px}
-.sidebar .logo h1{font-size:16px;font-weight:700;letter-spacing:-.3px}
-.sidebar .logo span{font-size:11px;color:var(--dim);display:block;margin-top:2px}
-.sidebar nav{flex:1;padding:0 12px}
-.sidebar nav a{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;font-size:13px;color:var(--dim);text-decoration:none;transition:all .15s}
+/* ── Shell ── */
+.shell{display:flex;height:100vh}
+.sidebar{width:220px;background:var(--bg2);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar .brand{padding:20px;border-bottom:1px solid var(--border)}
+.sidebar .brand h1{font-size:15px;font-weight:700;display:flex;align-items:center;gap:8px}
+.sidebar .brand h1::before{content:'';width:24px;height:24px;background:var(--accent);border-radius:6px;display:block}
+.sidebar .brand p{font-size:11px;color:var(--muted);margin-top:4px}
+.sidebar nav{flex:1;padding:8px}
+.sidebar nav a{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:8px;color:var(--dim);text-decoration:none;font-size:13px;font-weight:500;transition:all .12s}
 .sidebar nav a:hover{background:var(--surface);color:var(--text)}
-.sidebar nav a.active{background:rgba(124,92,252,.12);color:var(--accent2)}
-.sidebar nav a svg{width:16px;height:16px;opacity:.6}
-.sidebar nav a.active svg{opacity:1}
-.sidebar .version{padding:16px 20px;font-size:11px;color:var(--dim);border-top:1px solid var(--border)}
+.sidebar nav a.active{background:rgba(139,92,246,.12);color:var(--accent2)}
+.sidebar nav a svg{width:16px;height:16px;flex-shrink:0}
+.sidebar .foot{padding:16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted)}
 
-.main{margin-left:240px;min-height:100vh}
-.topbar{position:sticky;top:0;z-index:10;background:rgba(10,10,15,.85);backdrop-filter:blur(12px);border-bottom:1px solid var(--border);padding:0 32px;height:56px;display:flex;align-items:center;gap:16px}
-.topbar .breadcrumb{font-size:14px;color:var(--dim)}
-.topbar .breadcrumb strong{color:var(--text);font-weight:500}
-.topbar .actions{margin-left:auto;display:flex;gap:8px}
+.main-area{flex:1;display:flex;flex-direction:column;overflow:hidden}
+.header{height:52px;border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 24px;gap:12px;flex-shrink:0;background:var(--bg)}
+.header .title{font-size:14px;font-weight:600}
+.header .spacer{flex:1}
+.header .pill{font-size:11px;color:var(--muted);background:var(--surface);padding:4px 10px;border-radius:6px;border:1px solid var(--border)}
 
-.content{padding:32px;max-width:1200px}
-.page{display:none}
-.page.active{display:block}
+.scroll{flex:1;overflow-y:auto;padding:24px}
+.page{display:none}.page.active{display:block}
 
-/* Components */
-.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:32px}
-.stat-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:20px}
-.stat-card .label{font-size:12px;color:var(--dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
-.stat-card .value{font-size:28px;font-weight:700}
-.stat-card .value.accent{color:var(--accent2)}
-.stat-card .value.green{color:var(--green)}
-.stat-card .sub{font-size:11px;color:var(--dim);margin-top:4px}
+/* ── Stat Cards ── */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+.stat{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px 18px}
+.stat .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:500}
+.stat .val{font-size:24px;font-weight:700;margin-top:4px}
+.stat .sub{font-size:11px;color:var(--dim);margin-top:2px}
+.stat .val.g{color:var(--green)}.stat .val.p{color:var(--accent2)}.stat .val.b{color:var(--blue)}
 
-.card{background:var(--card);border:1px solid var(--border);border-radius:12px;overflow:hidden}
-.card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-.card-header h2{font-size:14px;font-weight:600}
-.card-body{padding:20px}
+/* ── Card ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px}
+.card .hd{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card .hd h2{font-size:13px;font-weight:600}
+.card .bd{padding:0}
 
-table{width:100%;border-collapse:collapse;font-size:13px}
-th{text-align:left;padding:10px 16px;color:var(--dim);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);background:var(--bg2)}
-td{padding:10px 16px;border-bottom:1px solid var(--border)}
-tr:last-child td{border-bottom:none}
+/* ── Table ── */
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:10px 18px;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);background:var(--bg2)}
+td{padding:10px 18px;font-size:13px;border-bottom:1px solid var(--border)}
+tr:last-child td{border:none}
 tr:hover td{background:rgba(255,255,255,.02)}
 
+/* ── Badge ── */
 .badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}
-.badge.green{background:rgba(52,211,153,.12);color:var(--green)}
-.badge.red{background:rgba(248,113,113,.12);color:var(--red)}
-.badge.yellow{background:rgba(251,191,36,.12);color:var(--yellow)}
-.badge.blue{background:rgba(96,165,250,.12);color:var(--blue)}
-.badge.purple{background:rgba(124,92,252,.12);color:var(--accent2)}
-.badge.gray{background:rgba(136,146,168,.12);color:var(--dim)}
+.badge .dot{width:5px;height:5px;border-radius:50%}
+.badge.ok{background:rgba(34,197,94,.1);color:var(--green)}.badge.ok .dot{background:var(--green)}
+.badge.off{background:rgba(239,68,68,.1);color:var(--red)}.badge.off .dot{background:var(--red)}
+.badge.info{background:rgba(59,130,246,.1);color:var(--blue)}
+.badge.warn{background:rgba(234,179,36,.1);color:var(--yellow)}
+.badge.muted{background:rgba(113,113,122,.1);color:var(--muted)}
+.badge.accent{background:rgba(139,92,246,.1);color:var(--accent2)}
 
-.dot{width:6px;height:6px;border-radius:50%;display:inline-block}
-.dot.ok{background:var(--green)}.dot.err{background:var(--red)}.dot.warn{background:var(--yellow)}
+/* ── Buttons ── */
+.btn{padding:7px 14px;border-radius:7px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:transparent;color:var(--text);transition:all .12s;display:inline-flex;align-items:center;gap:5px}
+.btn:hover{border-color:var(--accent);background:rgba(139,92,246,.06)}
+.btn.p{background:var(--accent);border-color:var(--accent);color:#fff}.btn.p:hover{background:#7c3aed}
+.btn.d{border-color:rgba(239,68,68,.3);color:var(--red)}.btn.d:hover{background:rgba(239,68,68,.06)}
+.btn.sm{padding:4px 8px;font-size:11px}
 
-.btn{padding:8px 16px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--border);transition:all .15s;display:inline-flex;align-items:center;gap:6px}
-.btn:hover{border-color:var(--accent);color:var(--accent2)}
-.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-.btn.primary:hover{background:#6b4ce6}
-.btn.danger{border-color:rgba(248,113,113,.3);color:var(--red)}
-.btn.danger:hover{background:rgba(248,113,113,.08)}
-.btn.sm{padding:5px 10px;font-size:12px;border-radius:6px}
-
-.input{background:var(--input);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px;font-size:13px;width:100%;transition:border-color .15s}
+/* ── Input ── */
+.input{background:var(--surface);border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:7px;font-size:13px;width:100%;transition:border-color .12s;font-family:inherit}
 .input:focus{outline:none;border-color:var(--accent)}
-.input::placeholder{color:var(--dim)}
+.input::placeholder{color:var(--muted)}
 
-.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
-.form-row.full{grid-template-columns:1fr}
-.form-group{display:flex;flex-direction:column;gap:4px}
-.form-group label{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;font-weight:500}
+/* ── Modal ── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:50;display:none;align-items:center;justify-content:center}
+.modal-bg.on{display:flex}
+.modal{background:var(--card);border:1px solid var(--border);border-radius:12px;width:460px;max-width:92vw;max-height:80vh;overflow-y:auto;box-shadow:0 24px 48px rgba(0,0,0,.5)}
+.modal .mhd{padding:18px 20px 0;display:flex;align-items:center;justify-content:space-between}
+.modal .mhd h2{font-size:15px;font-weight:600}
+.modal .mhd .x{cursor:pointer;color:var(--muted);font-size:18px}.modal .mhd .x:hover{color:var(--text)}
+.modal .mbd{padding:16px 20px}
+.modal .mft{padding:14px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;font-weight:500}
+.field-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:100;display:none;align-items:center;justify-content:center}
-.modal-overlay.show{display:flex}
-.modal{background:var(--card);border:1px solid var(--border);border-radius:16px;width:480px;max-width:90vw;max-height:85vh;overflow-y:auto}
-.modal-header{padding:20px 24px 0;display:flex;align-items:center;justify-content:space-between}
-.modal-header h2{font-size:16px;font-weight:600}
-.modal-header .close{cursor:pointer;color:var(--dim);font-size:20px;line-height:1}
-.modal-header .close:hover{color:var(--text)}
-.modal-body{padding:20px 24px}
-.modal-footer{padding:16px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+/* ── Toast ── */
+.toast{position:fixed;bottom:20px;right:20px;background:var(--card2);border:1px solid var(--border);padding:12px 18px;border-radius:10px;font-size:13px;z-index:60;display:none;box-shadow:0 8px 32px rgba(0,0,0,.4)}
+.toast.on{display:flex;align-items:center;gap:8px;animation:up .2s}
+.toast .dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.toast.ok .dot{background:var(--green)}.toast.err .dot{background:var(--red)}
+@keyframes up{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
-.toast{position:fixed;bottom:24px;right:24px;background:var(--card2);border:1px solid var(--border);padding:12px 20px;border-radius:10px;font-size:13px;z-index:200;display:none;box-shadow:0 8px 32px rgba(0,0,0,.4)}
-.toast.show{display:block;animation:slideUp .2s}
-.toast.success{border-color:var(--green)}
-.toast.error{border-color:var(--red)}
-@keyframes slideUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+/* ── Empty ── */
+.empty{text-align:center;padding:48px 20px}
+.empty h3{font-size:14px;color:var(--text);margin-bottom:6px}
+.empty p{font-size:12px;color:var(--dim);max-width:320px;margin:0 auto}
 
-.empty-state{text-align:center;padding:48px 20px;color:var(--dim)}
-.empty-state svg{margin-bottom:12px;opacity:.4}
-.empty-state h3{color:var(--text);font-size:15px;margin-bottom:6px}
-.empty-state p{font-size:13px;max-width:360px;margin:0 auto}
+/* ── Routing ── */
+.intent-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:8px}
+.intent-card .top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.intent-card .top .name{font-size:13px;font-weight:500;display:flex;align-items:center;gap:8px}
+.intent-card .top .name small{color:var(--dim);font-weight:400}
+.pills{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px}
+.pill{display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:20px;background:var(--surface);border:1px solid var(--border);font-size:11px}
+.pill .del{cursor:pointer;color:var(--muted);margin-left:2px;font-size:12px}.pill .del:hover{color:var(--red)}
+.add-row{display:flex;gap:6px}
 
-.pill{display:inline-flex;align-items:center;gap:4px;padding:4px 12px;border-radius:20px;background:var(--surface);border:1px solid var(--border);font-size:12px}
-.pill .x{cursor:pointer;color:var(--dim);font-size:14px;margin-left:2px}.pill .x:hover{color:var(--red)}
-
-.ladder-section{margin-bottom:20px}
-.ladder-section .intent-name{font-size:13px;font-weight:500;margin-bottom:8px;display:flex;align-items:center;gap:8px}
-.ladder-section .intent-name small{color:var(--dim);font-weight:400}
-.models-row{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
-.add-model-row{display:flex;gap:6px;margin-top:6px}
-
-@media(max-width:768px){.sidebar{width:60px}.sidebar .logo h1,.sidebar .logo span,.sidebar nav a span{display:none}.sidebar nav a{justify-content:center;padding:10px}.main{margin-left:60px}.content{padding:16px}.form-row{grid-template-columns:1fr}}
+/* ── Responsive ── */
+@media(max-width:900px){.sidebar{width:56px}.sidebar .brand h1 span,.sidebar .brand p,.sidebar nav a span{display:none}.sidebar nav a{justify-content:center;padding:10px}.stats{grid-template-columns:1fr 1fr}.scroll{padding:16px}}
+@media(max-width:600px){.stats{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
+<div class="shell">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="brand"><h1><span>Nimmakai</span></h1><p>AI Gateway</p></div>
+    <nav>
+      <a href="#" class="active" data-p="dash" onclick="go('dash')"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.5A1.5 1.5 0 012.5 1h3A1.5 1.5 0 017 2.5v3A1.5 1.5 0 015.5 7h-3A1.5 1.5 0 011 5.5v-3zm8 0A1.5 1.5 0 0110.5 1h3A1.5 1.5 0 0115 2.5v3A1.5 1.5 0 0113.5 7h-3A1.5 1.5 0 019 5.5v-3zm-8 8A1.5 1.5 0 012.5 9h3A1.5 1.5 0 017 10.5v3A1.5 1.5 0 015.5 15h-3A1.5 1.5 0 011 13.5v-3zm8 0A1.5 1.5 0 0110.5 9h3a1.5 1.5 0 011.5 1.5v3a1.5 1.5 0 01-1.5 1.5h-3A1.5 1.5 0 019 13.5v-3z"/></svg><span>Dashboard</span></a>
+      <a href="#" data-p="providers" onclick="go('providers')"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 2a2 2 0 012-2h8a2 2 0 012 2v12a2 2 0 01-2 2H4a2 2 0 01-2-2V2zm2 1v10h8V3H4zm3 2h2v1H7V5zm-3 3h8v1H4V8zm0 3h5v1H4v-1z"/></svg><span>Providers</span></a>
+      <a href="#" data-p="models" onclick="go('models')"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M7.068.38a1.5 1.5 0 011.864 0l5.25 3.78A1.5 1.5 0 0115 5.38v5.24a1.5 1.5 0 01-.884 1.36l-5.25 1.84a1.5 1.5 0 01-.984 0L2.884 11.98A1.5 1.5 0 012 10.62V5.38a1.5 1.5 0 01.816-1.22l4.252-3.6z"/></svg><span>Models</span></a>
+      <a href="#" data-p="routing" onclick="go('routing')"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M4 2.5A1.5 1.5 0 015.5 1h5A1.5 1.5 0 0112 2.5v11a1.5 1.5 0 01-1.5 1.5h-5A1.5 1.5 0 014 13.5v-11zM5.5 2a.5.5 0 00-.5.5v11a.5.5 0 00.5.5h5a.5.5 0 00.5-.5v-11a.5.5 0 00-.5-.5h-5zM8 5a.5.5 0 01.5.5v3h3a.5.5 0 010 1h-3v3a.5.5 0 01-1 0v-3h-3a.5.5 0 010-1h3v-3A.5.5 0 018 5z"/></svg><span>Routing</span></a>
+    </nav>
+    <div class="foot">v0.4.0</div>
+  </aside>
 
-<aside class="sidebar">
-  <div class="logo">
-    <svg viewBox="0 0 28 28" fill="none"><rect width="28" height="28" rx="6" fill="#7c5cfc"/><path d="M8 14h12M14 8v12" stroke="#fff" stroke-width="2.5" stroke-linecap="round"/></svg>
-    <div><h1>Nimmakai</h1><span>Gateway v0.4.0</span></div>
-  </div>
-  <nav>
-    <a href="#" class="active" onclick="showPage('dashboard')" data-page="dashboard">
-      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M1 2.5A1.5 1.5 0 012.5 1h3A1.5 1.5 0 017 2.5v3A1.5 1.5 0 015.5 7h-3A1.5 1.5 0 011 5.5v-3zm8 0A1.5 1.5 0 0110.5 1h3A1.5 1.5 0 0115 2.5v3A1.5 1.5 0 0113.5 7h-3A1.5 1.5 0 019 5.5v-3zm-8 8A1.5 1.5 0 012.5 9h3A1.5 1.5 0 017 10.5v3A1.5 1.5 0 015.5 15h-3A1.5 1.5 0 011 13.5v-3zm8 0A1.5 1.5 0 0110.5 9h3a1.5 1.5 0 011.5 1.5v3a1.5 1.5 0 01-1.5 1.5h-3A1.5 1.5 0 019 13.5v-3z"/></svg>
-      <span>Dashboard</span>
-    </a>
-    <a href="#" onclick="showPage('providers')" data-page="providers">
-      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 1a2 2 0 012 2v4a2 2 0 11-4 0V3a2 2 0 012-2zM5.5 9a.5.5 0 01.5.5V12a.5.5 0 01-1 0v-2.5a.5.5 0 01.5-.5zm5 0a.5.5 0 01.5.5V12a.5.5 0 01-1 0v-2.5a.5.5 0 01.5-.5zM8 14a3 3 0 100-6 3 3 0 000 6z"/></svg>
-      <span>Providers</span>
-    </a>
-    <a href="#" onclick="showPage('models')" data-page="models">
-      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 2A1.5 1.5 0 003 3.5v9A1.5 1.5 0 004.5 14h7a1.5 1.5 0 001.5-1.5v-9A1.5 1.5 0 0011.5 2h-7zM4 3.5a.5.5 0 01.5-.5h7a.5.5 0 01.5.5v9a.5.5 0 01-.5.5h-7a.5.5 0 01-.5-.5v-9zM8 6a.5.5 0 01.5.5v3h3a.5.5 0 010 1h-3v3a.5.5 0 01-1 0v-3h-3a.5.5 0 010-1h3v-3A.5.5 0 018 6z"/></svg>
-      <span>Models</span>
-    </a>
-    <a href="#" onclick="showPage('routing')" data-page="routing">
-      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1A1.5 1.5 0 005 2.5V3H1.5A1.5 1.5 0 000 4.5v1A1.5 1.5 0 001.5 7H2v4.5A1.5 1.5 0 003.5 13h3A1.5 1.5 0 008 11.5V7h.5A1.5 1.5 0 0010 5.5v-1h4A1.5 1.5 0 0015.5 3V2.5A1.5 1.5 0 0014 1h-7.5zm4 5h-3v4.5a.5.5 0 01-.5.5h-2a.5.5 0 01-.5-.5V6h-2.5a.5.5 0 01-.5-.5v-1a.5.5 0 01.5-.5H10V1.5a.5.5 0 01.5-.5h3a.5.5 0 01.5.5V6z"/></svg>
-      <span>Routing</span>
-    </a>
-  </nav>
-  <div class="version">v0.4.0 &middot; <a href="/docs" target="_blank" style="color:var(--dim)">API Docs</a></div>
-</aside>
-
-<div class="main">
-  <div class="topbar">
-    <div class="breadcrumb" id="breadcrumb"><strong>Dashboard</strong></div>
-    <div class="actions">
-      <button class="btn sm" onclick="refreshAll()">Refresh</button>
-      <button class="btn sm primary" onclick="showAddProvider()">+ Add Provider</button>
+  <!-- Main -->
+  <div class="main-area">
+    <div class="header">
+      <div class="title" id="hdr">Dashboard</div>
+      <div class="spacer"></div>
+      <div class="pill" id="status-pill">Loading...</div>
     </div>
-  </div>
+    <div class="scroll">
 
-  <div class="content">
-
-    <!-- Dashboard Page -->
-    <div class="page active" id="page-dashboard">
-      <div class="stat-grid" id="stats-grid"></div>
-      <div class="card">
-        <div class="card-header"><h2>Recent Activity</h2></div>
-        <div class="card-body" id="activity-body">
-          <div class="empty-state"><h3>No requests yet</h3><p>Requests will appear here as they flow through the gateway.</p></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Providers Page -->
-    <div class="page" id="page-providers">
-      <div class="stat-grid" id="provider-stats"></div>
-      <div class="card">
-        <div class="card-header"><h2>Providers</h2><button class="btn sm primary" onclick="showAddProvider()">+ Add Provider</button></div>
-        <div class="card-body" id="providers-body"></div>
-      </div>
-    </div>
-
-    <!-- Models Page -->
-    <div class="page" id="page-models">
-      <div class="card">
-        <div class="card-header">
-          <h2>Live Model Catalog</h2>
-          <div style="display:flex;gap:8px">
-            <input class="input" id="model-search" placeholder="Search models..." oninput="filterModels()" style="width:220px">
-            <button class="btn sm" onclick="refreshCatalog()">Refresh</button>
+      <!-- DASHBOARD -->
+      <div class="page active" id="pg-dash">
+        <div class="stats" id="dash-stats"></div>
+        <div class="card">
+          <div class="hd"><h2>Quick Start</h2></div>
+          <div class="bd" style="padding:20px">
+            <div style="font-size:13px;color:var(--dim);line-height:1.7">
+              <p style="margin-bottom:12px"><strong style="color:var(--text)">1. Add a provider</strong> — Go to <a href="#" onclick="go('providers')" style="color:var(--accent2)">Providers</a> and add Groq, Cerebras, or any OpenAI-compatible API.</p>
+              <p style="margin-bottom:12px"><strong style="color:var(--text)">2. Configure routing</strong> — Go to <a href="#" onclick="go('routing')" style="color:var(--accent2)">Routing</a> to pin models per intent, or leave empty for intelligent auto-routing.</p>
+              <p style="margin-bottom:12px"><strong style="color:var(--text)">3. Connect your app</strong> — Point any OpenAI SDK at this gateway:<br><code style="background:var(--surface);padding:3px 8px;border-radius:4px;font-size:12px">base_url: {origin}/v1</code></p>
+              <p><strong style="color:var(--text)">4. Browse models</strong> — Go to <a href="#" onclick="go('models')" style="color:var(--accent2)">Models</a> to see all live models across providers.</p>
+            </div>
           </div>
         </div>
-        <div class="card-body" id="models-body" style="max-height:600px;overflow-y:auto;padding:0"></div>
       </div>
-    </div>
 
-    <!-- Routing Page -->
-    <div class="page" id="page-routing">
-      <div class="stat-grid" id="ladder-stats"></div>
-      <div class="card" style="margin-bottom:20px">
-        <div class="card-header"><h2>Intent Preferences</h2><small style="color:var(--dim)">Pin models per intent. Empty = intelligent ladder.</small></div>
-        <div class="card-body" id="prefs-body"></div>
+      <!-- PROVIDERS -->
+      <div class="page" id="pg-providers">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+          <div>
+            <h2 style="font-size:16px;font-weight:600">Providers</h2>
+            <p style="font-size:12px;color:var(--dim);margin-top:2px">Connect OpenAI-compatible APIs</p>
+          </div>
+          <button class="btn p" onclick="modal('add')">+ Add Provider</button>
+        </div>
+        <div id="prov-list"></div>
       </div>
-      <div class="card">
-        <div class="card-header"><h2>Active Ladders (auto)</h2></div>
-        <div class="card-body" id="ladders-body"></div>
-      </div>
-    </div>
 
+      <!-- MODELS -->
+      <div class="page" id="pg-models">
+        <div style="display:flex;gap:8px;margin-bottom:16px">
+          <input class="input" id="msearch" placeholder="Search models..." oninput="filterM()" style="flex:1;max-width:320px">
+          <button class="btn" onclick="refreshCat()">Refresh Catalog</button>
+        </div>
+        <div class="card"><div class="bd" id="mtable"></div></div>
+      </div>
+
+      <!-- ROUTING -->
+      <div class="page" id="pg-routing">
+        <div style="margin-bottom:16px">
+          <h2 style="font-size:16px;font-weight:600">Intent Routing</h2>
+          <p style="font-size:12px;color:var(--dim);margin-top:2px">Pin specific models per intent. Empty = intelligent auto-routing.</p>
+        </div>
+        <div id="prefs-list"></div>
+        <div style="margin-top:24px">
+          <h2 style="font-size:16px;font-weight:600;margin-bottom:12px">Active Ladders</h2>
+          <div id="ladders"></div>
+        </div>
+      </div>
+
+    </div>
   </div>
 </div>
 
 <!-- Add Provider Modal -->
-<div class="modal-overlay" id="modal-provider">
+<div class="modal-bg" id="m-add">
   <div class="modal">
-    <div class="modal-header"><h2>Add Provider</h2><span class="close" onclick="closeModal('modal-provider')">&times;</span></div>
-    <div class="modal-body">
-      <div class="form-group" style="margin-bottom:12px">
-        <label>Provider ID</label>
-        <input class="input" id="p-id" placeholder="groq, cerebras, deepinfra...">
-      </div>
-      <div class="form-group" style="margin-bottom:12px">
-        <label>Name</label>
-        <input class="input" id="p-name" placeholder="Display name">
-      </div>
-      <div class="form-group" style="margin-bottom:12px">
-        <label>Base URL</label>
-        <input class="input" id="p-url" placeholder="https://api.groq.com/openai/v1">
-      </div>
-      <div class="form-group" style="margin-bottom:12px">
-        <label>API Keys (comma-separated)</label>
-        <input class="input" id="p-keys" placeholder="gsk-..., gsk-...">
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>RPM Limit</label>
-          <input class="input" id="p-rpm" type="number" value="40" min="1">
-        </div>
-        <div class="form-group">
-          <label>RPD Limit</label>
-          <input class="input" id="p-rpd" type="number" value="2000" min="1">
-        </div>
+    <div class="mhd"><h2>Add Provider</h2><span class="x" onclick="modal()">&times;</span></div>
+    <div class="mbd">
+      <div class="field"><label>ID</label><input class="input" id="pf-id" placeholder="groq, cerebras, deepinfra..."></div>
+      <div class="field"><label>Name</label><input class="input" id="pf-name" placeholder="Display name"></div>
+      <div class="field"><label>Base URL</label><input class="input" id="pf-url" placeholder="https://api.groq.com/openai/v1"></div>
+      <div class="field"><label>API Keys (comma-separated)</label><input class="input" id="pf-keys" placeholder="gsk-..., gsk-..."></div>
+      <div class="field-row">
+        <div class="field"><label>RPM Limit</label><input class="input" id="pf-rpm" type="number" value="40" min="1"></div>
+        <div class="field"><label>RPD Limit</label><input class="input" id="pf-rpd" type="number" value="2000" min="1"></div>
       </div>
     </div>
-    <div class="modal-footer">
-      <button class="btn" onclick="closeModal('modal-provider')">Cancel</button>
-      <button class="btn primary" onclick="addProvider()">Add Provider</button>
+    <div class="mft">
+      <button class="btn" onclick="modal()">Cancel</button>
+      <button class="btn p" onclick="addProv()">Add Provider</button>
     </div>
   </div>
 </div>
 
 <!-- Auth Modal -->
-<div class="modal-overlay" id="modal-auth">
+<div class="modal-bg" id="m-auth">
   <div class="modal">
-    <div class="modal-header"><h2>Connect to Gateway</h2></div>
-    <div class="modal-body">
-      <div class="form-group">
-        <label>API Key</label>
-        <input class="input" id="auth-key" placeholder="Enter your PROXY_API_KEYS value">
-      </div>
-      <p style="font-size:12px;color:var(--dim);margin-top:8px">Enter the API key from your server's PROXY_API_KEYS environment variable. Or <a href="#" onclick="setInsecure()" style="color:var(--accent2)">skip auth</a> (ALLOW_INSECURE_AUTH=true).</p>
+    <div class="mhd"><h2>Connect to Gateway</h2></div>
+    <div class="mbd">
+      <div class="field"><label>API Key</label><input class="input" id="akey" placeholder="Enter your PROXY_API_KEYS value" onkeydown="if(event.key==='Enter')doAuth()"></div>
+      <p style="font-size:11px;color:var(--muted);margin-top:6px">From your server's <code>PROXY_API_KEYS</code> env var. <a href="#" onclick="skipAuth()" style="color:var(--accent2)">Skip auth</a> if <code>ALLOW_INSECURE_AUTH=true</code>.</p>
     </div>
-    <div class="modal-footer">
-      <button class="btn primary" onclick="saveAuth()">Connect</button>
-    </div>
+    <div class="mft"><button class="btn p" onclick="doAuth()">Connect</button></div>
   </div>
 </div>
 
 <div class="toast" id="toast"></div>
 
 <script>
-var BASE='', AUTH={}, allModels=[], providers=[], preferences=[], ladders={};
-var INTENTS={coding_agentic:{label:'Coding / Agentic',icon:'<svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M10.478 1.647a1.5 1.5 0 10-1.414 2.156l.3.5a1.5 1.5 0 102.828 0l.3-.5a1.5 1.5 0 10-1.414-2.156l-.3.5zm-6.478.853a.5.5 0 10-1 0V5H2.5a.5.5 0 000 1H3v3.5a.5.5 0 001 0V6h.5a.5.5 0 000-1H3V2.5z"/></svg>',desc:'Tools, multi-file, agent harnesses'},chat_fast:{label:'Chat / Q&A',icon:'<svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M8 1a5 5 0 00-5 5v3a5 5 0 0010 0V6a5 5 0 00-5-5zm0 13a6 6 0 01-6-6h1a5 5 0 0010 0h1a6 6 0 01-6 6z"/></svg>',desc:'Plain conversation, summaries'},reasoning:{label:'Reasoning',icon:'<svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M8 16A8 8 0 108 0a8 8 0 000 16zm1-11V8h3l-4 5V9H5l4-5z"/></svg>',desc:'Math, logic, deep multi-step'},long_horizon:{label:'Long Context',icon:'<svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M2 2h12v12H2V2zm1 1v10h10V3H3zm2 2h6v1H5V5zm0 3h6v1H5V8z"/></svg>',desc:'Large context, planning'},vision:{label:'Vision',icon:'<svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M8 4C4 4 1 8 1 8s3 4 7 4 7-4 7-4-3-4-7-4zm0 6a2 2 0 110-4 2 2 0 010 4z"/></svg>',desc:'Image + text VLM'},embeddings:{label:'Embeddings',icon:'<svg viewBox="0 0 16 16" fill="currentColor" width="14" height="14"><path d="M4 4a2 2 0 114 0 2 2 0 01-4 0zm6 0a2 2 0 114 0 2 2 0 01-4 0zM4 10a2 2 0 114 0 2 2 0 01-4 0zm6 0a2 2 0 114 0 2 2 0 01-4 0z"/></svg>',desc:'Embedding models only'}};
+var A={},H={};
+var INTENTS={coding_agentic:{l:'Coding / Agentic',d:'Tools, multi-file, agents'},chat_fast:{l:'Chat / Q&A',d:'Conversation, summaries'},reasoning:{l:'Reasoning',d:'Math, logic, deep steps'},long_horizon:{l:'Long Context',d:'Large context, planning'},vision:{l:'Vision',d:'Image + text'},embeddings:{l:'Embeddings',d:'Embedding models only'}};
 
-function showPage(name){
-  document.querySelectorAll('.page').forEach(function(p){p.classList.remove('active')});
-  var el=document.getElementById('page-'+name);if(el)el.classList.add('active');
-  document.querySelectorAll('.sidebar nav a').forEach(function(a){
-    a.classList.toggle('active',a.getAttribute('data-page')===name);
-  });
-  document.getElementById('breadcrumb').innerHTML='<strong>'+name.charAt(0).toUpperCase()+name.slice(1)+'</strong>';
-  if(name==='providers')loadProviders();
-  if(name==='models')loadModels();
-  if(name==='routing')loadRouting();
-  if(name==='dashboard')loadDashboard();
-}
-
-function toast(msg,type){
-  var el=document.getElementById('toast');el.textContent=msg;el.className='toast show '+(type||'');
-  setTimeout(function(){el.className='toast'},3000);
-}
-function closeModal(id){document.getElementById(id).classList.remove('show')}
-function showModal(id){document.getElementById(id).classList.add('show')}
+function go(p){document.querySelectorAll('.page').forEach(function(e){e.classList.remove('active')});var el=document.getElementById('pg-'+p);if(el)el.classList.add('active');document.querySelectorAll('.sidebar nav a').forEach(function(a){a.classList.toggle('active',a.dataset.p===p)});document.getElementById('hdr').textContent={dash:'Dashboard',providers:'Providers',models:'Models',routing:'Routing'}[p]||p;if(p==='providers')loadP();if(p==='models')loadM();if(p==='routing')loadR();if(p==='dash')loadD()}
+function toast(m,t){var e=document.getElementById('toast');e.innerHTML='<span class="dot"></span>'+m;e.className='toast on '+(t||'ok');setTimeout(function(){e.className='toast'},3000)}
+function modal(id){document.querySelectorAll('.modal-bg').forEach(function(m){m.classList.remove('on')});if(id)document.getElementById('m-'+id).classList.add('on')}
 
 // Auth
-function getAuth(){return localStorage.getItem('nk_auth')||''}
-function setAuth(k){localStorage.setItem('nk_auth',k)}
-function headers(){return{'Authorization':'Bearer '+getAuth(),'Content-Type':'application/json'}}
-function setInsecure(){localStorage.setItem('nk_auth','');closeModal('modal-auth');loadDashboard()}
-function saveAuth(){setAuth(document.getElementById('auth-key').value);closeModal('modal-auth');loadDashboard()}
-if(!getAuth())showModal('modal-auth');
+function ak(){return localStorage.getItem('nk')||''}
+function sk(k){localStorage.setItem('nk',k)}
+function hd(){return{Authorization:'Bearer '+ak(),'Content-Type':'application/json'}}
+function skipAuth(){sk('');modal();loadD()}
+function doAuth(){sk(document.getElementById('akey').value);modal();loadD()}
+if(!ak())modal('auth');
 
-// API helpers
-async function api(path,opts){
-  var r=await fetch(BASE+path,{headers:headers(),...(opts||{})});
-  if(r.status===401){showModal('modal-auth');return null}
-  return r.json();
-}
-async function apiGet(path){return api(path)}
-async function apiPost(path,body){return api(path,{method:'POST',body:JSON.stringify(body)})}
-async function apiDelete(path){return api(path,{method:'DELETE'})}
+async function api(p,o){var r=await fetch(p,{headers:hd(),...(o||{})});if(r.status===401){modal('auth');return null}return r.json()}
+async function ap(p,b){return api(p,{method:'POST',body:JSON.stringify(b)})}
+async function ad(p){return api(p,{method:'DELETE'})}
 
 // Dashboard
-async function loadDashboard(){
-  var stats=await api('/health');
-  if(!stats)return;
-  var r=await api('/stats');
-  var grid=document.getElementById('stats-grid');
-  var html='<div class="stat-card"><div class="label">Status</div><div class="value green">Online</div><div class="sub">v'+stats.version+'</div></div>';
-  html+='<div class="stat-card"><div class="label">Providers</div><div class="value accent">'+(stats.providers||[]).length+'</div><div class="sub">'+(stats.providers||[]).filter(function(p){return p.enabled}).length+' active</div></div>';
-  html+='<div class="stat-card"><div class="label">Keys</div><div class="value accent">'+stats.nim_keys_configured+'</div><div class="sub">'+stats.keys_available+' available</div></div>';
-  html+='<div class="stat-card"><div class="label">Catalog</div><div class="value '+(stats.catalog_ok?'green':'red')+'">'+(stats.catalog_ok?'OK':'Stale')+'</div><div class="sub">'+(r&&r.catalog?r.catalog.live_model_count+' models':'—')+'</div></div>';
-  grid.innerHTML=html;
+async function loadD(){
+  var h=await api('/health');if(!h)return;
+  document.getElementById('status-pill').textContent=h.version?'v'+h.version+' — Online':'Offline';
+  document.getElementById('status-pill').style.color=h.version?'var(--green)':'var(--red)';
+  var s=await api('/stats');
+  var g=document.getElementById('dash-stats');
+  var provs=h.providers||[];
+  var n=s&&s.catalog?s.catalog.live_model_count:0;
+  g.innerHTML=
+    '<div class="stat"><div class="label">Status</div><div class="val g">Online</div><div class="sub">Uptime OK</div></div>'+
+    '<div class="stat"><div class="label">Providers</div><div class="val p">'+provs.length+'</div><div class="sub">'+provs.filter(function(p){return p.enabled}).length+' active</div></div>'+
+    '<div class="stat"><div class="label">Models</div><div class="val b">'+n+'</div><div class="sub">Live across providers</div></div>'+
+    '<div class="stat"><div class="label">Keys</div><div class="val p">'+h.nim_keys_configured+'</div><div class="sub">'+h.keys_available+' available</div></div>';
 }
 
 // Providers
-async function loadProviders(){
+async function loadP(){
   var r=await api('/admin/providers');if(!r)return;
-  providers=r.providers||[];
-  var total=providers.length,en=providers.filter(function(p){return p.enabled}).length,tk=providers.reduce(function(s,p){return s+(p.key_count||0)},0);
-  document.getElementById('provider-stats').innerHTML='<div class="stat-card"><div class="label">Total</div><div class="value accent">'+total+'</div></div><div class="stat-card"><div class="label">Active</div><div class="value green">'+en+'</div></div><div class="stat-card"><div class="label">API Keys</div><div class="value accent">'+tk+'</div></div>';
-  var el=document.getElementById('providers-body');
-  if(!providers.length){el.innerHTML='<div class="empty-state"><h3>No providers</h3><p>Add your first provider to start routing.</p></div>';return}
-  el.innerHTML='<table><thead><tr><th>Provider</th><th>Base URL</th><th>Keys</th><th>RPM</th><th>RPD</th><th>Status</th><th></th></tr></thead><tbody>'+
-  providers.map(function(p){
-    return '<tr><td><strong>'+p.name+'</strong><br><span style="font-size:11px;color:var(--dim)">'+p.id+'</span></td><td style="font-size:12px;color:var(--dim);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.base_url+'</td><td>'+p.key_count+'</td><td>'+p.rpm_limit+'</td><td>'+p.rpd_limit+'</td><td><span class="badge '+(p.enabled?'green':'red')+'"><span class="dot '+(p.enabled?'ok':'err')+'"></span>'+(p.enabled?'Active':'Inactive')+'</span>'+(p.builtin?' <span class="badge gray">built-in</span>':'')+'</td><td style="text-align:right">'+(p.enabled?'<button class="btn sm" onclick="toggleProvider(\''+p.id+'\',false)">Disable</button>':'<button class="btn sm primary" onclick="toggleProvider(\''+p.id+'\',true)">Enable</button>')+(p.builtin?'':' <button class="btn sm danger" onclick="deleteProvider(\''+p.id+'\')">Remove</button>')+'</td></tr>';
-  }).join('')+'</tbody></table>';
+  var ps=r.providers||[];
+  var el=document.getElementById('prov-list');
+  if(!ps.length){el.innerHTML='<div class="card"><div class="bd"><div class="empty"><h3>No providers</h3><p>Add your first provider to start routing across APIs.</p></div></div></div>';return}
+  el.innerHTML='<div class="card"><div class="bd"><table><thead><tr><th>Provider</th><th>Base URL</th><th>Keys</th><th>RPM</th><th>RPD</th><th>Status</th><th style="text-align:right">Actions</th></tr></thead><tbody>'+
+  ps.map(function(p){
+    return '<tr><td><strong>'+p.name+'</strong><div style="font-size:11px;color:var(--muted)">'+p.id+'</div></td><td style="font-size:12px;color:var(--dim);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+p.base_url+'</td><td>'+p.key_count+'</td><td>'+p.rpm_limit+'</td><td>'+p.rpd_limit+'</td><td><span class="badge '+(p.enabled?'ok':'off')+'"><span class="dot"></span>'+(p.enabled?'Active':'Off')+'</span>'+(p.builtin?' <span class="badge muted">built-in</span>':'')+'</td><td style="text-align:right">'+(p.enabled?'<button class="btn sm" onclick="togP(\''+p.id+'\',false)">Disable</button>':'<button class="btn sm p" onclick="togP(\''+p.id+'\',true)">Enable</button>')+(p.builtin?'':' <button class="btn sm d" onclick="delP(\''+p.id+'\')">Remove</button>')+'</td></tr>';
+  }).join('')+'</tbody></table></div></div>';
 }
-
-function showAddProvider(){showModal('modal-provider')}
-async function addProvider(){
-  var body={id:document.getElementById('p-id').value.trim(),name:document.getElementById('p-name').value.trim(),base_url:document.getElementById('p-url').value.trim(),api_keys:document.getElementById('p-keys').value.split(',').map(function(s){return s.trim()}).filter(Boolean),rpm_limit:Number(document.getElementById('p-rpm').value)||40,rpd_limit:Number(document.getElementById('p-rpd').value)||2000,enabled:true};
-  if(!body.id||!body.base_url){toast('ID and Base URL required','error');return}
-  var r=await apiPost('/admin/providers',body);if(!r||!r.ok){toast(r&&r.error?'Error: '+r.error.message:'Failed','error');return}
-  toast('Provider added','success');closeModal('modal-provider');loadProviders();
+function addProv(){modal('add')}
+async function addP(){
+  var b={id:v('pf-id'),name:v('pf-name'),base_url:v('pf-url'),api_keys:v('pf-keys').split(',').map(function(s){return s.trim()}).filter(Boolean),rpm_limit:Number(v('pf-rpm'))||40,rpd_limit:Number(v('pf-rpd'))||2000,enabled:true};
+  if(!b.id||!b.base_url){toast('ID and URL required','err');return}
+  var r=await ap('/admin/providers',b);if(!r||!r.ok){toast(r&&r.error?'Error: '+r.error.message:'Failed','err');return}
+  toast('Provider added');modal();loadP();
 }
-async function toggleProvider(id,en){
-  var p=providers.find(function(x){return x.id===id});if(!p)return;
-  await apiPost('/admin/providers',{id:p.id,name:p.name,base_url:p.base_url,enabled:en,rpm_limit:p.rpm_limit,rpd_limit:p.rpd_limit});
-  toast(en?'Enabled':'Disabled','success');loadProviders();
-}
-async function deleteProvider(id){
-  if(!confirm('Remove '+id+'?'))return;
-  var r=await apiDelete('/admin/providers/'+id);if(r&&r.ok)toast('Removed','success');loadProviders();
-}
+function v(id){return document.getElementById(id).value.trim()}
+async function togP(id,en){var r=await ap('/admin/providers',{id:id,enabled:en,base_url:'_',name:id});toast(en?'Enabled':'Disabled');loadP()}
+async function delP(id){if(!confirm('Remove '+id+'?'))return;await ad('/admin/providers/'+id);toast('Removed');loadP()}
 
 // Models
-async function loadModels(){
-  var r=await api('/v1/models');if(!r)return;
-  allModels=(r.data||[]).filter(function(m){return m.id!=='nimmakai/auto'});
-  renderModels(allModels);
-}
-function renderModels(models){
-  var el=document.getElementById('models-body');
-  if(!models.length){el.innerHTML='<div class="empty-state"><h3>No models</h3><p>Add a provider and refresh catalog.</p></div>';return}
+var ALL_M=[];
+async function loadM(){var r=await api('/v1/models');if(!r)return;ALL_M=(r.data||[]).filter(function(m){return m.id!=='nimmakai/auto'});renderM(ALL_M)}
+function renderM(ms){
+  var el=document.getElementById('mtable');
+  if(!ms.length){el.innerHTML='<div class="empty" style="padding:40px"><h3>No models</h3><p>Add a provider and refresh to see live models.</p></div>';return}
   el.innerHTML='<table><thead><tr><th>Model</th><th>Provider</th><th>Context</th></tr></thead><tbody>'+
-  models.map(function(m){
-    var parts=m.id.split('/'),prov=parts[0],mid=parts.slice(1).join('/');
-    var ctx=m.context_length||m.max_model_len||'—';if(typeof ctx==='number')ctx=ctx.toLocaleString();
-    return '<tr><td><strong>'+mid+'</strong></td><td><span class="badge blue">'+prov+'</span></td><td>'+ctx+'</td></tr>';
-  }).join('')+'</tbody></table>';
+  ms.map(function(m){var p=m.id.split('/'),pr=p[0],md=p.slice(1).join('/');var c=m.context_length||m.max_model_len||'\u2014';if(typeof c==='number')c=c.toLocaleString();
+  return '<tr><td><strong>'+md+'</strong></td><td><span class="badge accent">'+pr+'</span></td><td>'+c+'</td></tr>'}).join('')+'</tbody></table>';
 }
-function filterModels(){var q=document.getElementById('model-search').value.toLowerCase();renderModels(allModels.filter(function(m){return m.id.toLowerCase().indexOf(q)!==-1}))}
-async function refreshCatalog(){toast('Refreshing...');await apiPost('/admin/catalog/refresh');loadModels();toast('Refreshed','success')}
+function filterM(){var q=document.getElementById('msearch').value.toLowerCase();renderM(ALL_M.filter(function(m){return m.id.toLowerCase().indexOf(q)!==-1}))}
+async function refreshCat(){toast('Refreshing...');await ap('/admin/catalog/refresh',{});loadM();toast('Done')}
 
 // Routing
-async function loadRouting(){await Promise.all([loadPreferences(),loadLadders()])}
-async function loadPreferences(){var r=await api('/preferences');if(r)preferences=r.preferences||[];renderPrefs()}
-async function loadLadders(){var r=await api('/ladder');if(r)ladders=r.ladders||{};renderLadders()}
+async function loadR(){await Promise.all([loadPr(),loadL()])}
+async function loadPr(){var r=await api('/preferences');if(r)H.pr=r.preferences||[];renderPr()}
+async function loadL(){var r=await api('/ladder');if(r)H.l=r.ladders||{};renderL()}
 
-function renderPrefs(){
-  var el=document.getElementById('prefs-body');
+function renderPr(){
+  var el=document.getElementById('prefs-list');
   el.innerHTML=Object.keys(INTENTS).map(function(k){
-    var m=INTENTS[k],pref=preferences.find(function(p){return p.intent===k});
-    var chain=pref?pref.chain:[],strict=pref?pref.strict:false;
-    return '<div class="ladder-section"><div class="intent-name">'+m.icon+' '+m.label+' <small>'+m.desc+'</small>'+(pref?'<span class="badge green">configured</span>':'<span class="badge yellow">auto</span>')+'</div>'+
-    '<div class="models-row" id="chain-'+k+'">'+(chain.length?chain.map(function(mo,i){return '<span class="pill">'+mo+' <span class="x" onclick="removeFromChain(\''+k+'\','+i+')">&times;</span></span>'}).join(''):'<span style="color:var(--dim);font-size:12px">Empty — intelligent ladder</span>')+
-    '</div><div class="add-model-row"><input class="input" id="add-'+k+'" placeholder="provider/model-id" style="flex:1;width:260px" onkeydown="if(event.key===\'Enter\')addToChain(\''+k+'\')"><button class="btn sm" onclick="addToChain(\''+k+'\')">Add</button><label style="font-size:12px;color:var(--dim);display:flex;align-items:center;gap:4px;margin-left:8px"><input type="checkbox" id="strict-'+k+'" '+(strict?'checked':'')+'> Strict</label><button class="btn sm primary" onclick="saveChain(\''+k+'\')" style="margin-left:8px">Save</button>'+(pref?'<button class="btn sm danger" onclick="clearPref(\''+k+'\')" style="margin-left:4px">Reset</button>':'')+
-    '</div></div>';
+    var m=INTENTS[k],pr=H.pr.find(function(p){return p.intent===k}),ch=pr?pr.chain:[],st=pr?pr.strict:false;
+    return '<div class="intent-card"><div class="top"><div class="name">'+m.l+' <small>'+m.d+'</small>'+(pr?'<span class="badge ok">configured</span>':'<span class="badge warn">auto</span>')+'</div><div>'+
+    '<button class="btn sm p" onclick="savePr(\''+k+'\')">Save</button>'+
+    (pr?' <button class="btn sm d" onclick="clrPr(\''+k+'\')">Reset</button>':'')+
+    '</div></div><div class="pills" id="c-'+k+'">'+(ch.length?ch.map(function(mo,i){return '<span class="pill">'+mo+'<span class="del" onclick="rmC(\''+k+'\','+i+')">&times;</span></span>'}).join(''):'<span style="font-size:12px;color:var(--muted)">Empty — intelligent ladder handles this</span>')+
+    '</div><div class="add-row"><input class="input" id="a-'+k+'" placeholder="provider/model-id" style="width:240px" onkeydown="if(event.key===\'Enter\')addC(\''+k+'\')"><button class="btn sm" onclick="addC(\''+k+'\')">Add</button><label style="font-size:11px;color:var(--dim);display:flex;align-items:center;gap:4px;margin-left:6px"><input type="checkbox" id="s-'+k+'" '+(st?'checked':'')+'> Strict</label></div></div>';
   }).join('');
 }
-
 var _cs={};
-function addToChain(k){var inp=document.getElementById('add-'+k),v=inp.value.trim();if(!v)return;if(!_cs[k]){var p=preferences.find(function(x){return x.intent===k});_cs[k]=p?p.chain.slice():[]}_cs[k].push(v);inp.value='';renderPrefs()}
-function removeFromChain(k,i){if(!_cs[k]){var p=preferences.find(function(x){return x.intent===k});_cs[k]=p?p.chain.slice():[]}_cs[k].splice(i,1);renderPrefs()}
-async function saveChain(k){var p=preferences.find(function(x){return x.intent===k}),chain=_cs[k]||(p?p.chain.slice():[]),strict=document.getElementById('strict-'+k)&&document.getElementById('strict-'+k).checked;if(!chain.length){await clearPref(k);return}var r=await apiPost('/preferences',{intent:k,chain:chain,strict:strict});if(r&&r.ok){toast('Saved','success');delete _cs[k];loadPreferences()}}
-async function clearPref(k){var r=await apiDelete('/preferences/'+k);if(r&&r.ok){toast('Reset to auto','success');delete _cs[k];loadPreferences()}}
+function addC(k){var i=document.getElementById('a-'+k),v=i.value.trim();if(!v)return;if(!_cs[k]){var p=H.pr.find(function(x){return x.intent===k});_cs[k]=p?p.chain.slice():[]}_cs[k].push(v);i.value='';renderPr()}
+function rmC(k,i){if(!_cs[k]){var p=H.pr.find(function(x){return x.intent===k});_cs[k]=p?p.chain.slice():[]}_cs[k].splice(i,1);renderPr()}
+async function savePr(k){var p=H.pr.find(function(x){return x.intent===k}),ch=_cs[k]||(p?p.chain.slice():[]),st=document.getElementById('s-'+k)&&document.getElementById('s-'+k).checked;if(!ch.length){await clrPr(k);return}var r=await ap('/preferences',{intent:k,chain:ch,strict:st});if(r&&r.ok){toast('Saved');delete _cs[k];loadPr()}}
+async function clrPr(k){var r=await ad('/preferences/'+k);if(r&&r.ok){toast('Reset to auto');delete _cs[k];loadPr()}}
 
-function renderLadders(){
-  var el=document.getElementById('ladders-body');
-  var keys=Object.keys(ladders);
-  if(!keys.length){el.innerHTML='<div class="empty-state"><h3>No ladders yet</h3><p>Add providers and refresh catalog to build ladders.</p></div>';return}
-  el.innerHTML=keys.map(function(k){
-    var s=ladders[k],m=INTENTS[k]||{label:k};
-    return '<div class="ladder-section"><div class="intent-name">'+(m.icon||'')+' '+m.label+' <span class="badge blue">'+s.ladder_len+' models</span><small>'+s.built_from_live+' live</small></div>'+
-    '<div class="models-row">'+(s.ladder_head||[]).map(function(mid,i){
-      return '<span class="pill'+(i===0?' green':'')+'">'+(i===0?'&#9733; ':'')+mid+' <small style="color:var(--dim)">'+(s.scores_head&&s.scores_head[mid]!=null?s.scores_head[mid]:'')+'</small></span>';
-    }).join('')+(s.ladder_len>5?'<span style="color:var(--dim);font-size:12px">... +'+(s.ladder_len-5)+' more</span>':'')+'</div></div>';
+function renderL(){
+  var el=document.getElementById('ladders'),ks=Object.keys(H.l);
+  if(!ks.length){el.innerHTML='<div class="card"><div class="bd"><div class="empty"><h3>No ladders</h3><p>Add providers and refresh catalog to build intelligent ladders.</p></div></div></div>';return}
+  el.innerHTML=ks.map(function(k){
+    var s=H.l[k],m=INTENTS[k]||{l:k};
+    return '<div class="intent-card"><div class="top"><div class="name">'+m.l+' <span class="badge info">'+s.ladder_len+' models</span><small>'+s.built_from_live+' live</small></div></div><div class="pills">'+
+    (s.ladder_head||[]).map(function(mid,i){return '<span class="pill'+(i===0?' accent':'')+'">'+(i===0?'&#9733; ':'')+mid+' <small style="color:var(--muted)">'+(s.scores_head&&s.scores_head[mid]!=null?s.scores_head[mid]:'')+'</small></span>'}).join('')+
+    (s.ladder_len>5?'<span style="font-size:11px;color:var(--muted)">+'+(s.ladder_len-5)+' more</span>':'')+'</div></div>';
   }).join('');
 }
 
-async function refreshAll(){
-  toast('Refreshing...');
-  var r=await apiPost('/admin/catalog/refresh');
-  if(r&&r.ok)toast('Refreshed','success');
-  loadDashboard();loadProviders();
-}
-
-loadDashboard();
+loadD();
 </script>
 </body>
 </html>
