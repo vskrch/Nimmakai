@@ -84,6 +84,7 @@ class Settings(BaseSettings):
     # Backoff only for 429 / transport / 5xx — not for model-not-found ladder steps
     retry_backoff_base_seconds: float = 0.5
     retry_backoff_cap_seconds: float = 16.0
+    cors_allow_origins: str = "*"
     upstream_user_agent: str = (
         f"nimmakai/{__version__} (OpenAI-compatible NIM proxy)"
     )

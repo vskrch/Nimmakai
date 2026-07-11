@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -153,7 +152,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     cors_origins = [
         o.strip()
-        for o in os.environ.get("CORS_ALLOW_ORIGINS", "*").split(",")
+        for o in settings.cors_allow_origins.split(",")
         if o.strip()
     ]
     app.add_middleware(
