@@ -193,6 +193,34 @@ async def upsert_provider(request: Request) -> JSONResponse:
             status_code=503,
         )
     body: dict[str, Any] = await request.json()
+    provider_id = body.get("id")
+    if not provider_id:
+        return JSONResponse(
+            {"error": {"message": "Provider ID is required", "code": "invalid_request"}},
+            status_code=400,
+        )
+    provider_id = provider_id.strip().lower()
+
+    existing = hub.store.providers.get(provider_id)
+    if existing:
+        merged_body = {
+            "id": existing.id,
+            "name": existing.name,
+            "base_url": existing.base_url,
+            "api_keys": existing.api_keys,
+            "api_keys_env": existing.api_keys_env,
+            "enabled": existing.enabled,
+            "rpm_limit": existing.rpm_limit,
+            "rpd_limit": existing.rpd_limit,
+            "max_in_flight_per_key": existing.max_in_flight_per_key,
+            "api_style": existing.api_style,
+            "builtin": existing.builtin,
+        }
+        for k, v in body.items():
+            if v is not None and v != "_":
+                merged_body[k] = v
+        body = merged_body
+
     try:
         cfg = provider_from_request_body(body)
     except ValueError as exc:

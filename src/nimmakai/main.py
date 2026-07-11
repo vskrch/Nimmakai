@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
 from nimmakai import __version__
+from nimmakai.balancer import KeyPool
 from nimmakai.catalog import ModelRegistry
 from nimmakai.catalog.hub import ProviderHub
 from nimmakai.catalog.preferences import UserPreferences

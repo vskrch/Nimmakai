@@ -309,6 +309,27 @@ tr:hover td { background: rgba(255, 255, 255, 0.01); }
   </div>
 </div>
 
+<div class="modal-bg" id="m-pin">
+  <div class="modal" style="width:500px">
+    <div class="mhd"><h3 id="pin-title">Pin Models</h3><span style="cursor:pointer;color:var(--dim)" onclick="modal()">&times;</span></div>
+    <div class="mbd">
+      <input type="hidden" id="pin-intent">
+      <div class="field">
+        <label>Selected Models (pinned in order of preference)</label>
+        <div id="pin-selected" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;min-height:38px;padding:8px;border:1px dashed var(--border);border-radius:8px;"></div>
+      </div>
+      <div class="field">
+        <label>Available Models (Click to pin)</label>
+        <div id="pin-available" style="max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;border:1px solid var(--border);border-radius:8px;padding:8px;"></div>
+      </div>
+    </div>
+    <div class="mft">
+      <button class="btn" onclick="modal()">Cancel</button>
+      <button class="btn p" onclick="savePin()">Save Pins</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"><div class="icon"></div><span id="toast-msg"></span></div>
 
 <script>
@@ -368,9 +389,14 @@ async function loadD() {
   
   let s = await api('/stats');
   let p = h.providers || [];
+  let enabledP = p.filter(x=>x.enabled);
+  let statusText = h.catalog_ok && enabledP.length > 0 ? "Operational" : (enabledP.length === 0 ? "Degraded" : "Issues Detected");
+  let statusColor = statusText === "Operational" ? "var(--green)" : (statusText === "Degraded" ? "var(--blue)" : "var(--red)");
+  let statusSubText = statusText === "Operational" ? "Routing active" : (statusText === "Degraded" ? "No active providers" : "Catalog errors");
+  
   $('dash-stats').innerHTML = `
-    <div class="stat-box"><div class="label">Status</div><div class="val" style="color:var(--green)">Operational</div><div class="sub">Routing active</div></div>
-    <div class="stat-box"><div class="label">Providers</div><div class="val">${p.length}</div><div class="sub">${p.filter(x=>x.enabled).length} active integrations</div></div>
+    <div class="stat-box"><div class="label">Status</div><div class="val" style="color:${statusColor}">${statusText}</div><div class="sub">${statusSubText}</div></div>
+    <div class="stat-box"><div class="label">Providers</div><div class="val">${p.length}</div><div class="sub">${enabledP.length} active integrations</div></div>
     <div class="stat-box"><div class="label">Live Models</div><div class="val">${s?.catalog?.live_model_count || 0}</div><div class="sub">across all APIs</div></div>
     <div class="stat-box"><div class="label">Proxy Keys</div><div class="val">${h.nim_keys_configured}</div><div class="sub">Available for gateway</div></div>
   `;
@@ -417,9 +443,43 @@ async function loadT() {
 // Playground
 let msgs = [];
 function renderMsgs() {
-  $('pg-msgs').innerHTML = msgs.map(m => `<div class="msg ${m.role}"><div class="avatar">${m.role==='user'?'U':'N'}</div><div class="bubble">${m.content}</div></div>`).join('');
+  $('pg-msgs').innerHTML = msgs.map(m => {
+    let metaHTML = '';
+    if (m.meta) {
+      metaHTML = `<div class="msg-meta" style="font-size: 11px; color: var(--dim); margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px;">
+        <span class="badge accent" style="padding: 2px 6px;">Routed to: ${m.meta.model}</span>
+        ${m.meta.intent ? `<span class="badge" style="background: rgba(255,255,255,0.05); padding: 2px 6px; color: var(--dim)">Intent: ${m.meta.intent}</span>` : ''}
+        ${m.meta.mode ? `<span class="badge" style="background: rgba(255,255,255,0.05); padding: 2px 6px; color: var(--dim)">Mode: ${m.meta.mode}</span>` : ''}
+        ${m.meta.fallback && m.meta.fallback !== '0' ? `<span class="badge err" style="padding: 2px 6px;">Fallback #${m.meta.fallback}</span>` : ''}
+      </div>`;
+    }
+    return `<div class="msg ${m.role}">
+      <div class="avatar">${m.role==='user'?'U':'N'}</div>
+      <div style="display: flex; flex-direction: column;">
+        <div class="bubble">${m.content}</div>
+        ${metaHTML}
+      </div>
+    </div>`;
+  }).join('');
   $('pg-msgs').scrollTop = $('pg-msgs').scrollHeight;
 }
+
+function populatePlaygroundModels() {
+  let select = $('pg-model');
+  let selectedVal = select.value;
+  select.innerHTML = `
+    <option value="auto">auto (Intelligent)</option>
+    <option value="nimmakai/auto-cheap">nimmakai/auto-cheap (Cost-Aware)</option>
+    <option value="nimmakai/auto-fast">nimmakai/auto-fast (Latency-Aware)</option>
+  `;
+  ALL_M.forEach(m => {
+    select.innerHTML += `<option value="${m.id}">${m.id}</option>`;
+  });
+  if ([...select.options].some(o => o.value === selectedVal)) {
+    select.value = selectedVal;
+  }
+}
+
 async function sendMsg() {
   let text = $('pg-txt').value.trim();
   if(!text) return;
@@ -432,7 +492,7 @@ async function sendMsg() {
   if(sys) reqMsgs.push({role:'system', content:sys});
   reqMsgs.push(...msgs);
 
-  msgs.push({role:'bot', content:''}); // streaming placeholder
+  msgs.push({role:'bot', content:''});
   
   try {
     let res = await fetch('/v1/chat/completions', {
@@ -451,21 +511,42 @@ async function sendMsg() {
       return;
     }
 
+    let modelRoute = res.headers.get('X-Nimmakai-Model');
+    let intentRoute = res.headers.get('X-Nimmakai-Intent');
+    let routeMode = res.headers.get('X-Nimmakai-Route-Mode');
+    let fallbackIndex = res.headers.get('X-Nimmakai-Fallback-Index');
+    
+    if (modelRoute) {
+      msgs[msgs.length-1].meta = {
+        model: modelRoute,
+        intent: intentRoute,
+        mode: routeMode,
+        fallback: fallbackIndex
+      };
+    }
+
     let reader = res.body.getReader();
     let decoder = new TextDecoder("utf-8");
     let done = false;
+    let buffer = "";
 
     while(!done) {
       let {value, done: d} = await reader.read();
       done = d;
       if(value) {
-        let chunk = decoder.decode(value);
-        let lines = chunk.split('\n');
-        for(let line of lines) {
-          if(line.startsWith('data: ') && line !== 'data: [DONE]') {
+        buffer += decoder.decode(value, {stream: true});
+        let parts = buffer.split('\n');
+        buffer = parts.pop();
+        
+        for(let part of parts) {
+          let line = part.trim();
+          if(!line) continue;
+          if(line.startsWith('data: ')) {
+            let dataStr = line.slice(6).trim();
+            if(dataStr === '[DONE]') continue;
             try {
-              let data = JSON.parse(line.slice(6));
-              if(data.choices && data.choices[0].delta.content) {
+              let data = JSON.parse(dataStr);
+              if(data.choices && data.choices[0].delta && data.choices[0].delta.content) {
                 msgs[msgs.length-1].content += data.choices[0].delta.content;
                 renderMsgs();
               }
@@ -474,6 +555,7 @@ async function sendMsg() {
         }
       }
     }
+    renderMsgs();
   } catch(e) {
     msgs[msgs.length-1].content = `Connection Error: ${e.message}`;
     renderMsgs();
@@ -498,7 +580,7 @@ async function loadP() {
               <td style="color:var(--dim)">${p.base_url}</td>
               <td><span class="badge ${p.enabled ? 'ok' : 'err'}"><span class="dot"></span>${p.enabled ? 'Active' : 'Disabled'}</span></td>
               <td>
-                <button class="btn sm" onclick="ap('/admin/providers',{id:'${p.id}',enabled:${!p.enabled},base_url:'_',name:'_'}).then(()=>loadP())">${p.enabled ? 'Disable' : 'Enable'}</button>
+                <button class="btn sm" onclick="ap('/admin/providers',{id:'${p.id}',enabled:${!p.enabled}}).then(()=>loadP())">${p.enabled ? 'Disable' : 'Enable'}</button>
                 ${!p.builtin ? `<button class="btn sm d" onclick="if(confirm('Remove?')) ad('/admin/providers/${p.id}').then(()=>loadP())">Delete</button>` : ''}
               </td>
             </tr>
@@ -526,6 +608,7 @@ async function loadM() {
   let r = await api('/v1/models'); if(!r) return;
   ALL_M = (r.data||[]).filter(m => m.id!=='nimmakai/auto');
   renderM(ALL_M);
+  populatePlaygroundModels();
 }
 function renderM(ms) {
   if(!ms.length) { $('mtable').innerHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No models available.</div>'; return; }
@@ -539,6 +622,74 @@ function renderM(ms) {
 function filterM() { let q = $('msearch').value.toLowerCase(); renderM(ALL_M.filter(m => m.id.toLowerCase().includes(q))); }
 async function refreshCat() { toast('Refreshing...'); await ap('/admin/catalog/refresh',{}); loadM(); toast('Done'); }
 
+// Pinned models modal editor logic
+let currentPins = [];
+function openPinModal(intent) {
+  $('pin-intent').value = intent;
+  let intentMeta = INTENTS[intent];
+  $('pin-title').textContent = `Pin Models for: ${intentMeta.l}`;
+  
+  let pref = H.pr.find(x => x.intent === intent);
+  currentPins = pref ? [...pref.chain] : [];
+  
+  renderPinEditor();
+  modal('pin');
+}
+
+function renderPinEditor() {
+  let selectedDiv = $('pin-selected');
+  if (currentPins.length === 0) {
+    selectedDiv.innerHTML = '<span style="color: var(--muted); font-size: 12px;">No models pinned. Intelligent auto-routing active.</span>';
+  } else {
+    selectedDiv.innerHTML = currentPins.map((m, idx) => `
+      <span class="badge accent" style="cursor: pointer; padding: 6px 10px; border-radius: 20px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;" onclick="removePin(${idx})">
+        ${m} <span style="font-weight: bold; font-size: 14px;">&times;</span>
+      </span>
+    `).join('');
+  }
+  
+  let availableDiv = $('pin-available');
+  let unpinned = ALL_M.filter(m => !currentPins.includes(m.id));
+  if (unpinned.length === 0) {
+    availableDiv.innerHTML = '<div style="color: var(--dim); text-align: center; font-size: 12px; padding: 12px;">No other models available.</div>';
+  } else {
+    availableDiv.innerHTML = unpinned.map(m => `
+      <div style="padding: 6px 12px; border-radius: 6px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 4px;">
+        <span><strong>${m.id.split('/').slice(1).join('/')}</strong> <span style="font-size: 11px; color: var(--dim)">(${m.id.split('/')[0]})</span></span>
+        <button class="btn sm" onclick="addPin('${m.id}')">+</button>
+      </div>
+    `).join('');
+  }
+}
+
+function addPin(modelId) {
+  if (!currentPins.includes(modelId)) {
+    currentPins.push(modelId);
+    renderPinEditor();
+  }
+}
+
+function removePin(idx) {
+  currentPins.splice(idx, 1);
+  renderPinEditor();
+}
+
+async function savePin() {
+  let intent = $('pin-intent').value;
+  let r = await ap('/preferences', {
+    intent: intent,
+    chain: currentPins,
+    strict: false
+  });
+  if (r && r.ok !== false) {
+    toast('Preferences updated');
+    modal();
+    loadR();
+  } else {
+    toast('Failed to save pins', true);
+  }
+}
+
 async function loadR() {
   let pr = await api('/preferences'); if(pr) H.pr = pr.preferences || [];
   let l = await api('/ladder'); if(l) H.l = l.ladders || {};
@@ -547,8 +698,8 @@ async function loadR() {
     let m = INTENTS[k], p = H.pr.find(x=>x.intent===k), ch = p?p.chain:[];
     return `<div class="card" style="margin-bottom:12px"><div class="hd" style="padding:12px 20px">
       <div><strong>${m.l}</strong> <span style="font-size:12px;color:var(--dim);margin-left:8px">${m.d}</span></div>
-      <div><button class="btn sm" onclick="p=prompt('Comma separated models to pin (empty to reset):');if(p!=null) ap('/preferences',{intent:'${k}',chain:p.split(',').filter(Boolean),strict:false}).then(loadR)">Edit Pin</button></div>
-    </div><div class="bd" style="padding:12px 20px;display:flex;gap:8px">
+      <div><button class="btn sm" onclick="openPinModal('${k}')">Edit Pin</button></div>
+    </div><div class="bd" style="padding:12px 20px;display:flex;gap:8px;flex-wrap:wrap">
       ${ch.length ? ch.map(c=>`<span class="badge ok" style="background:rgba(255,255,255,0.05);color:var(--text);border:1px solid var(--border)">${c}</span>`).join('') : '<span style="font-size:12px;color:var(--muted)">Intelligent auto-routing</span>'}
     </div></div>`;
   }).join('');

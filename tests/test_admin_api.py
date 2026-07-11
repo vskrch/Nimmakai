@@ -15,7 +15,15 @@ from nimmakai.routing import RoutingStats
 from nimmakai.safety import AccountGuard
 
 
+_temp_dirs = []
+
+
 def _make_app():
+    import tempfile
+    from pathlib import Path
+    td = tempfile.TemporaryDirectory()
+    _temp_dirs.append(td)  # keep reference alive
+
     settings = Settings(
         proxy_api_keys=[],
         allow_insecure_auth=True,
@@ -24,6 +32,8 @@ def _make_app():
         nim_rpm_limit=40,
         nim_rpd_limit=2000,
         nim_max_in_flight_per_key=3,
+        providers_overlay_path=str(Path(td.name) / "providers.json"),
+        catalog_snapshot_path=str(Path(td.name) / "catalog_snapshot.json"),
     )
     app = create_app(settings)
     # Manually wire state (no lifespan in tests)
@@ -270,3 +280,33 @@ async def test_ladder_endpoint():
     ) as c:
         r = await c.get("/ladder", headers=AUTH)
         assert r.status_code in {200, 503}
+
+
+@pytest.mark.asyncio
+async def test_provider_partial_update():
+    app = _make_app()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        # Create initial provider
+        r = await c.post("/admin/providers", headers=AUTH, json={
+            "id": "groq",
+            "name": "Groq",
+            "base_url": "https://api.groq.com/openai/v1",
+            "api_keys": ["gsk-test-key"],
+            "rpm_limit": 30.0,
+        })
+        assert r.status_code == 200
+
+        # Perform partial update (toggle status only)
+        r = await c.post("/admin/providers", headers=AUTH, json={
+            "id": "groq",
+            "enabled": False,
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["provider"]["enabled"] is False
+        # Verify base_url and key_count were preserved
+        assert body["provider"]["base_url"] == "https://api.groq.com/openai/v1"
+        assert body["provider"]["key_count"] == 1

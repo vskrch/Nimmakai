@@ -24,9 +24,9 @@ def test_parse_alias_chain() -> None:
 def test_load_yaml_family_policy() -> None:
     reg = ModelRegistry.from_yaml(YAML)
     assert reg.catalog.defaults.dynamic_families is True
-    assert reg.catalog.families.coding_primary == "qwen"
+    assert reg.catalog.families.coding_primary == "mimo"
     assert reg.catalog.families.chat_primary == "nemotron"
-    assert reg.catalog.families.fallbacks[0] == "glm_5_2"
+    assert reg.catalog.families.fallbacks[0] == "deepseek"
 
 
 def test_latest_nemotron_excludes_embed() -> None:
@@ -53,8 +53,9 @@ def test_latest_qwen_excludes_image() -> None:
     assert "397b" in latest or "122b" in latest
 
 
-def test_registry_dynamic_chain_quality_first() -> None:
+def test_registry_dynamic_chain_quality_first(monkeypatch) -> None:
     """Quality-first scoring: best model wins regardless of family."""
+    monkeypatch.setattr("random.betavariate", lambda a, b: 0.5)
     reg = ModelRegistry.from_yaml(YAML)
     reg.live_ids = {
         "qwen/qwen3.5-122b-a10b",
@@ -119,7 +120,8 @@ def test_matches_family_glm() -> None:
 
 
 @pytest.mark.asyncio
-async def test_refresh_intersects_live_ids() -> None:
+async def test_refresh_intersects_live_ids(monkeypatch) -> None:
+    monkeypatch.setattr("random.betavariate", lambda a, b: 0.5)
     reg = ModelRegistry.from_yaml(YAML, probe_budget_per_hour=0)
     reg.enrich_doc_details = False
 

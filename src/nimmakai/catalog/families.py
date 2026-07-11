@@ -53,6 +53,22 @@ FAMILIES: dict[str, FamilySpec] = {
         name="minimax_m3",
         include=re.compile(r"minimax.*m3\b|minimax-m3", re.I),
     ),
+    "mimo": FamilySpec(
+        name="mimo",
+        include=re.compile(r"mimo|opencode", re.I),
+    ),
+    "deepseek": FamilySpec(
+        name="deepseek",
+        include=re.compile(r"deepseek", re.I),
+    ),
+    "kimi": FamilySpec(
+        name="kimi",
+        include=re.compile(r"kimi|k2\.6", re.I),
+    ),
+    "grok": FamilySpec(
+        name="grok",
+        include=re.compile(r"grok", re.I),
+    ),
 }
 
 

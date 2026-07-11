@@ -34,7 +34,8 @@ def _registry() -> ModelRegistry:
     return reg
 
 
-def test_eval_cursor_agent_routes_coding_to_qwen_head() -> None:
+def test_eval_cursor_agent_routes_coding_to_qwen_head(monkeypatch) -> None:
+    monkeypatch.setattr("random.betavariate", lambda a, b: 0.5)
     c = IntentClassifier()
     intent = c.classify(
         path="/v1/chat/completions",
@@ -115,7 +116,8 @@ def test_eval_learning_demotes_repeated_failures() -> None:
     assert scores["qwen/qwen3.5-122b-a10b"] < scores["zai/glm-5.2"] + 40
 
 
-def test_eval_openai_alias_gpt4o_maps_to_coding_ladder() -> None:
+def test_eval_openai_alias_gpt4o_maps_to_coding_ladder(monkeypatch) -> None:
+    monkeypatch.setattr("random.betavariate", lambda a, b: 0.5)
     reg = _registry()
     sel = ModelSelector(reg, Settings(nim_api_keys=["k"]))
     intent = IntentResult(

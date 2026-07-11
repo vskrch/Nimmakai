@@ -145,3 +145,21 @@ def test_capability_gate_blocks_no_tools() -> None:
     s = svc.score_model("model-x", "coding_agentic")
     # capability=0.1 should heavily penalize but not fully exclude
     assert s.capability < 0.2
+
+
+def test_coding_ladder_mimo_priority(monkeypatch) -> None:
+    """MiMo and DeepSeek priority for coding intent."""
+    monkeypatch.setattr("random.betavariate", lambda a, b: 0.5)
+    svc = LadderService()
+    live = {
+        "opencode/mimo-v2.5",
+        "deepseek/deepseek-v4-pro",
+        "qwen/qwen3.5-397b",
+        "kimi/kimi-k2.6",
+    }
+    svc.rebuild(live)
+    ladder = svc.ladder_for("coding_agentic")
+    # mimo (quality=97 × affinity=1.4 = 135.8) must be first
+    # deepseek (quality=98 × affinity=1.35 = 132.3) must be second
+    assert ladder[0] == "opencode/mimo-v2.5"
+    assert ladder[1] == "deepseek/deepseek-v4-pro"

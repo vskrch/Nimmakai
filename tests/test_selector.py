@@ -31,7 +31,8 @@ def _intent(intent: Intent = Intent.CODING_AGENTIC) -> IntentResult:
     return IntentResult(intent=intent, confidence=0.9, rule_id="test")
 
 
-def test_auto_mode_coding_uses_qwen() -> None:
+def test_auto_mode_coding_uses_qwen(monkeypatch) -> None:
+    monkeypatch.setattr("random.betavariate", lambda a, b: 0.5)
     s = _selector()
     d = s.resolve("auto", _intent())
     assert d.mode == "auto"

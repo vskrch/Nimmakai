@@ -14,8 +14,12 @@ defaults:
 # Soft family policy — concrete ids resolved at runtime
 families:
   chat_primary: nemotron
-  coding_primary: qwen
+  coding_primary: mimo
   fallbacks:
+    - deepseek
+    - kimi
+    - grok
+    - qwen
     - glm_5_2
     - step_3_7
     - minimax_m3
@@ -38,7 +42,7 @@ aliases:
 intents:
   coding_agentic:
     description: "Tools, multi-file, agent harnesses, repo coding"
-    primary_family: qwen
+    primary_family: mimo
     chain: []  # filled dynamically
   chat_fast:
     description: "Plain Q&A, summaries, short chat — latest Nemotron"
@@ -50,7 +54,7 @@ intents:
     chain: []
   long_horizon:
     description: "Long agentic planning / large context engineering"
-    primary_family: qwen
+    primary_family: mimo
     chain: []
   vision:
     description: "Image + text VLM"

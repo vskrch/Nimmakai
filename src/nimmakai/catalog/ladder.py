@@ -42,6 +42,23 @@ logger = logging.getLogger(__name__)
 # (family_regex, size_or_tier_regex | None) → base quality score
 # Ordered most-specific first; first match wins.
 QUALITY_TIERS: list[tuple[str, str | None, float]] = [
+    # OpenCode / MiMo
+    (r"mimo.*2\.5.*pro|opencode.*mimo.*pro", None, 99.0),
+    (r"mimo.*2\.5|opencode.*mimo", None, 97.0),
+    (r"mimo|opencode", None, 95.0),
+    # DeepSeek
+    (r"deepseek.*v4.*pro", None, 98.0),
+    (r"deepseek.*r1", None, 97.0),
+    (r"deepseek.*v4", None, 95.0),
+    (r"deepseek.*v3", None, 89.0),
+    (r"deepseek", None, 78.0),
+    # Kimi
+    (r"kimi.*2\.6", None, 96.0),
+    (r"kimi", None, 75.0),
+    # Grok
+    (r"grok.*4\.5", None, 96.0),
+    (r"grok.*4", None, 94.0),
+    (r"grok", None, 75.0),
     # Qwen frontier
     (r"qwen.*3\.5", r"397b", 95.0),
     (r"qwen.*3\.5", r"235b", 91.0),
@@ -88,10 +105,6 @@ QUALITY_TIERS: list[tuple[str, str | None, float]] = [
     (r"llama.*3", r"70b|72b", 78.0),
     (r"llama.*3", r"8b|7b", 64.0),
     (r"llama", None, 65.0),
-    # DeepSeek
-    (r"deepseek.*v3", None, 89.0),
-    (r"deepseek.*r1", None, 91.0),
-    (r"deepseek", None, 78.0),
     # Mistral
     (r"mistral.*large", None, 82.0),
     (r"mistral", None, 70.0),
@@ -125,9 +138,13 @@ def _quality_from_params(param_b: int) -> float:
 
 INTENT_AFFINITY: dict[str, dict[str, float]] = {
     "coding_agentic": {
+        "mimo": 1.40,
+        "opencode": 1.40,
+        "deepseek": 1.35,
+        "kimi": 1.30,
         "qwen": 1.30,
+        "grok": 1.20,
         "glm": 1.15,
-        "deepseek": 1.20,
         "nemotron": 1.10,
         "step": 1.05,
         "minimax": 1.00,
@@ -148,8 +165,11 @@ INTENT_AFFINITY: dict[str, dict[str, float]] = {
     },
     "reasoning": {
         "nemotron": 1.30,
-        "deepseek": 1.25,
+        "deepseek": 1.35,
+        "mimo": 1.30,
+        "grok": 1.25,
         "qwen": 1.15,
+        "kimi": 1.20,
         "glm": 1.10,
         "step": 1.05,
         "llama": 1.00,
@@ -158,9 +178,12 @@ INTENT_AFFINITY: dict[str, dict[str, float]] = {
         "mistral": 0.95,
     },
     "long_horizon": {
+        "mimo": 1.40,
+        "kimi": 1.35,
         "qwen": 1.25,
+        "deepseek": 1.25,
         "nemotron": 1.15,
-        "deepseek": 1.10,
+        "grok": 1.20,
         "glm": 1.10,
         "step": 1.05,
         "llama": 1.00,
@@ -170,12 +193,13 @@ INTENT_AFFINITY: dict[str, dict[str, float]] = {
     },
     "vision": {
         "qwen": 1.35,
+        "mimo": 1.20,
         "minimax": 1.20,
         "llama": 1.10,
+        "deepseek": 1.10,
         "glm": 1.00,
         "gemma": 0.95,
         "nemotron": 0.50,  # most nemotrons are text-only
-        "deepseek": 0.70,
         "step": 0.60,
         "mistral": 0.60,
     },
