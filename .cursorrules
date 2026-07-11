@@ -1,16 +1,30 @@
 # Scratchpad
 
 ## Current task
-Multi-provider OpenRouter-style gateway on `development` — implement + commit.
+Multi-provider OpenRouter-style gateway with web UI — DONE.
 
 ## Branches
-- `main` — stable published
-- `development` — active (this work)
+- `main` @ a718dd0 — stable published
+- `development` @ 3f0364d — active (multi-provider + web UI)
 
-## Progress
-[X] ProviderStore + ProviderHub
-[X] refresh_from_hub + namespaced models
-[X] Fallback routes per provider
-[X] Admin CRUD /admin/providers
-[X] Tests (66)
-[ ] Commit + push development
+## What was built (v0.4.0)
+- [X] ProviderStore + ProviderHub (multi-provider OpenAI-compatible)
+- [X] Namespaced model ids (provider/model-id)
+- [X] Admin CRUD /admin/providers
+- [X] Web dashboard at /dashboard (providers, models, routing)
+- [X] Per-intent user preferences (pin models per intent)
+- [X] Intelligent ladder fallback when no preferences set
+- [X] Context window discovery + advertise
+- [X] Exponential backoff on 429/5xx
+- [X] 66 tests pass, ruff clean
+
+## How it works
+1. Add providers via web UI or API → their models appear on /v1/models
+2. Configure per-intent routing (coding, chat, reasoning, etc.) via web UI
+3. If no preferences → intelligent ladder picks best model across all providers
+4. If preferences set → uses those models first, then falls back to ladder
+
+## Remaining work
+- [ ] Live smoke test with real provider keys
+- [ ] Multi-provider catalog merge refinement
+- [ ] Provider health monitoring in UI
