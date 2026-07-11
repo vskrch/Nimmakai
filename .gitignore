@@ -40,7 +40,6 @@ htmlcov/
 
 # UV / tooling
 uv.lock
-!uv.lock
 
 # Logs
 *.log
