@@ -54,8 +54,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "all client requests will be rejected until you set proxy keys."
             )
 
-        upstream = hub.default
-        pool = hub.default_pool
+        # Get default upstream/pool — create fail-closed if no providers have keys
+        try:
+            upstream = hub.default
+            pool = hub.default_pool
+        except RuntimeError:
+            # No providers with keys — create fail-closed pool
+            pool = KeyPool(
+                api_keys=["placeholder-no-keys"],
+                rpm_limit=settings.effective_rpm,
+                rpd_limit=settings.nim_rpd_limit,
+                max_in_flight_per_key=1,
+                auth_fail_threshold=settings.auth_fail_threshold,
+                auth_quarantine_seconds=settings.auth_quarantine_seconds,
+            )
+            upstream = UpstreamClient(
+                base_url=settings.nim_base_url,
+                pool=pool,
+                timeout=settings.upstream_timeout,
+                user_agent=settings.upstream_user_agent,
+                proxy_url=settings.egress_proxy_url(),
+                retry_backoff_base=settings.retry_backoff_base_seconds,
+                retry_backoff_cap=settings.retry_backoff_cap_seconds,
+            )
+            await upstream.start()
 
         registry: ModelRegistry | None = None
         classifier = IntentClassifier(settings)

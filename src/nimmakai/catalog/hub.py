@@ -88,8 +88,16 @@ class ProviderHub:
             )
             return None
 
+        if not keys:
+            logger.warning(
+                "provider %s has no API keys — skipping runtime "
+                "(add keys via dashboard or config)",
+                pid,
+            )
+            return None
+
         pool = KeyPool(
-            api_keys=keys,  # may be empty → fail-closed
+            api_keys=keys,
             rpm_limit=max(1.0, cfg.rpm_limit * self.settings.nim_rpm_safety_factor),
             cooldown_seconds=self.settings.nim_cooldown_seconds,
             rpd_limit=cfg.rpd_limit,
