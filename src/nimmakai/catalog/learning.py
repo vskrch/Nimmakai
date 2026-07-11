@@ -1,4 +1,10 @@
-"""Online learning from routing outcomes — adjusts ladder scores over time."""
+"""Online learning from routing outcomes — Thompson Sampling + UCB1.
+
+Tracks per-(intent, model) success/failure counts for:
+  - Thompson Sampling: Beta(α, β) distribution for Bayesian quality estimation
+  - UCB1: request counts for exploration bonus calculation
+  - Legacy EWMA: backward-compatible score_delta() for callers
+"""
 
 from __future__ import annotations
 
@@ -19,14 +25,26 @@ class ModelLearningStats:
     tool_ok: int = 0
     tool_fail: int = 0
     unavailable: int = 0
-    # EWMA quality in [-1, 1]: + good, - bad
+    # EWMA quality in [-1, 1]: + good, - bad (legacy, kept for compat)
     ewma_quality: float = 0.0
     last_updated: float = 0.0
+    # Total requests routed to this model for this intent (UCB1)
+    total_requests: int = 0
+
+    @property
+    def alpha(self) -> float:
+        """Beta distribution α parameter (successes + optimistic prior)."""
+        return self.successes + 1.0
+
+    @property
+    def beta_param(self) -> float:
+        """Beta distribution β parameter (failures + prior)."""
+        return self.failures + 1.0
 
     def score_delta(self) -> float:
         """
-        Soft adjustment applied on top of static power score.
-        Caps keep primary-family power-first unless the model is clearly failing.
+        Legacy soft adjustment.  Kept for backward compat with callers that
+        still read score_delta.  New code uses thompson_params / ucb instead.
         """
         total = self.successes + self.failures
         delta = self.ewma_quality * 12.0
@@ -43,11 +61,13 @@ class ModelLearningStats:
 
 @dataclass
 class LearningStore:
-    """Persisted per-(intent, model) learning signals."""
+    """Persisted per-(intent, model) learning signals with Thompson + UCB1."""
 
     path: Path = field(default_factory=lambda: Path(".nimmakai/learning.json"))
     save_debounce_seconds: float = 10.0
     _data: dict[str, dict[str, ModelLearningStats]] = field(default_factory=dict)
+    # Per-intent total request counters for UCB1
+    _intent_totals: dict[str, int] = field(default_factory=dict)
     _dirty: bool = False
     _last_save_at: float = 0.0
 
@@ -73,6 +93,9 @@ class LearningStore:
     ) -> None:
         s = self.stats(intent, model_id)
         s.last_updated = time.time()
+        s.total_requests += 1
+        self._intent_totals[intent] = self._intent_totals.get(intent, 0) + 1
+
         if unavailable:
             s.unavailable += 1
             s.failures += 1
@@ -97,10 +120,41 @@ class LearningStore:
         self._dirty = True
         self.save_if_due()
 
+    # ------------------------------------------------------------------
+    # Thompson Sampling interface
+    # ------------------------------------------------------------------
+
+    def thompson_params(self, intent: str, model_id: str) -> tuple[float, float]:
+        """Return (α, β) for Beta distribution — used by Thompson Sampling."""
+        s = self.stats(intent, model_id)
+        return s.alpha, s.beta_param
+
+    # ------------------------------------------------------------------
+    # UCB1 interface
+    # ------------------------------------------------------------------
+
+    def total_requests(self, intent: str) -> int:
+        """Total requests across all models for this intent."""
+        return self._intent_totals.get(intent, 0)
+
+    def model_requests(self, intent: str, model_id: str) -> int:
+        """Total requests routed to a specific model for this intent."""
+        if intent not in self._data or model_id not in self._data[intent]:
+            return 0
+        return self._data[intent][model_id].total_requests
+
+    # ------------------------------------------------------------------
+    # Legacy interface (backward compat)
+    # ------------------------------------------------------------------
+
     def score_delta(self, intent: str, model_id: str) -> float:
         if intent not in self._data or model_id not in self._data[intent]:
             return 0.0
         return self._data[intent][model_id].score_delta()
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
 
     def load(self) -> None:
         if not self.path.is_file():
@@ -118,8 +172,14 @@ class LearningStore:
                         unavailable=int(d.get("unavailable", 0)),
                         ewma_quality=float(d.get("ewma_quality", 0.0)),
                         last_updated=float(d.get("last_updated", 0.0)),
+                        total_requests=int(d.get("total_requests", 0)),
                     )
                     self._data.setdefault(intent, {})[mid] = st
+            # Rebuild intent totals from loaded data
+            for intent, models in self._data.items():
+                self._intent_totals[intent] = sum(
+                    s.total_requests for s in models.values()
+                )
             logger.info("loaded learning store (%s intents)", len(self._data))
         except Exception:
             logger.exception("failed to load learning store")
@@ -140,6 +200,7 @@ class LearningStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "saved_at": time.time(),
+            "intent_totals": dict(self._intent_totals),
             "intents": {
                 intent: {
                     mid: {
@@ -152,6 +213,9 @@ class LearningStore:
                         "ewma_quality": round(st.ewma_quality, 4),
                         "last_updated": st.last_updated,
                         "score_delta": round(st.score_delta(), 2),
+                        "total_requests": st.total_requests,
+                        "thompson_alpha": round(st.alpha, 1),
+                        "thompson_beta": round(st.beta_param, 1),
                     }
                     for mid, st in models.items()
                 }
@@ -172,6 +236,9 @@ class LearningStore:
                     "ewma_quality": round(st.ewma_quality, 3),
                     "successes": st.successes,
                     "failures": st.failures,
+                    "total_requests": st.total_requests,
+                    "thompson_alpha": round(st.alpha, 1),
+                    "thompson_beta": round(st.beta_param, 1),
                 }
                 for mid, st in models.items()
             }

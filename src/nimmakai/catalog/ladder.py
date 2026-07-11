@@ -1,14 +1,20 @@
 """
-Intelligent model ladder service.
+Intelligent model routing with classical optimization algorithms.
 
-Automatically builds strength-ordered ladders from whatever NVIDIA models are
-live *right now*, scored for the task/intent. The proxy always tries the
-strongest available head first and walks down only on unavailability/errors.
+Scoring pipeline:
+    score(m, intent) = quality(m) × affinity(m, intent) × capability(m, intent)
+                     × health(m)
+                     + ucb_bonus(m, intent)
+                     + thompson_bonus(m, intent)
+
+Chain construction: greedy best-first sort — no family pinning.
 """
 
 from __future__ import annotations
 
 import logging
+import math
+import random
 import re
 from dataclasses import dataclass, field
 
@@ -25,29 +31,164 @@ from nimmakai.catalog.providers import scoring_model_id
 
 logger = logging.getLogger(__name__)
 
-# Intent → hard primary family (must lead ladder when any member is live)
-INTENT_PRIMARY_FAMILY: dict[str, str] = {
-    "coding_agentic": "qwen",
-    "chat_fast": "nemotron",
-    "reasoning": "nemotron",
-    "long_horizon": "qwen",
-    "vision": "qwen",
-    "embeddings": "nemotron",
+# ---------------------------------------------------------------------------
+# 1. Benchmark Quality Tiers (ELO-like, 0-100 scale)
+#
+# Derived from public benchmarks: LMSYS Chatbot Arena, MMLU, HumanEval,
+# LiveCodeBench, MATH-500.  Pattern-matched against live model IDs so no
+# hardcoded full IDs are needed.
+# ---------------------------------------------------------------------------
+
+# (family_regex, size_or_tier_regex | None) → base quality score
+# Ordered most-specific first; first match wins.
+QUALITY_TIERS: list[tuple[str, str | None, float]] = [
+    # Qwen frontier
+    (r"qwen.*3\.5", r"397b", 95.0),
+    (r"qwen.*3\.5", r"235b", 91.0),
+    (r"qwen.*3\.5", r"122b", 88.0),
+    (r"qwen.*3\.5", r"72b", 84.0),
+    (r"qwen.*3\.5", r"30b|32b", 76.0),
+    (r"qwen.*3\.5", r"14b", 72.0),
+    (r"qwen.*3\.5", r"7b|8b", 68.0),
+    # Qwen 3
+    (r"qwen.*3(?!\.)", r"235b", 90.0),
+    (r"qwen.*3(?!\.)", r"120b|122b", 86.0),
+    (r"qwen.*3(?!\.)", r"30b|32b", 74.0),
+    (r"qwen.*3(?!\.)", r"14b", 70.0),
+    (r"qwen.*3(?!\.)", r"8b|7b", 66.0),
+    (r"qwen.*3(?!\.)", r"4b", 60.0),
+    # Qwen fallback (unknown version)
+    (r"qwen", None, 70.0),
+    # NVIDIA Nemotron
+    (r"nemotron.*ultra", r"550b|500b", 93.0),
+    (r"nemotron.*ultra", None, 92.0),
+    (r"nemotron.*super", r"120b", 86.0),
+    (r"nemotron.*super", r"56b|49b", 82.0),
+    (r"nemotron.*super", None, 84.0),
+    (r"nemotron.*pro", None, 78.0),
+    (r"nemotron.*nano", None, 68.0),
+    (r"nemotron", None, 75.0),
+    # GLM
+    (r"glm.*5\.2", None, 87.0),
+    (r"glm", None, 75.0),
+    # Step
+    (r"step.*3\.7", None, 83.0),
+    (r"step", None, 72.0),
+    # MiniMax
+    (r"minimax.*m3", None, 81.0),
+    (r"minimax", None, 72.0),
+    # Google Gemma
+    (r"gemma.*4", r"31b|27b", 74.0),
+    (r"gemma.*4", r"12b", 68.0),
+    (r"gemma", None, 65.0),
+    # Llama
+    (r"llama.*4", r"405b|400b", 88.0),
+    (r"llama.*4", r"70b|72b", 80.0),
+    (r"llama.*4", r"8b|7b", 68.0),
+    (r"llama.*3", r"70b|72b", 78.0),
+    (r"llama.*3", r"8b|7b", 64.0),
+    (r"llama", None, 65.0),
+    # DeepSeek
+    (r"deepseek.*v3", None, 89.0),
+    (r"deepseek.*r1", None, 91.0),
+    (r"deepseek", None, 78.0),
+    # Mistral
+    (r"mistral.*large", None, 82.0),
+    (r"mistral", None, 70.0),
+]
+
+# Compiled for speed
+_QUALITY_COMPILED: list[tuple[re.Pattern, re.Pattern | None, float]] = [
+    (re.compile(fam, re.I), re.compile(size, re.I) if size else None, q)
+    for fam, size, q in QUALITY_TIERS
+]
+
+# Parameter-size extraction for fallback quality estimation
+PARAM_RE = re.compile(r"(?:^|[^a-z0-9])(\d{1,4})b(?:[^a-z0-9]|$)", re.I)
+
+# Rough param → quality mapping (logarithmic)
+_PARAM_QUALITY_SLOPE = 8.0  # each doubling of params ≈ +8 quality
+
+
+def _quality_from_params(param_b: int) -> float:
+    """Estimate quality from parameter count using log-scale heuristic."""
+    # Anchored: 7B ≈ 60, 70B ≈ 80, 400B ≈ 92
+    return min(95.0, max(50.0, 60.0 + _PARAM_QUALITY_SLOPE * math.log2(param_b / 7.0)))
+
+
+# ---------------------------------------------------------------------------
+# 2. Intent Affinity Matrix (multiplicative, not additive)
+#
+# 1.0 = neutral.  A 0.3 affinity kills a high-quality model's score for that
+# intent; 1.3 makes a good model great for that intent.
+# ---------------------------------------------------------------------------
+
+INTENT_AFFINITY: dict[str, dict[str, float]] = {
+    "coding_agentic": {
+        "qwen": 1.30,
+        "glm": 1.15,
+        "deepseek": 1.20,
+        "nemotron": 1.10,
+        "step": 1.05,
+        "minimax": 1.00,
+        "llama": 1.05,
+        "gemma": 0.90,
+        "mistral": 0.95,
+    },
+    "chat_fast": {
+        "nemotron": 1.25,
+        "glm": 1.10,
+        "qwen": 1.05,
+        "minimax": 1.05,
+        "step": 1.00,
+        "llama": 1.00,
+        "deepseek": 1.00,
+        "gemma": 0.95,
+        "mistral": 1.00,
+    },
+    "reasoning": {
+        "nemotron": 1.30,
+        "deepseek": 1.25,
+        "qwen": 1.15,
+        "glm": 1.10,
+        "step": 1.05,
+        "llama": 1.00,
+        "minimax": 0.95,
+        "gemma": 0.90,
+        "mistral": 0.95,
+    },
+    "long_horizon": {
+        "qwen": 1.25,
+        "nemotron": 1.15,
+        "deepseek": 1.10,
+        "glm": 1.10,
+        "step": 1.05,
+        "llama": 1.00,
+        "minimax": 1.00,
+        "gemma": 0.90,
+        "mistral": 0.95,
+    },
+    "vision": {
+        "qwen": 1.35,
+        "minimax": 1.20,
+        "llama": 1.10,
+        "glm": 1.00,
+        "gemma": 0.95,
+        "nemotron": 0.50,  # most nemotrons are text-only
+        "deepseek": 0.70,
+        "step": 0.60,
+        "mistral": 0.60,
+    },
 }
 
-# Rough parameter-size extraction: 397b, 120b, 70b, 30b-a3b, etc.
-PARAM_RE = re.compile(r"(?:^|[^a-z0-9])(\d{1,4})b(?:[^a-z0-9]|$)", re.I)
+# Default affinity for families not in the matrix
+_DEFAULT_AFFINITY = 0.85
 
 # Intent keyword boosts from NVIDIA doc descriptions / model ids
 INTENT_KEYWORDS: dict[str, tuple[str, ...]] = {
     "coding_agentic": (
-        "coding",
-        "code",
-        "agent",
-        "agentic",
-        "tool",
-        "function calling",
-        "software",
+        "coding", "code", "agent", "agentic", "tool",
+        "function calling", "software",
     ),
     "chat_fast": ("chat", "instruct", "general", "assistant", "conversation"),
     "reasoning": ("reason", "math", "logic", "thinking"),
@@ -56,54 +197,29 @@ INTENT_KEYWORDS: dict[str, tuple[str, ...]] = {
     "embeddings": ("embed", "retrieval", "rerank"),
 }
 
-# Family affinity: which families are "base" strongest for an intent
-INTENT_FAMILY_BOOST: dict[str, dict[str, float]] = {
-    "coding_agentic": {
-        "qwen": 40.0,
-        "glm_5_2": 25.0,
-        "step_3_7": 20.0,
-        "minimax_m3": 15.0,
-        "nemotron": 10.0,
-    },
-    "chat_fast": {
-        "nemotron": 40.0,
-        "glm_5_2": 20.0,
-        "step_3_7": 15.0,
-        "minimax_m3": 12.0,
-        "qwen": 10.0,
-    },
-    "reasoning": {
-        "nemotron": 35.0,
-        "qwen": 25.0,
-        "glm_5_2": 20.0,
-        "step_3_7": 18.0,
-        "minimax_m3": 10.0,
-    },
-    "long_horizon": {
-        "qwen": 35.0,
-        "nemotron": 25.0,
-        "glm_5_2": 22.0,
-        "step_3_7": 18.0,
-        "minimax_m3": 12.0,
-    },
-    "vision": {
-        "qwen": 40.0,
-        "minimax_m3": 25.0,
-        "nemotron": 5.0,
-    },
-}
-
+# Modality exclusion for non-LLM endpoints
 CHAT_EXCLUDE = re.compile(
     r"(embed|rerank|ocr|asr|safety|guard|tts|image-edit|diffusion|"
     r"protein|fold|yolo|page-elements|table-structure|voicechat)",
     re.I,
 )
 
+# UCB1 exploration constant — controls explore/exploit tradeoff
+# ~5.0 gives ~10-15 bonus points to untested models relative to 100-point scale
+UCB_C = 5.0
+
 
 @dataclass
 class ScoredModel:
     model_id: str
     score: float
+    quality: float = 0.0
+    affinity: float = 1.0
+    capability: float = 1.0
+    health: float = 1.0
+    ucb_bonus: float = 0.0
+    thompson_bonus: float = 0.0
+    doc_bonus: float = 0.0
     reasons: list[str] = field(default_factory=list)
 
 
@@ -117,10 +233,16 @@ class LadderSnapshot:
 
 class LadderService:
     """
-    In-process intelligent laddering service.
+    Quality-first model routing using classical optimization.
+
+    Algorithms:
+        - Benchmark ELO: base quality from public leaderboards
+        - Multi-criteria scoring: quality × affinity × capability × health
+        - UCB1: upper confidence bound exploration bonus
+        - Thompson Sampling: Bayesian online learning from outcomes
 
     Lifecycle: call `rebuild(live_ids, docs)` after each catalog refresh.
-    Routing: call `ladder_for(intent)` to get strongest → next available order.
+    Routing: call `ladder_for(intent)` to get best → fallback order.
     """
 
     def __init__(
@@ -135,12 +257,7 @@ class LadderService:
         self.live_ids: set[str] = set()
         # Capability hints learned from probes / docs: model_id → flags
         self.capabilities: dict[str, dict[str, bool]] = {}
-        # Overridable from config/models.yaml (defaults = INTENT_* constants)
-        self.primary_by_intent: dict[str, str] = dict(INTENT_PRIMARY_FAMILY)
-        self.family_boost_by_intent: dict[str, dict[str, float]] = {
-            k: dict(v) for k, v in INTENT_FAMILY_BOOST.items()
-        }
-        # Known provider prefixes to strip for family/param scoring
+        # Overridable from config/models.yaml
         self.provider_ids: set[str] = {"nim"}
 
     def apply_catalog_policy(
@@ -149,29 +266,16 @@ class LadderService:
         primary_by_intent: dict[str, str] | None = None,
         fallback_families: list[str] | None = None,
     ) -> None:
-        """Wire soft family policy from models.yaml into scoring / pinning."""
+        """Wire soft family policy from models.yaml — now only boosts affinity."""
+        # In the new algorithm, primary/fallback hints are absorbed as small
+        # affinity nudges rather than hard pins.
         if primary_by_intent:
-            self.primary_by_intent.update(
-                {k: v for k, v in primary_by_intent.items() if v}
-            )
-        if fallback_families:
-            # Re-weight non-primary families by YAML fallback order (first = strongest)
-            ordered = [f for f in fallback_families if f]
-            for intent, boosts in self.family_boost_by_intent.items():
-                primary = self.primary_by_intent.get(intent)
-                primary_boost = boosts.get(primary, 40.0) if primary else 40.0
-                for i, fam in enumerate(ordered):
-                    if fam == primary:
-                        continue
-                    # 25, 20, 15, … declining
-                    boosts[fam] = max(8.0, 25.0 - i * 5.0)
-                if primary:
-                    boosts[primary] = primary_boost
-            logger.info(
-                "ladder policy applied: primary=%s fallbacks=%s",
-                self.primary_by_intent,
-                ordered,
-            )
+            for intent, fam in primary_by_intent.items():
+                if fam and intent in INTENT_AFFINITY:
+                    aff = INTENT_AFFINITY[intent]
+                    # Ensure the preferred family has at least 1.15 affinity
+                    if aff.get(fam, _DEFAULT_AFFINITY) < 1.15:
+                        aff[fam] = 1.15
 
     def set_docs(self, docs: list[DocModel]) -> None:
         self._docs_by_slug = {d.slug.lower().replace("_", "-"): d for d in docs}
@@ -189,7 +293,7 @@ class LadderService:
         for intent in targets:
             self._ladders[intent] = self._build_ladder(intent)
         logger.info(
-            "ladder service rebuilt for %s intents from %s live models: %s",
+            "ladder rebuilt (%s intents, %s live): %s",
             len(targets),
             len(live_ids),
             {k: v.ladder[:3] for k, v in self._ladders.items()},
@@ -197,9 +301,8 @@ class LadderService:
 
     def ladder_for(self, intent: str, *, max_n: int | None = None) -> list[str]:
         """
-        Strength-ordered available models for intent.
-        Re-scores on each call so online learning applies immediately.
-        Unhealthy / cooldown models are skipped (walk to next strongest).
+        Best-first chain for the given intent.  Re-scores on each call so
+        online learning (UCB1 + Thompson) applies immediately.
         """
         if self.live_ids:
             snap = self._build_ladder(intent)
@@ -212,8 +315,6 @@ class LadderService:
 
         out: list[str] = []
         for mid in snap.ladder:
-            if self.health.is_unhealthy(mid):
-                continue
             if mid not in self.live_ids and self.live_ids:
                 continue
             out.append(mid)
@@ -224,127 +325,218 @@ class LadderService:
             out = list(snap.ladder[: max_n or len(snap.ladder)])
         return out
 
+    # ------------------------------------------------------------------
+    # Core scoring
+    # ------------------------------------------------------------------
+
     def score_model(self, model_id: str, intent: str) -> ScoredModel:
+        """Multi-criteria composite score for a model on a given intent."""
         bare = scoring_model_id(model_id, self.provider_ids)
         mid = bare.lower()
         reasons: list[str] = []
-        score = 0.0
 
-        # Modality gates
+        # ── Modality gates (hard exclude) ────────────────────────
         if intent == "embeddings":
             if "embed" not in mid and "retrieval" not in mid:
-                return ScoredModel(model_id, -1e9, ["not_embedding"])
-            score += 50.0
-            reasons.append("embedding")
-        elif intent == "vision":
-            if not any(k in mid for k in ("vl", "vision", "omni", "minimax-m3")):
-                # Allow models with vision in docs
+                return ScoredModel(model_id, -1e9, reasons=["not_embedding"])
+            # Embeddings get a flat high score — quality differences are small
+            return ScoredModel(model_id, 50.0, quality=50.0, reasons=["embedding"])
+
+        if intent == "vision":
+            is_vision = any(k in mid for k in ("vl", "vision", "omni", "minimax-m3"))
+            if not is_vision:
                 doc = self._doc_for(model_id)
                 desc = (doc.description if doc else "").lower()
-                if "vision" not in desc and "vlm" not in desc and "multimodal" not in desc:
-                    return ScoredModel(model_id, -1e9, ["not_vision"])
-            score += 20.0
-            reasons.append("vision_capable")
-        else:
-            # Generic chat/coding — exclude non-LLM endpoints
+                if not any(k in desc for k in ("vision", "vlm", "multimodal")):
+                    return ScoredModel(model_id, -1e9, reasons=["not_vision"])
+
+        # Generic chat/coding — exclude non-LLM endpoints
+        if intent not in ("vision", "embeddings"):
             if CHAT_EXCLUDE.search(mid):
-                return ScoredModel(model_id, -1e9, ["excluded_modality"])
+                return ScoredModel(model_id, -1e9, reasons=["excluded_modality"])
             if intent == "coding_agentic" and QWEN_EXCLUDE.search(mid) and "qwen" in mid:
-                return ScoredModel(model_id, -1e9, ["qwen_non_text"])
+                return ScoredModel(model_id, -1e9, reasons=["qwen_non_text"])
             if "nemotron" in mid and NEMOTRON_EXCLUDE.search(mid):
-                return ScoredModel(model_id, -1e9, ["nemotron_non_chat"])
+                return ScoredModel(model_id, -1e9, reasons=["nemotron_non_chat"])
 
-        # Parameter size → power proxy
-        params = self._param_billions(mid)
-        if params:
-            score += min(params, 600) * 0.08  # 397b ≈ 31.8 pts
-            reasons.append(f"params={params}b")
+        # ── 1. Benchmark quality ─────────────────────────────────
+        quality = self._base_quality(mid)
+        reasons.append(f"quality={quality:.0f}")
 
-        # Version / tier (not param size — that is scored separately)
-        vk = version_key(bare)
-        ver_tuple = vk[0]
-        # Dotted versions like 3.5 beat bare 3
-        ver_score = ver_tuple[0] * 3.0
-        if len(ver_tuple) > 1:
-            ver_score += ver_tuple[1] * 0.5
-        score += ver_score
-        score += vk[1] * 8.0  # ultra/super/pro tier
-        if vk[1]:
-            reasons.append(f"tier={vk[1]}")
+        # ── 2. Intent affinity (multiplicative) ──────────────────
+        affinity = self._intent_affinity(mid, intent)
+        reasons.append(f"affinity={affinity:.2f}")
 
-        # Family affinity for this intent
-        boosts = self.family_boost_by_intent.get(intent, {})
-        for fam, boost in boosts.items():
-            if matches_family(bare, fam):
-                score += boost
-                reasons.append(f"family={fam}+{boost}")
-                break
+        # ── 3. Capability gate ───────────────────────────────────
+        capability = self._capability_score(model_id, mid, intent)
+        if capability < 0.01:
+            reasons.append("capability_blocked")
+        elif capability > 1.01:
+            reasons.append(f"capability_bonus={capability:.2f}")
 
-        # Doc description keyword match
-        doc = self._doc_for(bare)
-        if doc:
-            desc = doc.description.lower()
-            hits = 0
-            for kw in INTENT_KEYWORDS.get(intent, ()):
-                if kw in desc or kw in mid:
-                    hits += 1
-            if hits:
-                score += hits * 4.0
-                reasons.append(f"doc_keywords={hits}")
-            # Explicit capability language in NVIDIA docs
-            if intent == "coding_agentic" and (
-                "tool" in desc or "function calling" in desc or "agent" in desc
-            ):
-                score += 8.0
-                reasons.append("doc_tools_agent")
+        # ── 4. Health (continuous 0-1) ───────────────────────────
+        health_s = self.health.health_score(model_id)
+        if health_s < 0.99:
+            reasons.append(f"health={health_s:.2f}")
 
-        # Learned online adjustments (failures, empty replies, tool quality)
-        learned = self.learning.score_delta(intent, model_id)
-        if learned:
-            score += learned
-            reasons.append(f"learned={learned:+.1f}")
+        # ── Composite multiplicative score ───────────────────────
+        composite = quality * affinity * capability * health_s
 
-        # Capability registry (from probes)
+        # ── 5. UCB1 exploration bonus (additive) ─────────────────
+        ucb = self._ucb_bonus(model_id, intent)
+        if ucb > 0.5:
+            reasons.append(f"ucb={ucb:.1f}")
+
+        # ── 6. Thompson Sampling bonus (additive) ────────────────
+        thompson = self._thompson_bonus(model_id, intent)
+        if abs(thompson) > 0.5:
+            reasons.append(f"thompson={thompson:+.1f}")
+
+        # ── 7. Doc keyword bonus (small additive) ────────────────
+        doc_bonus = self._doc_keyword_bonus(model_id, mid, intent)
+        if doc_bonus > 0:
+            reasons.append(f"doc_kw={doc_bonus:.0f}")
+
+        total = composite + ucb + thompson + doc_bonus
+
+        return ScoredModel(
+            model_id=model_id,
+            score=total,
+            quality=quality,
+            affinity=affinity,
+            capability=capability,
+            health=health_s,
+            ucb_bonus=ucb,
+            thompson_bonus=thompson,
+            doc_bonus=doc_bonus,
+            reasons=reasons,
+        )
+
+    def _base_quality(self, mid_lower: str) -> float:
+        """Look up benchmark quality from the tier table, fall back to param estimate."""
+        for fam_re, size_re, quality in _QUALITY_COMPILED:
+            if fam_re.search(mid_lower):
+                if size_re is None:
+                    return quality
+                if size_re.search(mid_lower):
+                    return quality
+        # No tier match — estimate from parameter count
+        m = PARAM_RE.search(mid_lower)
+        if m:
+            try:
+                return _quality_from_params(int(m.group(1)))
+            except ValueError:
+                pass
+        # Version / tier heuristic fallback
+        vk = version_key(mid_lower)
+        ver_score = vk[0][0] * 2.0 + vk[1] * 5.0
+        return max(50.0, 55.0 + ver_score)
+
+    def _intent_affinity(self, mid_lower: str, intent: str) -> float:
+        """Multiplicative affinity — how well suited a model family is for this intent."""
+        affinities = INTENT_AFFINITY.get(intent)
+        if not affinities:
+            return 1.0
+        # Match against known family names
+        for fam_key, aff_value in affinities.items():
+            if fam_key in mid_lower:
+                return aff_value
+        return _DEFAULT_AFFINITY
+
+    def _capability_score(
+        self, model_id: str, mid_lower: str, intent: str
+    ) -> float:
+        """Capability gate: 0.0 blocks, 1.0 neutral, >1.0 confirmed bonus."""
         caps = self.capabilities.get(model_id) or {}
+
         if intent == "coding_agentic":
             if caps.get("supports_tools") is True:
-                score += 10.0
-                reasons.append("tools_confirmed")
-            elif caps.get("supports_tools") is False:
-                score -= 20.0
-                reasons.append("tools_unsupported")
+                return 1.15  # confirmed: small bonus
+            if caps.get("supports_tools") is False:
+                return 0.1  # confirmed no tools: heavy penalty (not zero — may still work)
 
-        return ScoredModel(model_id=model_id, score=score, reasons=reasons)
+        if intent == "vision":
+            if caps.get("supports_vision") is True:
+                return 1.10
+            if caps.get("supports_vision") is False:
+                return 0.0
+
+        return 1.0
+
+    def _ucb_bonus(self, model_id: str, intent: str) -> float:
+        """
+        UCB1 exploration bonus: C × √(ln(N) / nₘ)
+
+        Models with fewer samples get a larger bonus, encouraging exploration
+        of potentially better but untested models.
+        """
+        total_n = self.learning.total_requests(intent)
+        model_n = self.learning.model_requests(intent, model_id)
+
+        if total_n < 2:
+            return UCB_C * 2.0  # generous bonus when system is cold-starting
+
+        if model_n == 0:
+            # Never tried: give maximum exploration bonus
+            return UCB_C * math.sqrt(math.log(total_n + 1))
+
+        return UCB_C * math.sqrt(math.log(total_n + 1) / model_n)
+
+    def _thompson_bonus(self, model_id: str, intent: str) -> float:
+        """
+        Thompson Sampling: draw from Beta(α, β) distribution.
+
+        α = successes + 1 (optimistic prior)
+        β = failures + 1
+
+        Returns a bonus in [-10, +10] that reflects the model's Bayesian
+        quality estimate with natural exploration built in.
+        """
+        alpha, beta = self.learning.thompson_params(intent, model_id)
+        sample = random.betavariate(alpha, beta)
+        # Map [0, 1] → [-10, +10]
+        return (sample - 0.5) * 20.0
+
+    def _doc_keyword_bonus(
+        self, model_id: str, mid_lower: str, intent: str
+    ) -> float:
+        """Small additive bonus from doc description keyword matches."""
+        doc = self._doc_for(model_id)
+        if not doc:
+            return 0.0
+        desc = doc.description.lower()
+        hits = sum(1 for kw in INTENT_KEYWORDS.get(intent, ()) if kw in desc or kw in mid_lower)
+        bonus = hits * 2.0
+        # Extra for explicit capability language
+        if intent == "coding_agentic" and any(
+            k in desc for k in ("tool", "function calling", "agent")
+        ):
+            bonus += 4.0
+        return bonus
+
+    # ------------------------------------------------------------------
+    # Chain construction
+    # ------------------------------------------------------------------
 
     def _build_ladder(self, intent: str) -> LadderSnapshot:
+        """Greedy best-first: score all live models, sort descending, take top K."""
         scored: list[ScoredModel] = []
         for mid in self.live_ids:
             s = self.score_model(mid, intent)
             if s.score > -1e8:
                 scored.append(s)
+
+        # Greedy sort: highest composite score first
+        # Tiebreak: version_key (higher version wins), then shorter id
         scored.sort(
-            key=lambda s: (s.score, version_key(scoring_model_id(s.model_id, self.provider_ids))),
+            key=lambda s: (
+                s.score,
+                version_key(scoring_model_id(s.model_id, self.provider_ids)),
+            ),
             reverse=True,
         )
 
-        # Hard pin: strongest member of the intent's primary family leads,
-        # then the rest of the strength-ordered ladder (no duplicates).
-        primary_fam = self.primary_by_intent.get(intent)
-        ladder: list[str] = []
-        if primary_fam:
-            primary_candidates = [
-                s
-                for s in scored
-                if matches_family(
-                    scoring_model_id(s.model_id, self.provider_ids), primary_fam
-                )
-            ]
-            if primary_candidates:
-                ladder.append(primary_candidates[0].model_id)
-        for s in scored:
-            if s.model_id not in ladder:
-                ladder.append(s.model_id)
-
+        ladder = [s.model_id for s in scored]
         scores = {s.model_id: round(s.score, 2) for s in scored}
         return LadderSnapshot(
             intent=intent,
@@ -353,19 +545,13 @@ class LadderService:
             built_from_live=len(self.live_ids),
         )
 
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
     def _doc_for(self, model_id: str) -> DocModel | None:
         slug = model_id.rsplit("/", 1)[-1].lower().replace("_", "-")
         return self._docs_by_slug.get(slug)
-
-    @staticmethod
-    def _param_billions(model_id: str) -> int | None:
-        m = PARAM_RE.search(model_id)
-        if not m:
-            return None
-        try:
-            return int(m.group(1))
-        except ValueError:
-            return None
 
     def snapshot(self) -> dict:
         return {

@@ -109,49 +109,4 @@ def all_in_family(live_ids: set[str] | list[str], family: str) -> list[str]:
     return sorted(candidates, key=version_key, reverse=True)
 
 
-# Intent → primary family, then shared fallbacks
-INTENT_PRIMARY: dict[str, str] = {
-    "chat_fast": "nemotron",
-    "coding_agentic": "qwen",
-    "reasoning": "nemotron",
-    "long_horizon": "qwen",
-    "vision": "qwen",  # qwen VL if present; else fall through
-    "embeddings": "nemotron",  # will often miss; embeddings handled separately
-    "unknown": "nemotron",
-}
 
-SHARED_FALLBACKS = ("glm_5_2", "step_3_7", "minimax_m3")
-
-
-def build_preference_chain(
-    live_ids: set[str] | list[str],
-    intent: str,
-    *,
-    probed_ok: set[str] | None = None,
-) -> list[str]:
-    """
-    Build ordered chain: strongest primary + fallbacks.
-    probed_ok is ignored for ordering (power-first); unavailability is handled
-    via health cooldown demotion, not by preferring probed weaker models.
-    """
-    del probed_ok  # retained for call-site compatibility
-    ids = set(live_ids)
-
-    chain: list[str] = []
-    primary_fam = INTENT_PRIMARY.get(intent, "nemotron")
-    primary = latest_in_family(ids, primary_fam)
-    if primary:
-        chain.append(primary)
-
-    for fam in SHARED_FALLBACKS:
-        mid = latest_in_family(ids, fam)
-        if mid and mid not in chain:
-            chain.append(mid)
-
-    # Soft: add next-best same-family variants as deeper fallbacks
-    for fam in (primary_fam, *SHARED_FALLBACKS):
-        for mid in all_in_family(ids, fam)[1:3]:
-            if mid not in chain:
-                chain.append(mid)
-
-    return chain

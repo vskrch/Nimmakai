@@ -75,11 +75,17 @@ class UpstreamClient:
             raise RuntimeError("UpstreamClient not started")
         return self._client
 
-    def _headers(self, key: KeyStats, extra: dict[str, str] | None = None) -> dict[str, str]:
+    def _headers(
+        self,
+        key: KeyStats,
+        extra: dict[str, str] | None = None,
+        *,
+        accept_stream: bool = False,
+    ) -> dict[str, str]:
         h = {
             "Authorization": f"Bearer {key.api_key}",
             "Content-Type": "application/json",
-            "Accept": "application/json",
+            "Accept": "text/event-stream" if accept_stream else "application/json",
         }
         if self.user_agent:
             h["User-Agent"] = self.user_agent
@@ -91,14 +97,18 @@ class UpstreamClient:
         return h
 
     @staticmethod
-    def _filter_headers(headers: httpx.Headers) -> dict[str, str]:
+    def _filter_headers(
+        headers: httpx.Headers, *, streaming: bool = False
+    ) -> dict[str, str]:
+        # For streaming responses, preserve connection-related headers so
+        # downstream clients (Cursor agent mode, etc.) keep the SSE socket open.
         skip = {
             "content-encoding",
             "transfer-encoding",
-            "connection",
-            "keep-alive",
             "content-length",
         }
+        if not streaming:
+            skip |= {"connection", "keep-alive"}
         return {k: v for k, v in headers.items() if k.lower() not in skip}
 
     async def request_json(
@@ -224,7 +234,9 @@ class UpstreamClient:
                     method,
                     path,
                     json=json_body,
-                    headers=self._headers(key, forward_headers),
+                    headers=self._headers(
+                        key, forward_headers, accept_stream=True
+                    ),
                 )
                 resp = await self.client.send(req, stream=True)
 
@@ -308,7 +320,7 @@ class UpstreamClient:
                     )
                     continue
 
-                out_headers = self._filter_headers(resp.headers)
+                out_headers = self._filter_headers(resp.headers, streaming=True)
                 status_code = resp.status_code
                 bound_key = key
                 bound_resp = resp

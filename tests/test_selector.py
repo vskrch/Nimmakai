@@ -42,7 +42,10 @@ def test_auto_mode_chat_uses_nemotron() -> None:
     s = _selector()
     d = s.resolve("nimmakai/auto", _intent(Intent.CHAT_FAST))
     assert d.mode == "auto"
-    assert "nemotron" in d.chain[0]
+    # Nemotron super (quality=86 × affinity=1.25 ≈ 107) should be in top 2
+    # (Thompson Sampling may occasionally promote another model — by design)
+    top2 = d.chain[:2]
+    assert any("nemotron" in m for m in top2)
 
 
 def test_alias_to_chain() -> None:

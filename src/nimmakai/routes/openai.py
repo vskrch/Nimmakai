@@ -252,6 +252,7 @@ async def _chat_like(
                         **_merge_headers(result.headers, route_h),
                         "Cache-Control": "no-cache",
                         "X-Accel-Buffering": "no",
+                        "Connection": "keep-alive",
                     },
                 )
 
@@ -305,6 +306,7 @@ async def _chat_like(
                     **{k: v for k, v in headers.items() if k.lower() != "content-type"},
                     "Cache-Control": "no-cache",
                     "X-Accel-Buffering": "no",
+                    "Connection": "keep-alive",
                 },
             )
 

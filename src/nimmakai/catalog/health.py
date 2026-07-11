@@ -106,6 +106,24 @@ class ModelHealthStore:
             return False
         return h.error_rate > self.error_rate_threshold
 
+    def health_score(self, model_id: str) -> float:
+        """
+        Continuous health in [0, 1] for multiplicative scoring.
+
+        1.0  = healthy or unknown (optimistic default)
+        0.01 = in cooldown (near-zero but not fully excluded)
+        Intermediate = proportional to (1 - error_rate)
+        """
+        h = self._by_model.get(model_id)
+        if h is None:
+            return 1.0  # unknown = optimistic
+        if h.in_cooldown():
+            return 0.01
+        total = h.success_count + h.error_count
+        if total < self.min_samples:
+            return 1.0  # not enough data
+        return max(0.05, 1.0 - h.error_rate)
+
     def health_reorder(self, chain: list[str]) -> list[str]:
         """
         Power-first: keep preference order.

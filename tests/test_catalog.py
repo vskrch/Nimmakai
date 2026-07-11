@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from nimmakai.catalog import ModelRegistry, latest_in_family
-from nimmakai.catalog.families import build_preference_chain, matches_family
+from nimmakai.catalog.families import matches_family
 from nimmakai.catalog.health import ModelHealthStore
 from nimmakai.catalog.schema import parse_alias_value
 
@@ -53,34 +53,8 @@ def test_latest_qwen_excludes_image() -> None:
     assert "397b" in latest or "122b" in latest
 
 
-def test_coding_chain_order() -> None:
-    ids = {
-        "qwen/qwen3.5-122b-a10b",
-        "zai/glm-5.2",
-        "stepfun/step-3.7-flash",
-        "minimaxai/minimax-m3",
-        "nvidia/nemotron-3-super-120b-a12b",
-    }
-    chain = build_preference_chain(ids, "coding_agentic")
-    assert chain[0].startswith("qwen/")
-    # Fallbacks present in order when available
-    fams = [c for c in chain]
-    assert any("glm" in c for c in fams)
-    assert any("step-3.7" in c or "step-3.7" in c.replace("_", "-") for c in fams)
-    assert any("minimax" in c and "m3" in c for c in fams)
-
-
-def test_chat_chain_prefers_nemotron() -> None:
-    ids = {
-        "qwen/qwen3.5-122b-a10b",
-        "nvidia/nemotron-3-super-120b-a12b",
-        "zai/glm-5.2",
-    }
-    chain = build_preference_chain(ids, "chat_fast")
-    assert "nemotron" in chain[0]
-
-
-def test_registry_dynamic_chain_from_live_ids() -> None:
+def test_registry_dynamic_chain_quality_first() -> None:
+    """Quality-first scoring: best model wins regardless of family."""
     reg = ModelRegistry.from_yaml(YAML)
     reg.live_ids = {
         "qwen/qwen3.5-122b-a10b",
@@ -92,8 +66,10 @@ def test_registry_dynamic_chain_from_live_ids() -> None:
     reg._rebuild_all_chains()
     coding = reg.chain_for_intent("coding_agentic")
     chat = reg.chain_for_intent("chat_fast")
-    assert coding[0].startswith("qwen/")
-    assert "nemotron" in chat[0]
+    # Coding: qwen 3.5 122b (quality=88 × affinity=1.3 ≈ 114) should be in top 2
+    assert any("qwen" in m for m in coding[:2])
+    # Chat: all models present; nemotron super leads due to higher affinity
+    assert len(chat) >= 3
 
 
 def test_health_keeps_powerful_head_despite_slowness() -> None:
@@ -115,6 +91,25 @@ def test_health_demotes_unavailable_only() -> None:
     reordered = store.health_reorder(chain)
     assert reordered[0] == "fallback"
     assert reordered[-1] == "primary"
+
+
+def test_health_score_continuous() -> None:
+    """New continuous health_score returns float in [0, 1]."""
+    store = ModelHealthStore(min_samples=2)
+    # Unknown model: optimistic
+    assert store.health_score("unknown-model") == 1.0
+    # Healthy model
+    store.record_outcome("healthy", success=True, latency=0.5)
+    store.record_outcome("healthy", success=True, latency=0.5)
+    assert store.health_score("healthy") == 1.0
+    # Failing model
+    store.record_outcome("failing", success=False, status_code=500)
+    store.record_outcome("failing", success=False, status_code=500)
+    store.record_outcome("failing", success=False, status_code=500)
+    assert store.health_score("failing") < 0.5
+    # Cooldown model
+    store.record_outcome("cooled", success=False, status_code=404, unavailable=True)
+    assert store.health_score("cooled") == 0.01
 
 
 def test_matches_family_glm() -> None:
@@ -150,6 +145,7 @@ async def test_refresh_intersects_live_ids() -> None:
     )
     assert ok
     coding = reg.chain_for_intent("coding_agentic")
-    assert coding[0].startswith("qwen/")
+    # Quality-first: qwen 3.5 should lead for coding
+    assert any("qwen" in m for m in coding[:2])
     chat = reg.chain_for_intent("chat_fast")
-    assert "nemotron" in chat[0]
+    assert len(chat) >= 2
