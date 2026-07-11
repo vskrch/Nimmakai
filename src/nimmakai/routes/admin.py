@@ -77,6 +77,14 @@ async def stats(request: Request) -> JSONResponse:
             "intents_total": dict(routing_stats.intents_total),
             "models_total": dict(routing_stats.models_total),
             "fallback_advances": routing_stats.fallback_advances,
+            "model_tokens": {
+                k: {"prompt_tokens": v.prompt_tokens, "completion_tokens": v.completion_tokens}
+                for k, v in routing_stats.model_tokens.items()
+            },
+            "key_tokens": {
+                k: {"prompt_tokens": v.prompt_tokens, "completion_tokens": v.completion_tokens}
+                for k, v in routing_stats.key_tokens.items()
+            },
         }
     if registry is not None:
         snap = registry.snapshot()

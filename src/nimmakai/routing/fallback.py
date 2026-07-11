@@ -43,10 +43,20 @@ class StreamResult:
     decision: RouteDecision
 
 
+from dataclasses import dataclass, field
+from typing import Any, AsyncIterator
+
+@dataclass
+class TokenStats:
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+
 @dataclass
 class RoutingStats:
     intents_total: dict[str, int] = field(default_factory=dict)
     models_total: dict[str, int] = field(default_factory=dict)
+    model_tokens: dict[str, TokenStats] = field(default_factory=dict)
+    key_tokens: dict[str, TokenStats] = field(default_factory=dict)
     fallback_advances: int = 0
 
     def record(self, intent: str, model: str, advanced: bool) -> None:
@@ -55,6 +65,17 @@ class RoutingStats:
         if advanced:
             self.fallback_advances += 1
 
+    def record_tokens(self, model: str, key_id: str | None, in_tok: int, out_tok: int) -> None:
+        if model not in self.model_tokens:
+            self.model_tokens[model] = TokenStats()
+        self.model_tokens[model].prompt_tokens += in_tok
+        self.model_tokens[model].completion_tokens += out_tok
+        
+        if key_id:
+            if key_id not in self.key_tokens:
+                self.key_tokens[key_id] = TokenStats()
+            self.key_tokens[key_id].prompt_tokens += in_tok
+            self.key_tokens[key_id].completion_tokens += out_tok
 
 def _is_model_not_found(status: int, body: Any) -> bool:
     if status == 404:
@@ -318,8 +339,14 @@ class FallbackExecutor:
                         tool_ok,
                     )
                     continue
-                if isinstance(resp_body, dict) and "model" in resp_body:
-                    resp_body = {**resp_body, "model": model}
+                if isinstance(resp_body, dict):
+                    if "model" in resp_body:
+                        resp_body = {**resp_body, "model": model}
+                    usage = resp_body.get("usage")
+                    if isinstance(usage, dict):
+                        pt = usage.get("prompt_tokens", 0)
+                        ct = usage.get("completion_tokens", 0)
+                        self.stats.record_tokens(model, key_id, pt, ct)
                 self.stats.record(decision.intent.value, model, advanced=idx > 0)
                 return UpstreamResult(
                     status_code=status,
@@ -460,6 +487,25 @@ class FallbackExecutor:
             last_status, last_headers, last_key, last_model = status, headers, key, model
 
             if 200 <= status < 300:
+                import asyncio
+                try:
+                    first_chunk = await asyncio.wait_for(anext(byte_iter), timeout=10.0)
+                except StopAsyncIteration:
+                    first_chunk = b""
+                except (Exception, asyncio.TimeoutError) as exc:
+                    logger.warning("Stream TTFT stalled on %s: %s; falling back", model, exc)
+                    if hasattr(byte_iter, "aclose"):
+                        await byte_iter.aclose()
+                    self.stats.fallback_advances += 1
+                    self.registry.record_outcome(
+                        model,
+                        key.key_id if key else None,
+                        success=False,
+                        status_code=504,
+                        intent=decision.intent.value,
+                    )
+                    continue
+
                 self.stats.record(decision.intent.value, model, advanced=idx > 0)
                 self.registry.record_outcome(
                     model,
@@ -469,9 +515,36 @@ class FallbackExecutor:
                     intent=decision.intent.value,
                     had_tools=bool(body.get("tools") or body.get("functions")),
                 )
+
+                async def robust_iter(first: bytes, rest: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+                    def _scan_for_tokens(c: bytes) -> None:
+                        if b'"usage"' in c:
+                            import re
+                            p = re.search(rb'"prompt_tokens"\s*:\s*(\d+)', c)
+                            ct = re.search(rb'"completion_tokens"\s*:\s*(\d+)', c)
+                            if p and ct:
+                                self.stats.record_tokens(
+                                    model, key.key_id if key else None, int(p.group(1)), int(ct.group(1))
+                                )
+
+                    if first:
+                        _scan_for_tokens(first)
+                        yield first
+                    try:
+                        while True:
+                            # 10s watchdog for mid-stream chunks too.
+                            chunk = await asyncio.wait_for(anext(rest), timeout=10.0)
+                            _scan_for_tokens(chunk)
+                            yield chunk
+                    except StopAsyncIteration:
+                        return
+                    except Exception as e:
+                        logger.warning("Stream stalled mid-way: %s", e)
+                        raise
+
                 return StreamResult(
                     status_code=status,
-                    byte_iter=byte_iter,
+                    byte_iter=robust_iter(first_chunk, byte_iter),
                     headers=headers,
                     key=key,
                     model=model,
