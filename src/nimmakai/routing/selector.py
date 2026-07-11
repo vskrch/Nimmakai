@@ -58,6 +58,14 @@ class ModelSelector:
         if not raw and self.settings.default_model:
             raw = normalize_model_name(self.settings.default_model)
 
+        variant = "default"
+        if raw in ("auto-cheap", "nimmakai/auto-cheap"):
+            variant = "cheap"
+            raw = "auto"
+        elif raw in ("auto-fast", "nimmakai/auto-fast"):
+            variant = "fast"
+            raw = "auto"
+
         if routing_disabled:
             chain = [raw] if raw else []
             if not chain and self.settings.default_model:
@@ -78,7 +86,7 @@ class ModelSelector:
                 mode: RouteMode = "passthrough" if pref.strict else "passthrough_with_fallback"
                 chain = list(pref.chain)
                 if not pref.strict:
-                    siblings = self.registry.chain_for_intent(intent_key)
+                    siblings = self.registry.chain_for_intent(intent_key, variant=variant)
                     chain = chain + [m for m in siblings if m not in chain]
                 return RouteDecision(
                     chain=self.registry.health_reorder(chain),
@@ -89,7 +97,7 @@ class ModelSelector:
                 )
 
         if intent == Intent.EMBEDDINGS:
-            chain = self.registry.chain_for_intent("embeddings")
+            chain = self.registry.chain_for_intent("embeddings", variant=variant)
             if not chain and raw and looks_like_nim_id(raw):
                 chain = [raw]
             return RouteDecision(
@@ -101,7 +109,7 @@ class ModelSelector:
             )
 
         if self.registry.is_auto(raw) or raw == "":
-            chain = self.registry.chain_for_intent(intent_key)
+            chain = self.registry.chain_for_intent(intent_key, variant=variant)
             return RouteDecision(
                 chain=self.registry.health_reorder(chain),
                 mode="auto",
@@ -113,7 +121,7 @@ class ModelSelector:
         if self.registry.is_alias(raw):
             target = self.registry.resolve_alias(raw)
             if target.kind == "chain":
-                chain = self.registry.chain_for_intent(target.value)
+                chain = self.registry.chain_for_intent(target.value, variant=variant)
                 return RouteDecision(
                     chain=self.registry.health_reorder(chain),
                     mode="alias",
@@ -126,7 +134,7 @@ class ModelSelector:
             # alias → concrete model
             chain = [target.value]
             if self.settings.enable_fallback_on_explicit:
-                siblings = self.registry.chain_for_intent(intent_key)
+                siblings = self.registry.chain_for_intent(intent_key, variant=variant)
                 chain = chain + [m for m in siblings if m != target.value]
             return RouteDecision(
                 chain=self.registry.health_reorder(chain),
@@ -139,8 +147,12 @@ class ModelSelector:
         if self.registry.is_known(raw) or looks_like_nim_id(raw):
             resolved = self.registry.resolve_live_id(raw) or raw
             if self.settings.enable_fallback_on_explicit:
-                siblings = self.registry.chain_for_intent(intent_key)
-                chain = [resolved] + [m for m in siblings if m != resolved]
+                siblings = self.registry.chain_for_intent(intent_key, variant=variant)
+                bare = resolved.split("/")[-1] if "/" in resolved else resolved
+                # Explicit horizontal fallback: inject other providers of the exact same model first
+                horizontals = [m for m in siblings if (m.split("/")[-1] if "/" in m else m) == bare and m != resolved]
+                rest = [m for m in siblings if m != resolved and m not in horizontals]
+                chain = [resolved] + horizontals + rest
                 mode: RouteMode = "passthrough_with_fallback"
             else:
                 chain = [resolved]
@@ -156,7 +168,7 @@ class ModelSelector:
             )
 
         # Unknown non-NIM string → treat as auto
-        chain = self.registry.chain_for_intent(intent_key)
+        chain = self.registry.chain_for_intent(intent_key, variant=variant)
         return RouteDecision(
             chain=self.registry.health_reorder(chain),
             mode="unknown_alias_as_auto",

@@ -290,28 +290,32 @@ class LadderService:
             "vision",
             "embeddings",
         ]
+        variants = ["default", "cheap", "fast"]
         for intent in targets:
-            self._ladders[intent] = self._build_ladder(intent)
+            for variant in variants:
+                self._ladders[(intent, variant)] = self._build_ladder(intent, variant=variant)
         logger.info(
-            "ladder rebuilt (%s intents, %s live): %s",
+            "ladder rebuilt (%s intents × 3 variants, %s live): %s",
             len(targets),
             len(live_ids),
-            {k: v.ladder[:3] for k, v in self._ladders.items()},
+            {k[0]: v.ladder[:3] for k, v in self._ladders.items() if k[1] == "default"},
         )
 
-    def ladder_for(self, intent: str, *, max_n: int | None = None) -> list[str]:
+    def ladder_for(
+        self, intent: str, *, variant: str = "default", max_n: int | None = None
+    ) -> list[str]:
         """
-        Best-first chain for the given intent.  Re-scores on each call so
-        online learning (UCB1 + Thompson) applies immediately.
+        Best-first chain for the given intent and variant. Re-scores on each call
+        so online learning (UCB1 + Thompson) applies immediately.
         """
         if self.live_ids:
-            snap = self._build_ladder(intent)
-            self._ladders[intent] = snap
+            snap = self._build_ladder(intent, variant=variant)
+            self._ladders[(intent, variant)] = snap
         else:
-            snap = self._ladders.get(intent)
+            snap = self._ladders.get((intent, variant))
             if snap is None:
-                snap = self._build_ladder(intent)
-                self._ladders[intent] = snap
+                snap = self._build_ladder(intent, variant=variant)
+                self._ladders[(intent, variant)] = snap
 
         out: list[str] = []
         for mid in snap.ladder:
@@ -329,8 +333,10 @@ class LadderService:
     # Core scoring
     # ------------------------------------------------------------------
 
-    def score_model(self, model_id: str, intent: str) -> ScoredModel:
-        """Multi-criteria composite score for a model on a given intent."""
+    def score_model(
+        self, model_id: str, intent: str, *, variant: str = "default"
+    ) -> ScoredModel:
+        """Multi-criteria composite score for a model on a given intent and variant."""
         bare = scoring_model_id(model_id, self.provider_ids)
         mid = bare.lower()
         reasons: list[str] = []
@@ -379,20 +385,29 @@ class LadderService:
         if health_s < 0.99:
             reasons.append(f"health={health_s:.2f}")
 
-        # ── Composite multiplicative score ───────────────────────
-        composite = quality * affinity * capability * health_s
+        # ── 5. Variant Multipliers (Cost / Speed) ────────────────
+        variant_mult = 1.0
+        if variant == "cheap":
+            variant_mult = self._cost_multiplier(mid)
+            reasons.append(f"cheap_mult={variant_mult:.2f}")
+        elif variant == "fast":
+            variant_mult = self._speed_multiplier(model_id)
+            reasons.append(f"fast_mult={variant_mult:.2f}")
 
-        # ── 5. UCB1 exploration bonus (additive) ─────────────────
+        # ── Composite multiplicative score ───────────────────────
+        composite = quality * affinity * capability * health_s * variant_mult
+
+        # ── 6. UCB1 exploration bonus (additive) ─────────────────
         ucb = self._ucb_bonus(model_id, intent)
         if ucb > 0.5:
             reasons.append(f"ucb={ucb:.1f}")
 
-        # ── 6. Thompson Sampling bonus (additive) ────────────────
+        # ── 7. Thompson Sampling bonus (additive) ────────────────
         thompson = self._thompson_bonus(model_id, intent)
         if abs(thompson) > 0.5:
             reasons.append(f"thompson={thompson:+.1f}")
 
-        # ── 7. Doc keyword bonus (small additive) ────────────────
+        # ── 8. Doc keyword bonus (small additive) ────────────────
         doc_bonus = self._doc_keyword_bonus(model_id, mid, intent)
         if doc_bonus > 0:
             reasons.append(f"doc_kw={doc_bonus:.0f}")
@@ -463,6 +478,34 @@ class LadderService:
 
         return 1.0
 
+    def _cost_multiplier(self, mid_lower: str) -> float:
+        """
+        Heuristic: smaller models are cheaper.
+        8B gets ~1.6x multiplier, 70B gets ~0.37x, 400B gets ~0.07x.
+        This aggressively promotes smaller models for 'cheap' routing.
+        """
+        m = PARAM_RE.search(mid_lower)
+        if m:
+            try:
+                params_b = int(m.group(1))
+                return max(0.05, 30.0 / (params_b + 10.0))
+            except ValueError:
+                pass
+        return 0.5  # Unknown cost: penalize moderately to favor known-small models
+
+    def _speed_multiplier(self, model_id: str) -> float:
+        """
+        Heuristic: route to highest Tokens Per Second (TPS).
+        Tracked dynamically in health.py based on real outcomes.
+        """
+        h = self.health._by_model.get(model_id)
+        if not h or h.ewma_tok_per_s <= 0:
+            # Unknown speed: neutral multiplier
+            return 1.0
+        # Normalization: 40 TPS is a good baseline (1.0).
+        # 120 TPS gives 3.0x score. Cap at 5.0x.
+        return min(5.0, h.ewma_tok_per_s / 40.0)
+
     def _ucb_bonus(self, model_id: str, intent: str) -> float:
         """
         UCB1 exploration bonus: C × √(ln(N) / nₘ)
@@ -518,11 +561,11 @@ class LadderService:
     # Chain construction
     # ------------------------------------------------------------------
 
-    def _build_ladder(self, intent: str) -> LadderSnapshot:
+    def _build_ladder(self, intent: str, *, variant: str = "default") -> LadderSnapshot:
         """Greedy best-first: score all live models, sort descending, take top K."""
         scored: list[ScoredModel] = []
         for mid in self.live_ids:
-            s = self.score_model(mid, intent)
+            s = self.score_model(mid, intent, variant=variant)
             if s.score > -1e8:
                 scored.append(s)
 
@@ -561,7 +604,8 @@ class LadderService:
                 "scores_head": {m: snap.scores.get(m) for m in snap.ladder[:5]},
                 "built_from_live": snap.built_from_live,
             }
-            for intent, snap in self._ladders.items()
+            for (intent, variant), snap in self._ladders.items()
+            if variant == "default"
         }
 
     def set_capability(self, model_id: str, **flags: bool) -> None:

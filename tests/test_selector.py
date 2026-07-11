@@ -68,3 +68,26 @@ def test_passthrough_with_fallback() -> None:
     assert d.mode == "passthrough_with_fallback"
     assert d.chain[0] == "org/my-model"
     assert len(d.chain) > 1
+
+
+def test_auto_cheap_mode() -> None:
+    s = _selector()
+    s.registry.live_ids.add("nim/llama-3.1-8b-instruct")
+    s.registry.live_ids.add("nim/llama-3.1-405b-instruct")
+    s.registry._rebuild_all_chains()
+    d = s.resolve("nimmakai/auto-cheap", _intent())
+    assert d.mode == "auto"
+    # 8B is massively boosted by cheap mode vs 405B
+    assert d.chain[0] == "nim/llama-3.1-8b-instruct"
+
+
+def test_horizontal_fallback() -> None:
+    s = _selector(enable_fallback_on_explicit=True)
+    s.registry.live_ids.add("groq/llama-3.3-70b-versatile")
+    s.registry.live_ids.add("cerebras/llama-3.3-70b-versatile")
+    s.registry._rebuild_all_chains()
+    
+    d = s.resolve("groq/llama-3.3-70b-versatile", _intent())
+    assert d.mode == "passthrough_with_fallback"
+    assert d.chain[0] == "groq/llama-3.3-70b-versatile"
+    assert d.chain[1] == "cerebras/llama-3.3-70b-versatile"

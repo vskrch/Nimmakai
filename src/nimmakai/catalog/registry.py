@@ -275,14 +275,19 @@ class ModelRegistry:
     def model_meta(self, model_id: str):
         return self.catalog.models.get(normalize_model_name(model_id))
 
-    def chain_for_intent(self, intent: str) -> list[str]:
+    def chain_for_intent(self, intent: str, *, variant: str = "default") -> list[str]:
         if self.catalog.defaults.dynamic_families:
             # Intelligent ladder: strongest available → next → …
-            ladder = self.ladder.ladder_for(intent)
+            ladder = self.ladder.ladder_for(intent, variant=variant)
             if ladder:
                 return self._filter_available(ladder)
             if intent in self.dynamic_chains and self.dynamic_chains[intent]:
                 return self._filter_available(list(self.dynamic_chains[intent]))
+
+        # Legacy static fallback behavior
+        chain = self.dynamic_chains.get(intent)
+        if chain is not None:
+            return self._filter_available(list(chain))
 
         entry = self.catalog.intents.get(intent)
         if entry is None:
