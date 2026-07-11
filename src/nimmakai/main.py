@@ -41,7 +41,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             nim_max_in_flight=settings.nim_max_in_flight_per_key,
         )
         hub = ProviderHub(store, settings)
-        await hub.start()
+        try:
+            await hub.start()
+        except Exception:
+            logger.exception("provider hub startup failed — running degraded")
 
         if not settings.nim_api_keys:
             logger.error(
