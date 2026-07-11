@@ -106,7 +106,7 @@ class Settings(BaseSettings):
 
     @property
     def accept_any_proxy_key(self) -> bool:
-        return len(self.proxy_api_keys) == 0 and self.allow_insecure_auth
+        return self.allow_insecure_auth
 
     def egress_proxy_url(self) -> str | None:
         """First configured egress proxy, if any."""
