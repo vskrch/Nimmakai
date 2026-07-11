@@ -368,12 +368,12 @@ async function loadD() {
   
   let s = await api('/stats');
   let p = h.providers || [];
-  $('dash-stats').innerHTML = \`
+  $('dash-stats').innerHTML = `
     <div class="stat-box"><div class="label">Status</div><div class="val" style="color:var(--green)">Operational</div><div class="sub">Routing active</div></div>
-    <div class="stat-box"><div class="label">Providers</div><div class="val">\${p.length}</div><div class="sub">\${p.filter(x=>x.enabled).length} active integrations</div></div>
-    <div class="stat-box"><div class="label">Live Models</div><div class="val">\${s?.catalog?.live_model_count || 0}</div><div class="sub">across all APIs</div></div>
-    <div class="stat-box"><div class="label">Proxy Keys</div><div class="val">\${h.nim_keys_configured}</div><div class="sub">Available for gateway</div></div>
-  \`;
+    <div class="stat-box"><div class="label">Providers</div><div class="val">${p.length}</div><div class="sub">${p.filter(x=>x.enabled).length} active integrations</div></div>
+    <div class="stat-box"><div class="label">Live Models</div><div class="val">${s?.catalog?.live_model_count || 0}</div><div class="sub">across all APIs</div></div>
+    <div class="stat-box"><div class="label">Proxy Keys</div><div class="val">${h.nim_keys_configured}</div><div class="sub">Available for gateway</div></div>
+  `;
 }
 
 // Tracing
@@ -387,12 +387,12 @@ async function loadT() {
     let mt = rt.model_tokens[m];
     totalIn += mt.prompt_tokens; totalOut += mt.completion_tokens;
     let sum = mt.prompt_tokens + mt.completion_tokens;
-    mHTML += \`<tr>
-      <td><strong>\${m}</strong></td>
-      <td style="color:var(--dim)">\${mt.prompt_tokens.toLocaleString()}</td>
-      <td style="color:var(--dim)">\${mt.completion_tokens.toLocaleString()}</td>
-      <td style="color:var(--accent)">\${sum.toLocaleString()}</td>
-    </tr>\`;
+    mHTML += `<tr>
+      <td><strong>${m}</strong></td>
+      <td style="color:var(--dim)">${mt.prompt_tokens.toLocaleString()}</td>
+      <td style="color:var(--dim)">${mt.completion_tokens.toLocaleString()}</td>
+      <td style="color:var(--accent)">${sum.toLocaleString()}</td>
+    </tr>`;
   });
   mHTML += '</tbody></table>';
   if(totalIn===0) mHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No tokens consumed yet. Try the Playground.</div>';
@@ -401,23 +401,23 @@ async function loadT() {
   let kHTML = '<table style="margin-top:0"><thead><tr><th>Key ID</th><th>Tokens</th></tr></thead><tbody>';
   Object.keys(rt.key_tokens).forEach(k => {
     let sum = rt.key_tokens[k].prompt_tokens + rt.key_tokens[k].completion_tokens;
-    kHTML += \`<tr><td><span class="badge accent">\${k}</span></td><td>\${sum.toLocaleString()}</td></tr>\`;
+    kHTML += `<tr><td><span class="badge accent">${k}</span></td><td>${sum.toLocaleString()}</td></tr>`;
   });
   kHTML += '</tbody></table>';
   if(totalIn===0) kHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No keys used yet.</div>';
   $('trace-keys').innerHTML = kHTML;
 
-  $('trace-summary').innerHTML = \`
-    <div class="stat-box"><div class="label">Total Tokens</div><div class="val">\${(totalIn+totalOut).toLocaleString()}</div></div>
-    <div class="stat-box"><div class="label">Prompt (In)</div><div class="val" style="color:var(--dim)">\${totalIn.toLocaleString()}</div></div>
-    <div class="stat-box"><div class="label">Completion (Out)</div><div class="val" style="color:var(--accent)">\${totalOut.toLocaleString()}</div></div>
-  \`;
+  $('trace-summary').innerHTML = `
+    <div class="stat-box"><div class="label">Total Tokens</div><div class="val">${(totalIn+totalOut).toLocaleString()}</div></div>
+    <div class="stat-box"><div class="label">Prompt (In)</div><div class="val" style="color:var(--dim)">${totalIn.toLocaleString()}</div></div>
+    <div class="stat-box"><div class="label">Completion (Out)</div><div class="val" style="color:var(--accent)">${totalOut.toLocaleString()}</div></div>
+  `;
 }
 
 // Playground
 let msgs = [];
 function renderMsgs() {
-  $('pg-msgs').innerHTML = msgs.map(m => \`<div class="msg \${m.role}"><div class="avatar">\${m.role==='user'?'U':'N'}</div><div class="bubble">\${m.content}</div></div>\`).join('');
+  $('pg-msgs').innerHTML = msgs.map(m => `<div class="msg ${m.role}"><div class="avatar">${m.role==='user'?'U':'N'}</div><div class="bubble">${m.content}</div></div>`).join('');
   $('pg-msgs').scrollTop = $('pg-msgs').scrollHeight;
 }
 async function sendMsg() {
@@ -446,7 +446,7 @@ async function sendMsg() {
     });
     
     if(!res.ok) {
-      msgs[msgs.length-1].content = \`Error: \${res.statusText}\`;
+      msgs[msgs.length-1].content = `Error: ${res.statusText}`;
       renderMsgs();
       return;
     }
@@ -460,7 +460,7 @@ async function sendMsg() {
       done = d;
       if(value) {
         let chunk = decoder.decode(value);
-        let lines = chunk.split('\\n');
+        let lines = chunk.split('\n');
         for(let line of lines) {
           if(line.startsWith('data: ') && line !== 'data: [DONE]') {
             try {
@@ -475,7 +475,7 @@ async function sendMsg() {
       }
     }
   } catch(e) {
-    msgs[msgs.length-1].content = \`Connection Error: \${e.message}\`;
+    msgs[msgs.length-1].content = `Connection Error: ${e.message}`;
     renderMsgs();
   }
 }
@@ -485,23 +485,41 @@ async function loadP() {
   let r = await api('/admin/providers'); if(!r) return;
   let ps = r.providers || [];
   if(!ps.length) { $('prov-list').innerHTML = '<div class="card"><div class="bd" style="text-align:center;color:var(--dim)">No providers added yet.</div></div>'; return; }
-  $('prov-list').innerHTML = '<div class="card" style="padding:0"><table><thead><tr><th>Provider</th><th>Base URL</th><th>Status</th><th>Actions</th></tr></thead><tbody>' +
-    ps.map(p => \`<tr>
-      <td><strong>\${p.name}</strong><br><span style="font-size:11px;color:var(--dim)">\${p.id}</span></td>
-      <td style="color:var(--dim)">\${p.base_url}</td>
-      <td><span class="badge \${p.enabled?'ok':'err'}"><span class="dot"></span>\${p.enabled?'Active':'Disabled'}</span></td>
-      <td>
-        <button class="btn sm" onclick="ap('/admin/providers',{id:'\${p.id}',enabled:\${!p.enabled},base_url:'_',name:'_'})&&loadP()">\${p.enabled?'Disable':'Enable'}</button>
-        \${!p.builtin ? \`<button class="btn sm d" onclick="if(confirm('Remove?')) ad('/admin/providers/\${p.id}')&&loadP()">Delete</button>\` : ''}
-      </td>
-    </tr>\`).join('') + '</tbody></table></div>';
+  $('prov-list').innerHTML = `
+    <div class="card" style="padding:0">
+      <table>
+        <thead>
+          <tr><th>Provider</th><th>Base URL</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody>
+          ${ps.map(p => `
+            <tr>
+              <td><strong>${p.name}</strong><br/><span style="font-size:11px;color:var(--dim)">${p.id}</span></td>
+              <td style="color:var(--dim)">${p.base_url}</td>
+              <td><span class="badge ${p.enabled ? 'ok' : 'err'}"><span class="dot"></span>${p.enabled ? 'Active' : 'Disabled'}</span></td>
+              <td>
+                <button class="btn sm" onclick="ap('/admin/providers',{id:'${p.id}',enabled:${!p.enabled},base_url:'_',name:'_'}).then(()=>loadP())">${p.enabled ? 'Disable' : 'Enable'}</button>
+                ${!p.builtin ? `<button class="btn sm d" onclick="if(confirm('Remove?')) ad('/admin/providers/${p.id}').then(()=>loadP())">Delete</button>` : ''}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
 }
 async function addP() {
   let b = {id:$('pf-id').value.trim(), name:$('pf-name').value.trim(), base_url:$('pf-url').value.trim(), api_keys:$('pf-keys').value.split(',').map(s=>s.trim()).filter(Boolean), rpm_limit:Number($('pf-rpm').value)||40, rpd_limit:Number($('pf-rpd').value)||2000, enabled:true};
   if(!b.id || !b.base_url) { toast('ID and URL required', true); return; }
   let r = await ap('/admin/providers', b);
-  if(!r||!r.ok) { toast(r?.error?.message || 'Failed', true); return; }
-  toast('Provider added'); modal(); loadP();
+  if(!r||!r.ok) { 
+    toast(r?.error?.message || r?.detail?.error?.message || 'Failed to add provider', true); 
+    return; 
+  }
+  toast('Provider added'); 
+  modal(); 
+  $('pf-id').value = ''; $('pf-name').value = ''; $('pf-url').value = ''; $('pf-keys').value = '';
+  loadP();
 }
 
 async function loadM() {
@@ -515,7 +533,7 @@ function renderM(ms) {
     ms.map(m => {
       let parts = m.id.split('/'), prov = parts[0], mod = parts.slice(1).join('/');
       let ctx = m.context_length || m.max_model_len || '—';
-      return \`<tr><td><strong>\${mod}</strong></td><td><span class="badge accent">\${prov}</span></td><td style="color:var(--dim)">\${ctx.toLocaleString()}</td></tr>\`;
+      return `<tr><td><strong>${mod}</strong></td><td><span class="badge accent">${prov}</span></td><td style="color:var(--dim)">${ctx.toLocaleString()}</td></tr>`;
     }).join('') + '</tbody></table>';
 }
 function filterM() { let q = $('msearch').value.toLowerCase(); renderM(ALL_M.filter(m => m.id.toLowerCase().includes(q))); }
@@ -527,21 +545,21 @@ async function loadR() {
   
   $('prefs-list').innerHTML = Object.keys(INTENTS).map(k => {
     let m = INTENTS[k], p = H.pr.find(x=>x.intent===k), ch = p?p.chain:[];
-    return \`<div class="card" style="margin-bottom:12px"><div class="hd" style="padding:12px 20px">
-      <div><strong>\${m.l}</strong> <span style="font-size:12px;color:var(--dim);margin-left:8px">\${m.d}</span></div>
-      <div><button class="btn sm" onclick="p=prompt('Comma separated models to pin (empty to reset):');if(p!=null) ap('/preferences',{intent:'\${k}',chain:p.split(',').filter(Boolean),strict:false}).then(loadR)">Edit Pin</button></div>
+    return `<div class="card" style="margin-bottom:12px"><div class="hd" style="padding:12px 20px">
+      <div><strong>${m.l}</strong> <span style="font-size:12px;color:var(--dim);margin-left:8px">${m.d}</span></div>
+      <div><button class="btn sm" onclick="p=prompt('Comma separated models to pin (empty to reset):');if(p!=null) ap('/preferences',{intent:'${k}',chain:p.split(',').filter(Boolean),strict:false}).then(loadR)">Edit Pin</button></div>
     </div><div class="bd" style="padding:12px 20px;display:flex;gap:8px">
-      \${ch.length ? ch.map(c=>\`<span class="badge ok" style="background:rgba(255,255,255,0.05);color:var(--text);border:1px solid var(--border)">\${c}</span>\`).join('') : '<span style="font-size:12px;color:var(--muted)">Intelligent auto-routing</span>'}
-    </div></div>\`;
+      ${ch.length ? ch.map(c=>`<span class="badge ok" style="background:rgba(255,255,255,0.05);color:var(--text);border:1px solid var(--border)">${c}</span>`).join('') : '<span style="font-size:12px;color:var(--muted)">Intelligent auto-routing</span>'}
+    </div></div>`;
   }).join('');
 
   $('ladders').innerHTML = Object.keys(H.l).map(k => {
     let s = H.l[k], hd = s.ladder_head||[];
-    return \`<div class="card" style="margin-bottom:12px"><div class="hd" style="padding:12px 20px"><strong>\${INTENTS[k]?.l||k}</strong> <span class="badge accent" style="margin-left:8px">\${s.ladder_len} models</span></div>
+    return `<div class="card" style="margin-bottom:12px"><div class="hd" style="padding:12px 20px"><strong>${INTENTS[k]?.l||k}</strong> <span class="badge accent" style="margin-left:8px">${s.ladder_len} models</span></div>
       <div class="bd" style="padding:12px 20px;display:flex;flex-wrap:wrap;gap:8px">
-        \${hd.map((m,i)=>\`<span class="badge" style="background:var(--bg-sidebar);border:1px solid \${i===0?'var(--accent)':'var(--border)'};color:var(--text)">\${i===0?'⭐ ':''}\${m} <span style="color:var(--dim);margin-left:4px">\${s.scores_head[m]?.toFixed(1)||''}</span></span>\`).join('')}
-        \${s.ladder_len>5 ? \`<span style="font-size:11px;color:var(--muted);align-self:center">+\${s.ladder_len-5} more</span>\` : ''}
-      </div></div>\`;
+        ${hd.map((m,i)=>`<span class="badge" style="background:var(--bg-sidebar);border:1px solid ${i===0?'var(--accent)':'var(--border)'};color:var(--text)">${i===0?'⭐ ':''}${m} <span style="color:var(--dim);margin-left:4px">${s.scores_head[m]?.toFixed(1)||''}</span></span>`).join('')}
+        ${s.ladder_len>5 ? `<span style="font-size:11px;color:var(--muted);align-self:center">+${s.ladder_len-5} more</span>` : ''}
+      </div></div>`;
   }).join('');
 }
 
