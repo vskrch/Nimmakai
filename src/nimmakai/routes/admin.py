@@ -151,7 +151,7 @@ async def catalog_refresh(request: Request) -> JSONResponse:
             status_code=503,
         )
     if hub is not None:
-        ok = await registry.refresh_from_hub(hub)
+        ok = await registry.refresh_from_hub(hub, fetch_docs=False, run_probes=False)
     elif upstream is not None:
         ok = await registry.refresh_from_upstream(upstream)
     else:

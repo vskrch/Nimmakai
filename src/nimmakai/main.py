@@ -113,10 +113,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # Defer initial catalog refresh to background — don't block startup
             async def _initial_refresh() -> None:
                 try:
+                    # Skip docs on initial refresh — too slow for startup
                     await registry.refresh_from_hub(
                         hub,
-                        fetch_docs=settings.catalog_fetch_docs,
-                        run_probes=settings.catalog_run_probes,
+                        fetch_docs=False,
+                        run_probes=False,
                     )
                 except Exception:
                     logger.exception("initial catalog refresh failed")

@@ -35,8 +35,8 @@ class DocModel:
 async def fetch_models_md(
     base_url: str = "https://build.nvidia.com/models.md",
     *,
-    max_pages: int = 5,
-    timeout: float = 30.0,
+    max_pages: int = 3,
+    timeout: float = 10.0,
 ) -> list[DocModel]:
     """Fetch paginated models.md and parse entries."""
     out: list[DocModel] = []
