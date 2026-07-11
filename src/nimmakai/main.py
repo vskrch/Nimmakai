@@ -109,15 +109,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             fallback = FallbackExecutor(
                 upstream, registry, settings, stats=routing_stats, hub=hub
             )
-            has_any_keys = any(
-                rt.config.resolved_keys() for rt in hub.runtimes.values()
-            )
-            if has_any_keys:
-                await registry.refresh_from_hub(
-                    hub,
-                    fetch_docs=settings.catalog_fetch_docs,
-                    run_probes=settings.catalog_run_probes,
-                )
+
+            # Defer initial catalog refresh to background — don't block startup
+            async def _initial_refresh() -> None:
+                try:
+                    await registry.refresh_from_hub(
+                        hub,
+                        fetch_docs=settings.catalog_fetch_docs,
+                        run_probes=settings.catalog_run_probes,
+                    )
+                except Exception:
+                    logger.exception("initial catalog refresh failed")
+
+            asyncio.create_task(_initial_refresh())
 
             async def _refresh_loop() -> None:
                 assert registry is not None
