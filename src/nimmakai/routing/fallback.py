@@ -232,9 +232,18 @@ class FallbackExecutor:
                 len(raw),
             )
             available = raw
-        # Prefer healthy heads first (self-heal soft demotion of cooldowns)
+        # Adaptive: best sticky order → respondings first (no recompute delay)
         if available and hasattr(self.registry, "health"):
-            available = self.registry.health.health_reorder(available)
+            if getattr(self.settings, "adaptive_routing", True):
+                available = self.registry.health.health_reorder(available)
+            else:
+                available = self.registry.health.health_reorder(available)
+        # Drop models still cooling — fail-fast skip (don't burn TTFT on them)
+        if available and hasattr(self.registry, "health"):
+            hot = [m for m in available if not self.registry.health.is_unhealthy(m)]
+            cold = [m for m in available if self.registry.health.is_unhealthy(m)]
+            # Keep 1–2 cold at end as last resort only
+            available = hot + cold[:2]
         chain = available[: max(1, max_n)]
         return chain
 

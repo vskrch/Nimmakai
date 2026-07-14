@@ -323,7 +323,7 @@ async def rankings_refresh(request: Request) -> JSONResponse:
 
 @router.get("/admin/rankings")
 async def rankings_view(request: Request) -> JSONResponse:
-    """Inspect sticky precomputed best-model cache."""
+    """Inspect sticky precomputed best-model cache + live adaptive order."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
     require_proxy_auth(request, settings)
     registry = getattr(request.app.state, "registry", None)
@@ -332,18 +332,29 @@ async def rankings_view(request: Request) -> JSONResponse:
             {"error": {"message": "Catalog not loaded", "code": "nimmakai_catalog_empty"}},
             status_code=503,
         )
+    sticky = list(registry.dynamic_chains.get("coding_agentic", [])[:15])
+    adaptive = registry.health_reorder(sticky)
     return JSONResponse(
         {
             "sticky": registry.rankings_sticky,
             "frozen": registry.ladder.frozen,
+            "adaptive_routing": getattr(settings, "adaptive_routing", True),
             "computed_at": registry.ladder.computed_at,
-            "best_coding": registry.dynamic_chains.get("coding_agentic", [])[:15],
-            "best_chat": registry.dynamic_chains.get("chat_fast", [])[:10],
+            "best_coding_sticky": sticky,
+            "best_coding_adaptive": adaptive,
+            "best_coding": adaptive,  # what requests actually try first
+            "best_chat": registry.health_reorder(
+                list(registry.dynamic_chains.get("chat_fast", [])[:10])
+            ),
             "best_reasoning": registry.dynamic_chains.get("reasoning", [])[:10],
+            "responsive": {
+                m: round(registry.health.responsive_score(m), 3) for m in adaptive[:8]
+            },
             "ladders": registry.ladder.snapshot(),
             "hint": (
-                "Rankings are precomputed at startup and frozen. "
-                "POST /admin/catalog/refresh or /admin/rankings/refresh to recompute."
+                "Sticky quality cache is precomputed at startup. "
+                "Each request auto-adapts: currently responding models jump to the front. "
+                "POST /admin/catalog/refresh to recompute the quality cache."
             ),
         }
     )

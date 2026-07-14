@@ -42,11 +42,13 @@ class Settings(BaseSettings):
     log_level: str = "info"
     upstream_timeout: float = 300.0
     default_model: str | None = None
-    # Streaming: TTFT = wait for first token; idle = max gap between chunks.
-    # 10s mid-stream was killing Cursor/agent sessions (H18 / TimeoutError).
-    stream_ttft_timeout_seconds: float = 90.0
+    # Streaming: short TTFT = fail-fast to next model if not responding;
+    # long idle once first token arrives (Cursor/agent safe).
+    stream_ttft_timeout_seconds: float = 12.0
     stream_idle_timeout_seconds: float = 180.0
     request_log_size: int = 200
+    # Adaptive: always prefer currently responding models at request time
+    adaptive_routing: bool = True
 
     # Catalog / routing
     models_config_path: str = "config/models.yaml"
@@ -79,10 +81,10 @@ class Settings(BaseSettings):
     # One-time: seed free-provider templates (no keys) into SQLite on first boot
     sqlite_seed_free_presets: bool = True
 
-    # Account safety
-    safety_jitter_enabled: bool = True
-    safety_jitter_ms_min: float = 20.0
-    safety_jitter_ms_max: float = 120.0
+    # Account safety — jitter off by default for Cursor "no delay"
+    safety_jitter_enabled: bool = False
+    safety_jitter_ms_min: float = 0.0
+    safety_jitter_ms_max: float = 0.0
     nim_rpd_limit: int = 2000
     nim_max_in_flight_per_key: int = 3
     global_max_in_flight: int = 0  # 0 = auto (keys * per-key)

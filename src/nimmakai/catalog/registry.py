@@ -470,6 +470,7 @@ class ModelRegistry:
         return filtered if filtered else list(chain)
 
     def health_reorder(self, chain: list[str]) -> list[str]:
+        """Request-time adaptive reorder: best + currently responding first."""
         return self.health.health_reorder(chain)
 
     def record_outcome(
