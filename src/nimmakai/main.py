@@ -7,9 +7,10 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
+from typing import Any
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 
@@ -23,6 +24,7 @@ from nimmakai.config import Settings, get_settings
 from nimmakai.routes import admin, openai
 from nimmakai.routing import FallbackExecutor, IntentClassifier, ModelSelector, RoutingStats
 from nimmakai.safety import AccountGuard
+from nimmakai.upstream import UpstreamClient
 
 logger = logging.getLogger("nimmakai")
 
@@ -115,11 +117,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             async def _initial_refresh() -> None:
                 try:
                     # Skip docs on initial refresh — too slow for startup
-                    await registry.refresh_from_hub(
+                    ok = await registry.refresh_from_hub(
                         hub,
                         fetch_docs=False,
                         run_probes=False,
                     )
+                    if not ok:
+                        logger.warning(
+                            "initial catalog refresh returned no models — "
+                            "check provider API keys and base URLs"
+                        )
+                    else:
+                        logger.info(
+                            "initial catalog ready — %s live model(s)",
+                            len(registry.live_ids),
+                        )
                 except Exception:
                     logger.exception("initial catalog refresh failed")
 
@@ -192,21 +204,45 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[
+            "X-Nimmakai-Model",
+            "X-Nimmakai-Intent",
+            "X-Nimmakai-Key-Id",
+            "X-Nimmakai-Route-Mode",
+            "X-Nimmakai-Fallback-Index",
+            "X-Nimmakai-Provider",
+            "X-Nimmakai-Context-Length",
+            "X-Nimmakai-Requested-Model",
+            "X-Nimmakai-Rule-Id",
+        ],
     )
 
     app.include_router(admin.router)
     app.include_router(openai.router)
 
+    def _dashboard_html() -> HTMLResponse:
+        html_path = Path(__file__).parent / "static" / "index.html"
+        if html_path.is_file():
+            return HTMLResponse(
+                content=html_path.read_text(encoding="utf-8"),
+                headers={"Cache-Control": "no-cache"},
+            )
+        return HTMLResponse(content="<h1>Dashboard not found</h1>", status_code=404)
+
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:
         """Serve the web dashboard."""
-        html_path = Path(__file__).parent / "static" / "index.html"
-        if html_path.is_file():
-            return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
-        return HTMLResponse(content="<h1>Dashboard not found</h1>", status_code=404)
+        return _dashboard_html()
 
     @app.get("/")
-    async def root() -> dict:
+    async def root(request: Request) -> Any:
+        """
+        Browsers get the dashboard; API clients get the JSON discovery document.
+        """
+        accept = (request.headers.get("accept") or "").lower()
+        # Prefer dashboard for human browsers
+        if "text/html" in accept and "application/json" not in accept.split(",")[0]:
+            return _dashboard_html()
         return {
             "name": "nimmakai",
             "version": __version__,
@@ -217,6 +253,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "stats": "/stats",
             "catalog": "/catalog",
             "providers": "/admin/providers",
+            "status": "ok",
         }
 
     return app

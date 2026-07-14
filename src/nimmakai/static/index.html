@@ -91,6 +91,19 @@ tr:hover td { background: rgba(255, 255, 255, 0.01); }
 .badge.ok { background: rgba(16, 185, 129, 0.1); color: var(--green); } .badge.ok .dot { background: var(--green); }
 .badge.err { background: rgba(239, 68, 68, 0.1); color: var(--red); } .badge.err .dot { background: var(--red); }
 .badge.accent { background: rgba(139, 92, 246, 0.1); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.2); }
+.badge.free { background: rgba(16, 185, 129, 0.12); color: var(--green); border: 1px solid rgba(16, 185, 129, 0.25); }
+.badge.fast { background: rgba(59, 130, 246, 0.12); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.25); }
+
+/* Free provider preset grid */
+.preset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.preset-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; cursor: pointer; transition: all 0.2s; display: flex; flex-direction: column; gap: 8px; min-height: 140px; }
+.preset-card:hover { border-color: var(--border-focus); background: var(--card-hover); transform: translateY(-1px); }
+.preset-card.configured { opacity: 0.85; border-color: rgba(16, 185, 129, 0.3); }
+.preset-card h4 { font-size: 14px; font-weight: 600; }
+.preset-card p { font-size: 12px; color: var(--dim); line-height: 1.45; flex: 1; }
+.preset-card .tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.modal.wide { width: 560px; }
+select.input { appearance: auto; }
 
 /* ── Playground ── */
 .pg-layout { display: flex; gap: 24px; height: calc(100vh - 140px); }
@@ -243,12 +256,29 @@ tr:hover td { background: rgba(255, 255, 255, 0.01); }
 
     <!-- PROVIDERS -->
     <div class="page" id="pg-providers">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;gap:16px;flex-wrap:wrap">
         <div>
           <h2 style="font-size: 20px; font-weight: 600;">Providers</h2>
-          <p style="color: var(--dim); font-size: 13px; margin-top: 4px;">Manage API integrations.</p>
+          <p style="color: var(--dim); font-size: 13px; margin-top: 4px; max-width: 560px;">
+            Add free OpenAI-compatible endpoints. Every key’s models join the shared pool —
+            the router picks the best + fastest model across all of them.
+          </p>
         </div>
-        <button class="btn p" onclick="modal('add')">+ Add Provider</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" onclick="refreshCat()">Refresh Pool</button>
+          <button class="btn p" onclick="openAddCustom()">+ Custom Endpoint</button>
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:20px">
+        <div class="hd"><h3>Free / popular OpenAI-compatible</h3>
+          <span style="font-size:12px;color:var(--dim)">Click a card → paste keys → models merge into the pool</span>
+        </div>
+        <div class="bd" style="padding:16px">
+          <div class="preset-grid" id="preset-grid"><div style="color:var(--dim);font-size:13px">Loading presets…</div></div>
+        </div>
+      </div>
+      <div style="margin-bottom:12px">
+        <h3 style="font-size:14px;font-weight:600">Configured providers</h3>
       </div>
       <div id="prov-list"></div>
     </div>
@@ -279,21 +309,27 @@ tr:hover td { background: rgba(255, 255, 255, 0.01); }
 
 <!-- Modals -->
 <div class="modal-bg" id="m-add">
-  <div class="modal">
-    <div class="mhd"><h3>Add Provider</h3><span style="cursor:pointer;color:var(--dim)" onclick="modal()">&times;</span></div>
+  <div class="modal wide">
+    <div class="mhd"><h3 id="add-title">Add OpenAI-compatible endpoint</h3><span style="cursor:pointer;color:var(--dim)" onclick="modal()">&times;</span></div>
     <div class="mbd">
-      <div class="field"><label>Provider ID</label><input class="input" id="pf-id" placeholder="e.g. groq"></div>
+      <p id="add-desc" style="font-size:12px;color:var(--dim);line-height:1.5;margin-top:-4px"></p>
+      <input type="hidden" id="pf-preset">
+      <div class="field"><label>Provider ID</label><input class="input" id="pf-id" placeholder="e.g. groq (used as model prefix: groq/…)"></div>
       <div class="field"><label>Display Name</label><input class="input" id="pf-name" placeholder="e.g. Groq"></div>
-      <div class="field"><label>Base URL</label><input class="input" id="pf-url" placeholder="https://api.groq.com/openai/v1"></div>
-      <div class="field"><label>API Keys (comma-separated)</label><input class="input" id="pf-keys" placeholder="gsk-..."></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-        <div class="field"><label>RPM Limit</label><input class="input" id="pf-rpm" type="number" value="40"></div>
-        <div class="field"><label>RPD Limit</label><input class="input" id="pf-rpd" type="number" value="2000"></div>
+      <div class="field"><label>Base URL (OpenAI-compatible …/v1)</label><input class="input" id="pf-url" placeholder="https://api.groq.com/openai/v1"></div>
+      <div class="field"><label>API Keys (comma-separated — multi-key pooling)</label><input class="input" id="pf-keys" placeholder="gsk-... or paste several keys"></div>
+      <div class="field"><label>Optional: env var name for keys</label><input class="input" id="pf-env" placeholder="GROQ_API_KEYS (optional)"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+        <div class="field"><label>RPM / key</label><input class="input" id="pf-rpm" type="number" value="40"></div>
+        <div class="field"><label>RPD / key</label><input class="input" id="pf-rpd" type="number" value="2000"></div>
+        <div class="field"><label>Max in-flight</label><input class="input" id="pf-inflight" type="number" value="3"></div>
       </div>
+      <div id="test-result" style="font-size:12px;color:var(--dim);min-height:18px"></div>
     </div>
     <div class="mft">
       <button class="btn" onclick="modal()">Cancel</button>
-      <button class="btn p" onclick="addP()">Save Provider</button>
+      <button class="btn" onclick="testP()">Test connection</button>
+      <button class="btn p" onclick="addP()">Save &amp; merge models</button>
     </div>
   </div>
 </div>
@@ -333,7 +369,7 @@ tr:hover td { background: rgba(255, 255, 255, 0.01); }
 <div class="toast" id="toast"><div class="icon"></div><span id="toast-msg"></span></div>
 
 <script>
-let H = { pr: [], l: {} }, ALL_M = [];
+let H = { pr: [], l: {} }, ALL_M = [], BUSY = false;
 const INTENTS = {
   coding_agentic:{l:'Coding / Agentic',d:'Tools, multi-file, agents'},
   chat_fast:{l:'Chat / Q&A',d:'Conversation, summaries'},
@@ -344,6 +380,9 @@ const INTENTS = {
 };
 
 function $(id) { return document.getElementById(id); }
+function esc(s) {
+  return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 function go(p) {
   document.querySelectorAll('.page').forEach(e => e.classList.remove('active'));
   let el = $('pg-'+p); if (el) el.classList.add('active');
@@ -354,83 +393,191 @@ function go(p) {
   if(p==='providers') loadP();
   if(p==='models') loadM();
   if(p==='routing') loadR();
+  if(p==='playground') { if (!ALL_M.length) loadM(); }
 }
 function toast(m, err=false) {
   let t = $('toast');
   t.className = 'toast on ' + (err ? 'err' : 'ok');
   $('toast-msg').textContent = m;
-  setTimeout(() => t.className = 'toast', 3000);
+  setTimeout(() => t.className = 'toast', 3500);
 }
 function modal(id) {
   document.querySelectorAll('.modal-bg').forEach(m => m.classList.remove('on'));
-  if (id) $('m-'+id).classList.add('on');
+  if (id) {
+    let el = $('m-'+id);
+    if (el) el.classList.add('on');
+  }
+}
+function errMsg(body, fallback) {
+  if (!body) return fallback || 'Request failed';
+  if (typeof body === 'string') return body;
+  if (body.error?.message) return body.error.message;
+  if (body.detail?.error?.message) return body.detail.error.message;
+  if (typeof body.detail === 'string') return body.detail;
+  if (body.message) return body.message;
+  return fallback || 'Request failed';
 }
 
 // Auth
 function ak() { return localStorage.getItem('nk') || ''; }
 function sk(k) { localStorage.setItem('nk', k); }
-function hd() { return { Authorization: 'Bearer ' + ak(), 'Content-Type': 'application/json' }; }
-function doAuth() { sk($('akey').value); modal(); loadD(); }
+function hd(extra) {
+  let h = { 'Content-Type': 'application/json', ...(extra || {}) };
+  if (ak()) h.Authorization = 'Bearer ' + ak();
+  return h;
+}
+async function doAuth() {
+  let k = $('akey').value.trim();
+  if (!k) { toast('Enter your PROXY_API_KEYS value', true); return; }
+  sk(k);
+  // Validate against an authed endpoint
+  try {
+    let r = await fetch('/stats', { headers: hd() });
+    if (r.status === 401) {
+      toast('Invalid API key — check PROXY_API_KEYS', true);
+      localStorage.removeItem('nk');
+      return;
+    }
+    modal();
+    toast('Connected');
+    await boot();
+  } catch (e) {
+    toast('Cannot reach gateway: ' + e.message, true);
+  }
+}
 if (!ak()) modal('auth');
 
 async function api(p, o) {
-  let r = await fetch(p, { headers: hd(), ...(o||{}) });
-  if (r.status === 401) { modal('auth'); return null; }
-  return r.json();
+  try {
+    let r = await fetch(p, { headers: hd(), ...(o || {}) });
+    let body = null;
+    let ct = r.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      try { body = await r.json(); } catch (_) { body = null; }
+    } else {
+      let t = await r.text();
+      try { body = JSON.parse(t); } catch (_) { body = { message: t }; }
+    }
+    if (r.status === 401) {
+      modal('auth');
+      return null;
+    }
+    if (!r.ok) {
+      body = body || {};
+      body.__http_status = r.status;
+      body.__ok = false;
+    } else if (body && typeof body === 'object') {
+      body.__ok = true;
+    }
+    return body;
+  } catch (e) {
+    toast('Network error: ' + e.message, true);
+    return null;
+  }
 }
-async function ap(p, b) { return api(p, { method:'POST', body:JSON.stringify(b) }); }
+async function ap(p, b) { return api(p, { method:'POST', body: JSON.stringify(b) }); }
 async function ad(p) { return api(p, { method:'DELETE' }); }
 
 // Dash
 async function loadD() {
-  let h = await api('/health'); if(!h) return;
-  $('status-pill').innerHTML = h.version ? '<div class="dot"></div> Online (v'+h.version+')' : '<div class="dot" style="background:var(--red)"></div> Offline';
-  $('status-pill').style.borderColor = h.version ? 'var(--green)' : 'var(--red)';
-  
-  let s = await api('/stats');
+  let h = await api('/health');
+  if (!h) {
+    $('status-pill').innerHTML = '<div class="dot" style="background:var(--red)"></div> Offline';
+    $('status-pill').style.borderColor = 'var(--red)';
+    return;
+  }
+  let online = !!h.version;
+  let degraded = h.status === 'degraded';
+  $('status-pill').innerHTML = online
+    ? `<div class="dot" style="background:${degraded ? 'var(--blue)' : 'var(--green)'}"></div> ${degraded ? 'Degraded' : 'Online'} (v${esc(h.version)})`
+    : '<div class="dot" style="background:var(--red)"></div> Offline';
+  $('status-pill').style.borderColor = !online ? 'var(--red)' : (degraded ? 'var(--blue)' : 'var(--green)');
+
+  let s = ak() ? await api('/stats') : null;
   let p = h.providers || [];
-  let enabledP = p.filter(x=>x.enabled);
-  let statusText = h.catalog_ok && enabledP.length > 0 ? "Operational" : (enabledP.length === 0 ? "Degraded" : "Issues Detected");
-  let statusColor = statusText === "Operational" ? "var(--green)" : (statusText === "Degraded" ? "var(--blue)" : "var(--red)");
-  let statusSubText = statusText === "Operational" ? "Routing active" : (statusText === "Degraded" ? "No active providers" : "Catalog errors");
-  
+  let runtimeP = p.filter(x => x.runtime || (x.enabled && x.key_count > 0));
+  let live = h.live_models ?? s?.catalog?.live_model_count ?? 0;
+  let keys = h.keys_configured ?? h.nim_keys_configured ?? 0;
+  let statusText = (!runtimeP.length || keys === 0) ? 'Setup needed'
+    : (live === 0 ? 'No models' : (degraded ? 'Degraded' : 'Operational'));
+  let statusColor = statusText === 'Operational' ? 'var(--green)'
+    : (statusText === 'Setup needed' || statusText === 'No models' ? 'var(--red)' : 'var(--blue)');
+  let statusSub = statusText === 'Operational' ? 'Routing active'
+    : (statusText === 'Setup needed' ? 'Add API keys under Providers' : 'Refresh catalog or check keys');
+
   $('dash-stats').innerHTML = `
-    <div class="stat-box"><div class="label">Status</div><div class="val" style="color:${statusColor}">${statusText}</div><div class="sub">${statusSubText}</div></div>
-    <div class="stat-box"><div class="label">Providers</div><div class="val">${p.length}</div><div class="sub">${enabledP.length} active integrations</div></div>
-    <div class="stat-box"><div class="label">Live Models</div><div class="val">${s?.catalog?.live_model_count || 0}</div><div class="sub">across all APIs</div></div>
-    <div class="stat-box"><div class="label">Proxy Keys</div><div class="val">${h.nim_keys_configured}</div><div class="sub">Available for gateway</div></div>
+    <div class="stat-box"><div class="label">Status</div><div class="val" style="color:${statusColor}">${statusText}</div><div class="sub">${statusSub}</div></div>
+    <div class="stat-box"><div class="label">Providers</div><div class="val">${p.length}</div><div class="sub">${runtimeP.length} with active keys</div></div>
+    <div class="stat-box"><div class="label">Live Models</div><div class="val">${live}</div><div class="sub">across all APIs</div></div>
+    <div class="stat-box"><div class="label">Upstream Keys</div><div class="val">${keys}</div><div class="sub">${h.keys_available ?? 0} available now</div></div>
   `;
+
+  // Setup guidance when production is empty / misconfigured
+  let setup = '';
+  if (!h.proxy_auth_configured) {
+    setup += '<li><strong>PROXY_API_KEYS</strong> is not set on the server — set it in production env (or ALLOW_INSECURE_AUTH for local only).</li>';
+  }
+  if (keys === 0) {
+    setup += '<li><strong>No upstream keys.</strong> Set NIM_API_KEYS or add a provider (Groq, OpenRouter, etc.) with API keys.</li>';
+  }
+  if (live === 0 && keys > 0) {
+    setup += '<li><strong>Catalog empty.</strong> Open Models → Refresh Catalog, or wait for the background refresh (~a few seconds after boot).</li>';
+  }
+  if (setup) {
+    $('dash-stats').insertAdjacentHTML('afterend', `
+      <div class="card" id="setup-card">
+        <div class="hd"><h3>Production setup checklist</h3>
+          <button class="btn sm" onclick="refreshCat()">Refresh Catalog</button>
+        </div>
+        <div class="bd" style="color:var(--dim);line-height:1.6;font-size:14px">
+          <ol style="margin-left:20px;display:flex;flex-direction:column;gap:10px">${setup}</ol>
+        </div>
+      </div>`);
+  } else {
+    let sc = $('setup-card'); if (sc) sc.remove();
+  }
 }
 
 // Tracing
 async function loadT() {
-  let s = await api('/stats'); if(!s || !s.routing) return;
-  let rt = s.routing;
-  
+  let s = await api('/stats');
+  if (!s) {
+    $('trace-models').innerHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">Sign in with your proxy key to view usage.</div>';
+    return;
+  }
+  let rt = s.routing || {};
+  let modelTokens = rt.model_tokens || {};
+  let keyTokens = rt.key_tokens || {};
+
   let totalIn = 0, totalOut = 0;
+  let rows = Object.keys(modelTokens).sort((a,b) => {
+    let ta = (modelTokens[a].prompt_tokens||0)+(modelTokens[a].completion_tokens||0);
+    let tb = (modelTokens[b].prompt_tokens||0)+(modelTokens[b].completion_tokens||0);
+    return tb - ta;
+  });
   let mHTML = '<table style="margin-top:0"><thead><tr><th>Model</th><th>Prompt Tokens</th><th>Completion Tokens</th><th>Total</th></tr></thead><tbody>';
-  Object.keys(rt.model_tokens).sort((a,b)=> (rt.model_tokens[b].prompt_tokens+rt.model_tokens[b].completion_tokens) - (rt.model_tokens[a].prompt_tokens+rt.model_tokens[a].completion_tokens)).forEach(m => {
-    let mt = rt.model_tokens[m];
-    totalIn += mt.prompt_tokens; totalOut += mt.completion_tokens;
-    let sum = mt.prompt_tokens + mt.completion_tokens;
+  rows.forEach(m => {
+    let mt = modelTokens[m];
+    let pin = mt.prompt_tokens || 0, cout = mt.completion_tokens || 0;
+    totalIn += pin; totalOut += cout;
     mHTML += `<tr>
-      <td><strong>${m}</strong></td>
-      <td style="color:var(--dim)">${mt.prompt_tokens.toLocaleString()}</td>
-      <td style="color:var(--dim)">${mt.completion_tokens.toLocaleString()}</td>
-      <td style="color:var(--accent)">${sum.toLocaleString()}</td>
+      <td><strong>${esc(m)}</strong></td>
+      <td style="color:var(--dim)">${pin.toLocaleString()}</td>
+      <td style="color:var(--dim)">${cout.toLocaleString()}</td>
+      <td style="color:var(--accent)">${(pin+cout).toLocaleString()}</td>
     </tr>`;
   });
   mHTML += '</tbody></table>';
-  if(totalIn===0) mHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No tokens consumed yet. Try the Playground.</div>';
+  if (!rows.length) mHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No tokens consumed yet. Try the Playground.</div>';
   $('trace-models').innerHTML = mHTML;
 
   let kHTML = '<table style="margin-top:0"><thead><tr><th>Key ID</th><th>Tokens</th></tr></thead><tbody>';
-  Object.keys(rt.key_tokens).forEach(k => {
-    let sum = rt.key_tokens[k].prompt_tokens + rt.key_tokens[k].completion_tokens;
-    kHTML += `<tr><td><span class="badge accent">${k}</span></td><td>${sum.toLocaleString()}</td></tr>`;
+  Object.keys(keyTokens).forEach(k => {
+    let sum = (keyTokens[k].prompt_tokens||0) + (keyTokens[k].completion_tokens||0);
+    kHTML += `<tr><td><span class="badge accent">${esc(k)}</span></td><td>${sum.toLocaleString()}</td></tr>`;
   });
   kHTML += '</tbody></table>';
-  if(totalIn===0) kHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No keys used yet.</div>';
+  if (!Object.keys(keyTokens).length) kHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No keys used yet.</div>';
   $('trace-keys').innerHTML = kHTML;
 
   $('trace-summary').innerHTML = `
@@ -447,16 +594,17 @@ function renderMsgs() {
     let metaHTML = '';
     if (m.meta) {
       metaHTML = `<div class="msg-meta" style="font-size: 11px; color: var(--dim); margin-top: 6px; display: flex; flex-wrap: wrap; gap: 8px;">
-        <span class="badge accent" style="padding: 2px 6px;">Routed to: ${m.meta.model}</span>
-        ${m.meta.intent ? `<span class="badge" style="background: rgba(255,255,255,0.05); padding: 2px 6px; color: var(--dim)">Intent: ${m.meta.intent}</span>` : ''}
-        ${m.meta.mode ? `<span class="badge" style="background: rgba(255,255,255,0.05); padding: 2px 6px; color: var(--dim)">Mode: ${m.meta.mode}</span>` : ''}
-        ${m.meta.fallback && m.meta.fallback !== '0' ? `<span class="badge err" style="padding: 2px 6px;">Fallback #${m.meta.fallback}</span>` : ''}
+        <span class="badge accent" style="padding: 2px 6px;">Routed to: ${esc(m.meta.model)}</span>
+        ${m.meta.intent ? `<span class="badge" style="background: rgba(255,255,255,0.05); padding: 2px 6px; color: var(--dim)">Intent: ${esc(m.meta.intent)}</span>` : ''}
+        ${m.meta.mode ? `<span class="badge" style="background: rgba(255,255,255,0.05); padding: 2px 6px; color: var(--dim)">Mode: ${esc(m.meta.mode)}</span>` : ''}
+        ${m.meta.provider ? `<span class="badge" style="background: rgba(255,255,255,0.05); padding: 2px 6px; color: var(--dim)">Provider: ${esc(m.meta.provider)}</span>` : ''}
+        ${m.meta.fallback && m.meta.fallback !== '0' ? `<span class="badge err" style="padding: 2px 6px;">Fallback #${esc(m.meta.fallback)}</span>` : ''}
       </div>`;
     }
-    return `<div class="msg ${m.role}">
+    return `<div class="msg ${m.role==='user'?'user':'bot'}">
       <div class="avatar">${m.role==='user'?'U':'N'}</div>
       <div style="display: flex; flex-direction: column;">
-        <div class="bubble">${m.content}</div>
+        <div class="bubble">${esc(m.content)}</div>
         ${metaHTML}
       </div>
     </div>`;
@@ -468,12 +616,16 @@ function populatePlaygroundModels() {
   let select = $('pg-model');
   let selectedVal = select.value;
   select.innerHTML = `
-    <option value="auto">auto (Intelligent)</option>
+    <option value="nimmakai/auto">nimmakai/auto (Intelligent)</option>
+    <option value="auto">auto</option>
     <option value="nimmakai/auto-cheap">nimmakai/auto-cheap (Cost-Aware)</option>
     <option value="nimmakai/auto-fast">nimmakai/auto-fast (Latency-Aware)</option>
   `;
   ALL_M.forEach(m => {
-    select.innerHTML += `<option value="${m.id}">${m.id}</option>`;
+    let o = document.createElement('option');
+    o.value = m.id;
+    o.textContent = m.id;
+    select.appendChild(o);
   });
   if ([...select.options].some(o => o.value === selectedVal)) {
     select.value = selectedVal;
@@ -481,33 +633,55 @@ function populatePlaygroundModels() {
 }
 
 async function sendMsg() {
+  if (BUSY) return;
   let text = $('pg-txt').value.trim();
-  if(!text) return;
+  if (!text) return;
+  if (!ak()) { modal('auth'); toast('Connect with your proxy key first', true); return; }
   $('pg-txt').value = '';
   msgs.push({role:'user', content:text});
-  renderMsgs();
-
-  let reqMsgs = [];
+  // Build OpenAI message list (map bot → assistant; skip empty drafts)
+  let apiMsgs = [];
   let sys = $('pg-system').value.trim();
-  if(sys) reqMsgs.push({role:'system', content:sys});
-  reqMsgs.push(...msgs);
+  if (sys) apiMsgs.push({role:'system', content:sys});
+  for (let m of msgs) {
+    if (m.role === 'user') apiMsgs.push({role:'user', content:m.content});
+    else if (m.role === 'bot' && m.content) apiMsgs.push({role:'assistant', content:m.content});
+  }
 
   msgs.push({role:'bot', content:''});
-  
+  renderMsgs();
+  BUSY = true;
+
   try {
     let res = await fetch('/v1/chat/completions', {
       method: 'POST',
       headers: hd(),
       body: JSON.stringify({
-        model: $('pg-model').value,
-        messages: reqMsgs,
+        model: $('pg-model').value || 'nimmakai/auto',
+        messages: apiMsgs,
         stream: true
       })
     });
-    
-    if(!res.ok) {
-      msgs[msgs.length-1].content = `Error: ${res.statusText}`;
+
+    if (res.status === 401) {
+      msgs[msgs.length-1].content = 'Unauthorized — re-enter your PROXY_API_KEYS value.';
+      modal('auth');
       renderMsgs();
+      return;
+    }
+
+    if (!res.ok) {
+      let errText = await res.text();
+      let msg = res.statusText;
+      try {
+        let j = JSON.parse(errText);
+        msg = errMsg(j, msg);
+      } catch (_) {
+        if (errText) msg = errText.slice(0, 400);
+      }
+      msgs[msgs.length-1].content = `Error ${res.status}: ${msg}`;
+      renderMsgs();
+      toast(msg, true);
       return;
     }
 
@@ -515,112 +689,367 @@ async function sendMsg() {
     let intentRoute = res.headers.get('X-Nimmakai-Intent');
     let routeMode = res.headers.get('X-Nimmakai-Route-Mode');
     let fallbackIndex = res.headers.get('X-Nimmakai-Fallback-Index');
-    
+    let provider = res.headers.get('X-Nimmakai-Provider');
     if (modelRoute) {
       msgs[msgs.length-1].meta = {
         model: modelRoute,
         intent: intentRoute,
         mode: routeMode,
-        fallback: fallbackIndex
+        fallback: fallbackIndex,
+        provider: provider
       };
     }
 
-    let reader = res.body.getReader();
-    let decoder = new TextDecoder("utf-8");
-    let done = false;
-    let buffer = "";
+    // JSON error body disguised as stream
+    let ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json') && !ct.includes('text/event-stream')) {
+      let j = await res.json();
+      msgs[msgs.length-1].content = errMsg(j, 'Request failed');
+      renderMsgs();
+      return;
+    }
 
-    while(!done) {
+    let reader = res.body.getReader();
+    let decoder = new TextDecoder('utf-8');
+    let done = false;
+    let buffer = '';
+    let gotContent = false;
+
+    while (!done) {
       let {value, done: d} = await reader.read();
       done = d;
-      if(value) {
+      if (value) {
         buffer += decoder.decode(value, {stream: true});
         let parts = buffer.split('\n');
         buffer = parts.pop();
-        
-        for(let part of parts) {
+        for (let part of parts) {
           let line = part.trim();
-          if(!line) continue;
-          if(line.startsWith('data: ')) {
-            let dataStr = line.slice(6).trim();
-            if(dataStr === '[DONE]') continue;
+          if (!line) continue;
+          if (line.startsWith('data:')) {
+            let dataStr = line.slice(5).trim();
+            if (dataStr === '[DONE]') continue;
             try {
               let data = JSON.parse(dataStr);
-              if(data.choices && data.choices[0].delta && data.choices[0].delta.content) {
-                msgs[msgs.length-1].content += data.choices[0].delta.content;
+              if (data.error) {
+                msgs[msgs.length-1].content += (msgs[msgs.length-1].content ? '\n' : '') + errMsg(data, 'stream error');
+                renderMsgs();
+                continue;
+              }
+              let delta = data.choices && data.choices[0] && data.choices[0].delta;
+              let piece = delta && (delta.content || delta.reasoning_content);
+              if (piece) {
+                msgs[msgs.length-1].content += piece;
+                gotContent = true;
                 renderMsgs();
               }
-            } catch(e) {}
+            } catch (_) {}
           }
         }
       }
     }
+    if (!gotContent && !msgs[msgs.length-1].content) {
+      msgs[msgs.length-1].content = 'Empty response. Check that providers have valid keys and models are available (Models tab → Refresh).';
+    }
     renderMsgs();
-  } catch(e) {
+  } catch (e) {
     msgs[msgs.length-1].content = `Connection Error: ${e.message}`;
     renderMsgs();
+    toast(e.message, true);
+  } finally {
+    BUSY = false;
   }
 }
 
 // Providers, Models, Routing
+let PRESETS = [];
+let PROV_BY_ID = {};
+
+function openAddCustom() {
+  clearProviderForm();
+  $('add-title').textContent = 'Custom OpenAI-compatible endpoint';
+  $('add-desc').textContent = 'Any server with /v1/chat/completions + /v1/models (vLLM, Ollama, LiteLLM, LocalAI, OpenAI, …). Models join the unified pool.';
+  $('pf-preset').value = 'custom';
+  $('pf-id').readOnly = false;
+  modal('add');
+}
+
+function openPreset(presetId) {
+  let p = PRESETS.find(x => x.id === presetId);
+  if (!p) { openAddCustom(); return; }
+  if (p.custom) { openAddCustom(); return; }
+  clearProviderForm();
+  $('add-title').textContent = `Add ${p.name}`;
+  $('add-desc').textContent = (p.description || '') + (p.signup_url ? `  ·  Get a key: ${p.signup_url}` : '');
+  $('pf-preset').value = p.id;
+  $('pf-id').value = p.id;
+  $('pf-id').readOnly = true;
+  $('pf-name').value = p.name || p.id;
+  $('pf-url').value = p.base_url || '';
+  $('pf-env').value = p.api_keys_env || '';
+  $('pf-rpm').value = p.rpm_limit ?? 40;
+  $('pf-rpd').value = p.rpd_limit ?? 2000;
+  $('pf-inflight').value = p.max_in_flight_per_key ?? 3;
+  // Prefill keys empty; if already configured, edit mode
+  let existing = PROV_BY_ID[p.id];
+  if (existing) {
+    $('add-title').textContent = `Update ${p.name}`;
+    $('add-desc').textContent = `Already configured (${existing.key_count || 0} keys). Paste new keys to replace, or leave empty to keep existing keys when only changing limits.`;
+  }
+  modal('add');
+  $('pf-keys').focus();
+}
+
+function openEditProvider(id) {
+  let p = PROV_BY_ID[id];
+  if (!p) return;
+  clearProviderForm();
+  $('add-title').textContent = `Edit ${p.name || id}`;
+  $('add-desc').textContent = 'Update keys or base URL. Models re-merge into the pool on save.';
+  $('pf-preset').value = id;
+  $('pf-id').value = id;
+  $('pf-id').readOnly = true;
+  $('pf-name').value = p.name || id;
+  $('pf-url').value = p.base_url || '';
+  $('pf-env').value = p.api_keys_env || '';
+  $('pf-rpm').value = p.rpm_limit ?? 40;
+  $('pf-rpd').value = p.rpd_limit ?? 2000;
+  $('pf-inflight').value = p.max_in_flight_per_key ?? 3;
+  $('pf-keys').placeholder = 'Leave empty to keep existing keys, or paste new keys';
+  modal('add');
+}
+
+function clearProviderForm() {
+  $('pf-preset').value = '';
+  $('pf-id').value = '';
+  $('pf-id').readOnly = false;
+  $('pf-name').value = '';
+  $('pf-url').value = '';
+  $('pf-keys').value = '';
+  $('pf-keys').placeholder = 'gsk-... or paste several keys';
+  $('pf-env').value = '';
+  $('pf-rpm').value = 40;
+  $('pf-rpd').value = 2000;
+  $('pf-inflight').value = 3;
+  $('test-result').textContent = '';
+  $('test-result').style.color = 'var(--dim)';
+}
+
+function collectProviderBody() {
+  let keys = $('pf-keys').value.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+  let b = {
+    id: $('pf-id').value.trim().toLowerCase(),
+    name: $('pf-name').value.trim(),
+    base_url: $('pf-url').value.trim().replace(/\/+$/, ''),
+    rpm_limit: Number($('pf-rpm').value) || 40,
+    rpd_limit: Number($('pf-rpd').value) || 2000,
+    max_in_flight_per_key: Number($('pf-inflight').value) || 3,
+    enabled: true,
+  };
+  let env = $('pf-env').value.trim();
+  if (env) b.api_keys_env = env;
+  if (keys.length) b.api_keys = keys;
+  let preset = $('pf-preset').value.trim();
+  if (preset && preset !== 'custom') b.preset = preset;
+  return b;
+}
+
+async function testP() {
+  let b = collectProviderBody();
+  let body = {};
+  if (PROV_BY_ID[b.id] && !b.api_keys) {
+    body = { id: b.id };
+  } else {
+    body = { base_url: b.base_url, api_keys: b.api_keys || [] };
+  }
+  if (!body.id && !body.base_url) {
+    toast('Base URL required to test', true);
+    return;
+  }
+  if (!body.id && !(body.api_keys && body.api_keys.length)) {
+    toast('Paste at least one API key to test', true);
+    return;
+  }
+  $('test-result').textContent = 'Testing…';
+  let r = await ap('/admin/providers/test', body);
+  if (r && r.ok) {
+    let sample = (r.sample_models || []).slice(0, 4).join(', ');
+    $('test-result').style.color = 'var(--green)';
+    $('test-result').textContent = `${r.message || 'OK'}${sample ? ' · ' + sample : ''}`;
+    toast(r.message || 'Connection OK');
+  } else {
+    $('test-result').style.color = 'var(--red)';
+    $('test-result').textContent = errMsg(r, 'Test failed');
+    toast(errMsg(r, 'Test failed'), true);
+  }
+}
+
+function renderPresets(configuredIds) {
+  let list = PRESETS.filter(p => p.id !== 'nim'); // nim is built-in; show custom + free
+  if (!list.length) {
+    $('preset-grid').innerHTML = '<div style="color:var(--dim);font-size:13px">No presets loaded.</div>';
+    return;
+  }
+  $('preset-grid').innerHTML = list.map(p => {
+    let conf = configuredIds.has(p.id) && !p.custom;
+    let tags = [];
+    if (p.free_tier) tags.push('<span class="badge free">Free</span>');
+    if (p.speed_tier === 'ultra' || p.speed_tier === 'fast') tags.push('<span class="badge fast">Fast</span>');
+    if (p.custom) tags.push('<span class="badge accent">Custom</span>');
+    if (conf) tags.push('<span class="badge ok"><span class="dot"></span>Added</span>');
+    return `<div class="preset-card ${conf ? 'configured' : ''}" data-preset="${esc(p.id)}">
+      <h4>${esc(p.name)}</h4>
+      <p>${esc(p.description || '')}</p>
+      <div class="tags">${tags.join('')}</div>
+    </div>`;
+  }).join('');
+  $('preset-grid').querySelectorAll('[data-preset]').forEach(el => {
+    el.onclick = () => openPreset(el.getAttribute('data-preset'));
+  });
+}
+
 async function loadP() {
-  let r = await api('/admin/providers'); if(!r) return;
+  let r = await api('/admin/providers');
+  if (!r) {
+    $('prov-list').innerHTML = '<div class="card"><div class="bd" style="text-align:center;color:var(--dim)">Auth required to manage providers.</div></div>';
+    $('preset-grid').innerHTML = '<div style="color:var(--dim);font-size:13px">Sign in to load free provider presets.</div>';
+    return;
+  }
+  PRESETS = r.presets || [];
+  if (!PRESETS.length) {
+    let pr = await api('/admin/providers/presets');
+    if (pr) PRESETS = pr.presets || [];
+  }
   let ps = r.providers || [];
-  if(!ps.length) { $('prov-list').innerHTML = '<div class="card"><div class="bd" style="text-align:center;color:var(--dim)">No providers added yet.</div></div>'; return; }
+  PROV_BY_ID = {};
+  ps.forEach(p => { PROV_BY_ID[p.id] = p; });
+  renderPresets(new Set(ps.map(p => p.id)));
+
+  if (!ps.length) {
+    $('prov-list').innerHTML = '<div class="card"><div class="bd" style="text-align:center;color:var(--dim)">No providers yet. Click a free preset above or add a custom endpoint.</div></div>';
+    return;
+  }
   $('prov-list').innerHTML = `
     <div class="card" style="padding:0">
       <table>
         <thead>
-          <tr><th>Provider</th><th>Base URL</th><th>Status</th><th>Actions</th></tr>
+          <tr><th>Provider</th><th>Base URL</th><th>Keys</th><th>Status</th><th>Actions</th></tr>
         </thead>
         <tbody>
-          ${ps.map(p => `
-            <tr>
-              <td><strong>${p.name}</strong><br/><span style="font-size:11px;color:var(--dim)">${p.id}</span></td>
-              <td style="color:var(--dim)">${p.base_url}</td>
-              <td><span class="badge ${p.enabled ? 'ok' : 'err'}"><span class="dot"></span>${p.enabled ? 'Active' : 'Disabled'}</span></td>
-              <td>
-                <button class="btn sm" onclick="ap('/admin/providers',{id:'${p.id}',enabled:${!p.enabled}}).then(()=>loadP())">${p.enabled ? 'Disable' : 'Enable'}</button>
-                ${!p.builtin ? `<button class="btn sm d" onclick="if(confirm('Remove?')) ad('/admin/providers/${p.id}').then(()=>loadP())">Delete</button>` : ''}
+          ${ps.map(p => {
+            let active = p.runtime || (p.enabled && (p.key_count || 0) > 0);
+            let status = !p.enabled ? 'Disabled' : (active ? 'In pool' : 'No keys');
+            return `<tr>
+              <td><strong>${esc(p.name)}</strong><br/><span style="font-size:11px;color:var(--dim)">${esc(p.id)}/…</span></td>
+              <td style="color:var(--dim);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.base_url)}">${esc(p.base_url)}</td>
+              <td style="color:var(--dim)">${p.key_count ?? 0}${p.available_keys != null ? ` <span style="color:var(--muted)">(${p.available_keys} free)</span>` : ''}</td>
+              <td><span class="badge ${active ? 'ok' : 'err'}"><span class="dot"></span>${status}</span></td>
+              <td style="display:flex;gap:6px;flex-wrap:wrap">
+                <button class="btn sm" data-edit="${esc(p.id)}">Keys / Edit</button>
+                <button class="btn sm" data-test-id="${esc(p.id)}">Test</button>
+                <button class="btn sm" data-toggle="${esc(p.id)}" data-en="${p.enabled ? '0' : '1'}">${p.enabled ? 'Disable' : 'Enable'}</button>
+                ${!p.builtin ? `<button class="btn sm d" data-del="${esc(p.id)}">Delete</button>` : ''}
               </td>
-            </tr>
-          `).join('')}
+            </tr>`;
+          }).join('')}
         </tbody>
       </table>
     </div>
+    ${r.pool_note ? `<p style="margin-top:12px;font-size:12px;color:var(--muted)">${esc(r.pool_note)}</p>` : ''}
   `;
+  $('prov-list').querySelectorAll('[data-edit]').forEach(btn => {
+    btn.onclick = () => openEditProvider(btn.getAttribute('data-edit'));
+  });
+  $('prov-list').querySelectorAll('[data-test-id]').forEach(btn => {
+    btn.onclick = async () => {
+      let id = btn.getAttribute('data-test-id');
+      toast('Testing ' + id + '…');
+      let res = await ap('/admin/providers/test', { id });
+      if (res && res.ok) toast(res.message || 'OK');
+      else toast(errMsg(res, 'Test failed'), true);
+    };
+  });
+  $('prov-list').querySelectorAll('[data-toggle]').forEach(btn => {
+    btn.onclick = async () => {
+      let id = btn.getAttribute('data-toggle');
+      let en = btn.getAttribute('data-en') === '1';
+      let res = await ap('/admin/providers', { id, enabled: en });
+      if (res && res.ok) { toast(en ? 'Enabled — models rejoin pool' : 'Disabled'); loadP(); loadD(); refreshCat(true); }
+      else toast(errMsg(res, 'Update failed'), true);
+    };
+  });
+  $('prov-list').querySelectorAll('[data-del]').forEach(btn => {
+    btn.onclick = async () => {
+      if (!confirm('Remove provider from the pool?')) return;
+      let id = btn.getAttribute('data-del');
+      let res = await ad('/admin/providers/' + encodeURIComponent(id));
+      if (res && res.ok !== false) { toast('Removed'); loadP(); loadD(); refreshCat(true); }
+      else toast(errMsg(res, 'Delete failed'), true);
+    };
+  });
 }
 async function addP() {
-  let b = {id:$('pf-id').value.trim(), name:$('pf-name').value.trim(), base_url:$('pf-url').value.trim(), api_keys:$('pf-keys').value.split(',').map(s=>s.trim()).filter(Boolean), rpm_limit:Number($('pf-rpm').value)||40, rpd_limit:Number($('pf-rpd').value)||2000, enabled:true};
-  if(!b.id || !b.base_url) { toast('ID and URL required', true); return; }
-  let r = await ap('/admin/providers', b);
-  if(!r||!r.ok) { 
-    toast(r?.error?.message || r?.detail?.error?.message || 'Failed to add provider', true); 
-    return; 
+  let b = collectProviderBody();
+  if (!b.id || !b.base_url) { toast('ID and Base URL required', true); return; }
+  let existing = PROV_BY_ID[b.id];
+  if (!b.api_keys && !b.api_keys_env && !existing) {
+    toast('At least one API key is required', true);
+    return;
   }
-  toast('Provider added'); 
-  modal(); 
-  $('pf-id').value = ''; $('pf-name').value = ''; $('pf-url').value = ''; $('pf-keys').value = '';
-  loadP();
+  // Editing without new keys: send empty omit — backend keeps existing
+  let r = await ap('/admin/providers', b);
+  if (!r || r.ok === false || r.__ok === false) {
+    toast(errMsg(r, 'Failed to save provider'), true);
+    return;
+  }
+  toast(r.message || `Saved — ${r.live_model_count ?? '?'} models in pool`);
+  modal();
+  clearProviderForm();
+  await loadP();
+  await loadM();
+  loadD();
 }
 
 async function loadM() {
-  let r = await api('/v1/models'); if(!r) return;
-  ALL_M = (r.data||[]).filter(m => m.id!=='nimmakai/auto');
+  let r = await api('/v1/models');
+  if (!r) {
+    $('mtable').innerHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">Auth required to list models.</div>';
+    return;
+  }
+  if (r.__ok === false) {
+    $('mtable').innerHTML = `<div style="padding:32px;text-align:center;color:var(--dim)">${esc(errMsg(r, 'Failed to load models'))}</div>`;
+    return;
+  }
+  ALL_M = (r.data || []).filter(m => m.id && !String(m.id).startsWith('nimmakai/'));
   renderM(ALL_M);
   populatePlaygroundModels();
 }
 function renderM(ms) {
-  if(!ms.length) { $('mtable').innerHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No models available.</div>'; return; }
-  $('mtable').innerHTML = '<table><thead><tr><th>Model</th><th>Provider</th><th>Context</th></tr></thead><tbody>' + 
+  if (!ms.length) {
+    $('mtable').innerHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No models available. Add provider keys and click Refresh Catalog.</div>';
+    return;
+  }
+  $('mtable').innerHTML = '<table><thead><tr><th>Model</th><th>Provider</th><th>Context</th></tr></thead><tbody>' +
     ms.map(m => {
-      let parts = m.id.split('/'), prov = parts[0], mod = parts.slice(1).join('/');
+      let parts = m.id.split('/'), prov = parts[0], mod = parts.slice(1).join('/') || m.id;
       let ctx = m.context_length || m.max_model_len || '—';
-      return `<tr><td><strong>${mod}</strong></td><td><span class="badge accent">${prov}</span></td><td style="color:var(--dim)">${ctx.toLocaleString()}</td></tr>`;
+      let ctxStr = typeof ctx === 'number' ? ctx.toLocaleString() : esc(ctx);
+      return `<tr><td><strong>${esc(mod)}</strong></td><td><span class="badge accent">${esc(prov)}</span></td><td style="color:var(--dim)">${ctxStr}</td></tr>`;
     }).join('') + '</tbody></table>';
 }
-function filterM() { let q = $('msearch').value.toLowerCase(); renderM(ALL_M.filter(m => m.id.toLowerCase().includes(q))); }
-async function refreshCat() { toast('Refreshing...'); await ap('/admin/catalog/refresh',{}); loadM(); toast('Done'); }
+function filterM() {
+  let q = $('msearch').value.toLowerCase();
+  renderM(ALL_M.filter(m => m.id.toLowerCase().includes(q)));
+}
+async function refreshCat(silent) {
+  if (!silent) toast('Refreshing catalog…');
+  let r = await ap('/admin/catalog/refresh', {});
+  if (!r || r.__ok === false) {
+    toast(errMsg(r, 'Catalog refresh failed'), true);
+    return;
+  }
+  await loadM();
+  if (!silent) toast(r.ok === false ? 'Refresh completed with warnings' : 'Catalog updated');
+}
 
 // Pinned models modal editor logic
 let currentPins = [];
@@ -628,10 +1057,8 @@ function openPinModal(intent) {
   $('pin-intent').value = intent;
   let intentMeta = INTENTS[intent];
   $('pin-title').textContent = `Pin Models for: ${intentMeta.l}`;
-  
   let pref = H.pr.find(x => x.intent === intent);
   currentPins = pref ? [...pref.chain] : [];
-  
   renderPinEditor();
   modal('pin');
 }
@@ -642,23 +1069,29 @@ function renderPinEditor() {
     selectedDiv.innerHTML = '<span style="color: var(--muted); font-size: 12px;">No models pinned. Intelligent auto-routing active.</span>';
   } else {
     selectedDiv.innerHTML = currentPins.map((m, idx) => `
-      <span class="badge accent" style="cursor: pointer; padding: 6px 10px; border-radius: 20px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;" onclick="removePin(${idx})">
-        ${m} <span style="font-weight: bold; font-size: 14px;">&times;</span>
+      <span class="badge accent" style="cursor: pointer; padding: 6px 10px; border-radius: 20px; font-size: 12px; display: inline-flex; align-items: center; gap: 4px;" data-rm="${idx}">
+        ${esc(m)} <span style="font-weight: bold; font-size: 14px;">&times;</span>
       </span>
     `).join('');
+    selectedDiv.querySelectorAll('[data-rm]').forEach(el => {
+      el.onclick = () => { removePin(Number(el.getAttribute('data-rm'))); };
+    });
   }
-  
+
   let availableDiv = $('pin-available');
   let unpinned = ALL_M.filter(m => !currentPins.includes(m.id));
   if (unpinned.length === 0) {
-    availableDiv.innerHTML = '<div style="color: var(--dim); text-align: center; font-size: 12px; padding: 12px;">No other models available.</div>';
+    availableDiv.innerHTML = '<div style="color: var(--dim); text-align: center; font-size: 12px; padding: 12px;">No other models available. Load Models first.</div>';
   } else {
     availableDiv.innerHTML = unpinned.map(m => `
       <div style="padding: 6px 12px; border-radius: 6px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 4px;">
-        <span><strong>${m.id.split('/').slice(1).join('/')}</strong> <span style="font-size: 11px; color: var(--dim)">(${m.id.split('/')[0]})</span></span>
-        <button class="btn sm" onclick="addPin('${m.id}')">+</button>
+        <span><strong>${esc(m.id.split('/').slice(1).join('/') || m.id)}</strong> <span style="font-size: 11px; color: var(--dim)">(${esc(m.id.split('/')[0])})</span></span>
+        <button class="btn sm" data-add="${esc(m.id)}">+</button>
       </div>
     `).join('');
+    availableDiv.querySelectorAll('[data-add]').forEach(btn => {
+      btn.onclick = () => addPin(btn.getAttribute('data-add'));
+    });
   }
 }
 
@@ -668,7 +1101,6 @@ function addPin(modelId) {
     renderPinEditor();
   }
 }
-
 function removePin(idx) {
   currentPins.splice(idx, 1);
   renderPinEditor();
@@ -681,40 +1113,64 @@ async function savePin() {
     chain: currentPins,
     strict: false
   });
-  if (r && r.ok !== false) {
-    toast('Preferences updated');
+  if (r && (r.ok === true || r.cleared === true || r.__ok !== false)) {
+    toast(currentPins.length ? 'Preferences updated' : 'Pins cleared — auto-routing restored');
     modal();
     loadR();
   } else {
-    toast('Failed to save pins', true);
+    toast(errMsg(r, 'Failed to save pins'), true);
   }
 }
 
 async function loadR() {
-  let pr = await api('/preferences'); if(pr) H.pr = pr.preferences || [];
-  let l = await api('/ladder'); if(l) H.l = l.ladders || {};
-  
+  if (!ALL_M.length) await loadM();
+  let pr = await api('/preferences');
+  if (pr) H.pr = pr.preferences || [];
+  let l = await api('/ladder');
+  if (l && !l.error) H.l = l.ladders || {};
+  else if (l && l.error) H.l = {};
+
   $('prefs-list').innerHTML = Object.keys(INTENTS).map(k => {
-    let m = INTENTS[k], p = H.pr.find(x=>x.intent===k), ch = p?p.chain:[];
+    let m = INTENTS[k], p = H.pr.find(x => x.intent === k), ch = p ? p.chain : [];
     return `<div class="card" style="margin-bottom:12px"><div class="hd" style="padding:12px 20px">
-      <div><strong>${m.l}</strong> <span style="font-size:12px;color:var(--dim);margin-left:8px">${m.d}</span></div>
-      <div><button class="btn sm" onclick="openPinModal('${k}')">Edit Pin</button></div>
+      <div><strong>${esc(m.l)}</strong> <span style="font-size:12px;color:var(--dim);margin-left:8px">${esc(m.d)}</span></div>
+      <div><button class="btn sm" data-pin="${k}">Edit Pin</button></div>
     </div><div class="bd" style="padding:12px 20px;display:flex;gap:8px;flex-wrap:wrap">
-      ${ch.length ? ch.map(c=>`<span class="badge ok" style="background:rgba(255,255,255,0.05);color:var(--text);border:1px solid var(--border)">${c}</span>`).join('') : '<span style="font-size:12px;color:var(--muted)">Intelligent auto-routing</span>'}
+      ${ch.length ? ch.map(c => `<span class="badge ok" style="background:rgba(255,255,255,0.05);color:var(--text);border:1px solid var(--border)">${esc(c)}</span>`).join('') : '<span style="font-size:12px;color:var(--muted)">Intelligent auto-routing</span>'}
     </div></div>`;
   }).join('');
+  $('prefs-list').querySelectorAll('[data-pin]').forEach(btn => {
+    btn.onclick = () => openPinModal(btn.getAttribute('data-pin'));
+  });
 
-  $('ladders').innerHTML = Object.keys(H.l).map(k => {
-    let s = H.l[k], hd = s.ladder_head||[];
-    return `<div class="card" style="margin-bottom:12px"><div class="hd" style="padding:12px 20px"><strong>${INTENTS[k]?.l||k}</strong> <span class="badge accent" style="margin-left:8px">${s.ladder_len} models</span></div>
+  let ladderKeys = Object.keys(H.l || {});
+  if (!ladderKeys.length) {
+    $('ladders').innerHTML = '<div class="card"><div class="bd" style="color:var(--dim);text-align:center">No ladders yet — add providers and refresh the catalog.</div></div>';
+    return;
+  }
+  $('ladders').innerHTML = ladderKeys.map(k => {
+    let s = H.l[k], hd = s.ladder_head || [];
+    return `<div class="card" style="margin-bottom:12px"><div class="hd" style="padding:12px 20px"><strong>${esc(INTENTS[k]?.l || k)}</strong> <span class="badge accent" style="margin-left:8px">${s.ladder_len || 0} models</span></div>
       <div class="bd" style="padding:12px 20px;display:flex;flex-wrap:wrap;gap:8px">
-        ${hd.map((m,i)=>`<span class="badge" style="background:var(--bg-sidebar);border:1px solid ${i===0?'var(--accent)':'var(--border)'};color:var(--text)">${i===0?'⭐ ':''}${m} <span style="color:var(--dim);margin-left:4px">${s.scores_head[m]?.toFixed(1)||''}</span></span>`).join('')}
-        ${s.ladder_len>5 ? `<span style="font-size:11px;color:var(--muted);align-self:center">+${s.ladder_len-5} more</span>` : ''}
+        ${hd.map((m,i) => `<span class="badge" style="background:var(--bg-sidebar);border:1px solid ${i===0?'var(--accent)':'var(--border)'};color:var(--text)">${i===0?'⭐ ':''}${esc(m)} <span style="color:var(--dim);margin-left:4px">${s.scores_head && s.scores_head[m] != null ? Number(s.scores_head[m]).toFixed(1) : ''}</span></span>`).join('')}
+        ${(s.ladder_len||0) > 5 ? `<span style="font-size:11px;color:var(--muted);align-self:center">+${s.ladder_len-5} more</span>` : ''}
       </div></div>`;
   }).join('');
 }
 
-loadD();
+async function boot() {
+  await loadD();
+  if (ak()) {
+    await loadM();
+  }
+}
+
+// Periodic health refresh (production status)
+setInterval(() => {
+  if (document.visibilityState === 'visible') loadD();
+}, 30000);
+
+boot();
 </script>
 </body>
 </html>

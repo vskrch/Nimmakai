@@ -1,16 +1,11 @@
 # OpenAI-compatible providers (self-hosted OpenRouter-style)
 #
 # Built-in `nim` is always synced from NIM_BASE_URL / NIM_API_KEYS in .env.
-# Add more providers here or via POST /admin/providers.
+# Free providers auto-register when their env vars are set (GROQ_API_KEYS, …)
+# or add via the dashboard: Providers → free presets / Custom Endpoint.
 #
-# Example (Groq free tier — get a key at https://console.groq.com):
-# - id: groq
-#   name: Groq
-#   base_url: https://api.groq.com/openai/v1
-#   api_keys_env: GROQ_API_KEYS
-#   enabled: true
-#   rpm_limit: 30
-#   rpd_limit: 14400
+# All enabled providers with keys merge into one model pool; the router
+# scores quality × affinity × health × free-provider speed.
 
 providers:
   - id: nim
@@ -21,3 +16,24 @@ providers:
     builtin: true
     rpm_limit: 40
     rpd_limit: 2000
+
+# Optional free-tier examples (uncomment + set env, or use the admin UI):
+# - id: groq
+#   name: Groq
+#   base_url: https://api.groq.com/openai/v1
+#   api_keys_env: GROQ_API_KEYS
+#   enabled: true
+#   rpm_limit: 30
+#   rpd_limit: 14400
+# - id: cerebras
+#   name: Cerebras
+#   base_url: https://api.cerebras.ai/v1
+#   api_keys_env: CEREBRAS_API_KEYS
+#   enabled: true
+#   rpm_limit: 30
+# - id: openrouter
+#   name: OpenRouter
+#   base_url: https://openrouter.ai/api/v1
+#   api_keys_env: OPENROUTER_API_KEYS
+#   enabled: true
+#   rpm_limit: 20

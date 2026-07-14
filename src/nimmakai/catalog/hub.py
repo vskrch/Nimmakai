@@ -143,18 +143,37 @@ class ProviderHub:
                 await self._ensure_runtime(cfg)
         return ok
 
+    def has_runtime(self, provider_id: str) -> bool:
+        """True when provider has an active client with keys."""
+        rt = self.runtimes.get(provider_id.lower())
+        return rt is not None and rt.config.enabled and bool(rt.config.resolved_keys())
+
+    def active_provider_ids(self) -> set[str]:
+        return {pid for pid in self.runtimes if self.has_runtime(pid)}
+
     def client_for_model(self, model_id: str) -> tuple[UpstreamClient, str, str]:
         """
         Returns (upstream, provider_id, upstream_model_id).
+
+        Never silently sends a namespaced model to the wrong provider — that
+        was a production footgun (e.g. groq/... routed to NIM → 404 cascade).
+        Raises RuntimeError when the owning provider has no active runtime so
+        FallbackExecutor can advance to the next chain model.
         """
         pid, upstream_mid = split_provider_model(
             model_id, self.provider_ids, default_provider="nim"
         )
         rt = self.runtimes.get(pid)
+        if rt is not None and rt.config.enabled and rt.config.resolved_keys():
+            return rt.upstream, pid, upstream_mid
+
         if rt is None or not rt.config.enabled:
-            # fall back to default provider client
-            return self.default, pid, upstream_mid
-        return rt.upstream, pid, upstream_mid
+            raise RuntimeError(
+                f"provider '{pid}' is not available for model '{model_id}'"
+            )
+        raise RuntimeError(
+            f"provider '{pid}' has no API keys for model '{model_id}'"
+        )
 
     def namespace(self, provider_id: str, upstream_model_id: str) -> str:
         return namespace_model(provider_id, upstream_model_id)

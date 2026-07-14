@@ -22,7 +22,6 @@ from nimmakai.catalog.docs_fetcher import DocModel
 from nimmakai.catalog.families import (
     NEMOTRON_EXCLUDE,
     QWEN_EXCLUDE,
-    matches_family,
     version_key,
 )
 from nimmakai.catalog.health import ModelHealthStore
@@ -51,14 +50,34 @@ QUALITY_TIERS: list[tuple[str, str | None, float]] = [
     (r"deepseek.*r1", None, 97.0),
     (r"deepseek.*v4", None, 95.0),
     (r"deepseek.*v3", None, 89.0),
+    (r"deepseek.*coder", None, 86.0),
     (r"deepseek", None, 78.0),
-    # Kimi
-    (r"kimi.*2\.6", None, 96.0),
-    (r"kimi", None, 75.0),
+    # Kimi / Moonshot
+    (r"kimi.*2\.6|kimi.*k2", None, 96.0),
+    (r"kimi|moonshot", None, 78.0),
     # Grok
     (r"grok.*4\.5", None, 96.0),
     (r"grok.*4", None, 94.0),
+    (r"grok.*3", None, 88.0),
     (r"grok", None, 75.0),
+    # Claude (via OpenRouter etc.)
+    (r"claude.*opus.*4|claude-opus-4", None, 97.0),
+    (r"claude.*sonnet.*4|claude-sonnet-4", None, 94.0),
+    (r"claude.*3\.5.*sonnet|claude-3-5-sonnet", None, 90.0),
+    (r"claude.*haiku", None, 78.0),
+    (r"claude", None, 85.0),
+    # GPT / OpenAI
+    (r"gpt-4o(?!-mini)|gpt-4\.1(?!-mini)|o3(?!-mini)|o1(?!-mini)", None, 93.0),
+    (r"gpt-4o-mini|gpt-4\.1-mini|o3-mini|o4-mini", None, 80.0),
+    (r"gpt-4", None, 84.0),
+    (r"gpt-3\.5", None, 65.0),
+    # Gemini
+    (r"gemini.*2\.5.*pro|gemini-2\.5-pro", None, 94.0),
+    (r"gemini.*2\.5.*flash|gemini-2\.5-flash", None, 86.0),
+    (r"gemini.*2\.0|gemini-2", None, 84.0),
+    (r"gemini.*1\.5.*pro", None, 82.0),
+    (r"gemini.*flash", None, 78.0),
+    (r"gemini", None, 76.0),
     # Qwen frontier
     (r"qwen.*3\.5", r"397b", 95.0),
     (r"qwen.*3\.5", r"235b", 91.0),
@@ -67,6 +86,9 @@ QUALITY_TIERS: list[tuple[str, str | None, float]] = [
     (r"qwen.*3\.5", r"30b|32b", 76.0),
     (r"qwen.*3\.5", r"14b", 72.0),
     (r"qwen.*3\.5", r"7b|8b", 68.0),
+    (r"qwen.*2\.5", r"72b", 82.0),
+    (r"qwen.*2\.5", r"32b", 74.0),
+    (r"qwen.*2\.5", r"14b|7b", 68.0),
     # Qwen 3
     (r"qwen.*3(?!\.)", r"235b", 90.0),
     (r"qwen.*3(?!\.)", r"120b|122b", 86.0),
@@ -86,28 +108,38 @@ QUALITY_TIERS: list[tuple[str, str | None, float]] = [
     (r"nemotron.*nano", None, 68.0),
     (r"nemotron", None, 75.0),
     # GLM
-    (r"glm.*5\.2", None, 87.0),
+    (r"glm.*5\.2|glm-5", None, 87.0),
+    (r"glm.*4", None, 78.0),
     (r"glm", None, 75.0),
     # Step
     (r"step.*3\.7", None, 83.0),
     (r"step", None, 72.0),
     # MiniMax
-    (r"minimax.*m3", None, 81.0),
+    (r"minimax.*m3|minimax-text", None, 81.0),
     (r"minimax", None, 72.0),
     # Google Gemma
     (r"gemma.*4", r"31b|27b", 74.0),
     (r"gemma.*4", r"12b", 68.0),
+    (r"gemma.*3", r"27b", 70.0),
     (r"gemma", None, 65.0),
-    # Llama
-    (r"llama.*4", r"405b|400b", 88.0),
+    # Llama / Meta
+    (r"llama.*4", r"405b|400b|maverick|scout", 88.0),
     (r"llama.*4", r"70b|72b", 80.0),
     (r"llama.*4", r"8b|7b", 68.0),
+    (r"llama.*3\.3", r"70b", 80.0),
+    (r"llama.*3\.1", r"405b", 84.0),
+    (r"llama.*3\.1", r"70b", 76.0),
     (r"llama.*3", r"70b|72b", 78.0),
     (r"llama.*3", r"8b|7b", 64.0),
     (r"llama", None, 65.0),
-    # Mistral
+    # Mistral / Mixtral
     (r"mistral.*large", None, 82.0),
+    (r"mistral.*small|mistral.*nemo", None, 72.0),
+    (r"mixtral", None, 74.0),
     (r"mistral", None, 70.0),
+    # Groq-hosted popular free models
+    (r"llama-3\.3-70b", None, 80.0),
+    (r"llama-3\.1-8b", None, 64.0),
 ]
 
 # Compiled for speed
@@ -141,9 +173,12 @@ INTENT_AFFINITY: dict[str, dict[str, float]] = {
         "mimo": 1.40,
         "opencode": 1.40,
         "deepseek": 1.35,
+        "claude": 1.32,
         "kimi": 1.30,
         "qwen": 1.30,
         "grok": 1.20,
+        "gpt": 1.18,
+        "gemini": 1.15,
         "glm": 1.15,
         "nemotron": 1.10,
         "step": 1.05,
@@ -154,22 +189,30 @@ INTENT_AFFINITY: dict[str, dict[str, float]] = {
     },
     "chat_fast": {
         "nemotron": 1.25,
+        "gemini": 1.20,
+        "gpt": 1.15,
+        "gemma": 1.10,
         "glm": 1.10,
         "qwen": 1.05,
         "minimax": 1.05,
+        "llama": 1.05,
+        "mistral": 1.05,
         "step": 1.00,
-        "llama": 1.00,
         "deepseek": 1.00,
-        "gemma": 0.95,
-        "mistral": 1.00,
+        "claude": 1.00,
     },
     "reasoning": {
+        "deepseek": 1.40,
+        "o1": 1.40,
+        "o3": 1.40,
         "nemotron": 1.30,
-        "deepseek": 1.35,
         "mimo": 1.30,
         "grok": 1.25,
+        "claude": 1.22,
+        "gemini": 1.20,
         "qwen": 1.15,
         "kimi": 1.20,
+        "gpt": 1.15,
         "glm": 1.10,
         "step": 1.05,
         "llama": 1.00,
@@ -180,8 +223,11 @@ INTENT_AFFINITY: dict[str, dict[str, float]] = {
     "long_horizon": {
         "mimo": 1.40,
         "kimi": 1.35,
+        "claude": 1.30,
+        "gemini": 1.28,
         "qwen": 1.25,
         "deepseek": 1.25,
+        "gpt": 1.20,
         "nemotron": 1.15,
         "grok": 1.20,
         "glm": 1.10,
@@ -193,6 +239,9 @@ INTENT_AFFINITY: dict[str, dict[str, float]] = {
     },
     "vision": {
         "qwen": 1.35,
+        "gemini": 1.35,
+        "gpt": 1.30,
+        "claude": 1.25,
         "mimo": 1.20,
         "minimax": 1.20,
         "llama": 1.10,
@@ -204,6 +253,9 @@ INTENT_AFFINITY: dict[str, dict[str, float]] = {
         "mistral": 0.60,
     },
 }
+
+# Max consecutive same-family models at the head of a ladder (diversity)
+_MAX_HEAD_FAMILY_STREAK = 2
 
 # Default affinity for families not in the matrix
 _DEFAULT_AFFINITY = 0.85
@@ -418,8 +470,21 @@ class LadderService:
             variant_mult = self._speed_multiplier(model_id)
             reasons.append(f"fast_mult={variant_mult:.2f}")
 
+        # ── 5b. Provider speed prior (best+fast across free pool) ─
+        # Soft boost so equally-good models on Groq/Cerebras win on default
+        # without crushing pure quality ranking for coding.
+        provider_prior = self._provider_speed_prior(model_id)
+        if variant == "default":
+            # Blend: ~half of full prior so quality still dominates
+            provider_prior = 1.0 + (provider_prior - 1.0) * 0.55
+        elif variant == "cheap":
+            provider_prior = 1.0 + (provider_prior - 1.0) * 0.25
+        # fast variant already multiplies measured TPS; keep full prior
+        if abs(provider_prior - 1.0) > 0.02:
+            reasons.append(f"provider_prior={provider_prior:.2f}")
+
         # ── Composite multiplicative score ───────────────────────
-        composite = quality * affinity * capability * health_s * variant_mult
+        composite = quality * affinity * capability * health_s * variant_mult * provider_prior
 
         # ── 6. UCB1 exploration bonus (additive) ─────────────────
         ucb = self._ucb_bonus(model_id, intent)
@@ -521,14 +586,26 @@ class LadderService:
         """
         Heuristic: route to highest Tokens Per Second (TPS).
         Tracked dynamically in health.py based on real outcomes.
+        Falls back to provider speed priors for free ultra-fast backends.
         """
         h = self.health._by_model.get(model_id)
-        if not h or h.ewma_tok_per_s <= 0:
-            # Unknown speed: neutral multiplier
-            return 1.0
-        # Normalization: 40 TPS is a good baseline (1.0).
-        # 120 TPS gives 3.0x score. Cap at 5.0x.
-        return min(5.0, h.ewma_tok_per_s / 40.0)
+        if h and h.ewma_tok_per_s > 0:
+            # Normalization: 40 TPS is a good baseline (1.0).
+            # 120 TPS gives 3.0x score. Cap at 5.0x.
+            return min(5.0, h.ewma_tok_per_s / 40.0)
+        # Unknown measured speed — use provider prior so free fast backends
+        # (Groq, Cerebras, …) still win on auto-fast before probes run.
+        return self._provider_speed_prior(model_id)
+
+    def _provider_speed_prior(self, model_id: str) -> float:
+        """Multiplicative prior from free/fast OpenAI-compatible providers."""
+        from nimmakai.catalog.presets import speed_prior_for_provider
+        from nimmakai.catalog.providers import split_provider_model
+
+        pid, _ = split_provider_model(
+            model_id, self.provider_ids, default_provider="nim"
+        )
+        return speed_prior_for_provider(pid)
 
     def _ucb_bonus(self, model_id: str, intent: str) -> float:
         """
@@ -551,18 +628,24 @@ class LadderService:
 
     def _thompson_bonus(self, model_id: str, intent: str) -> float:
         """
-        Thompson Sampling: draw from Beta(α, β) distribution.
+        Thompson Sampling with production-stable damping.
 
         α = successes + 1 (optimistic prior)
         β = failures + 1
 
-        Returns a bonus in [-10, +10] that reflects the model's Bayesian
-        quality estimate with natural exploration built in.
+        Returns a bonus in [-10, +10]. Early on (few samples) we blend the
+        posterior mean with a smaller random draw so ladders don't thrash
+        randomly in production while still exploring.
         """
         alpha, beta = self.learning.thompson_params(intent, model_id)
+        mean = alpha / (alpha + beta)
         sample = random.betavariate(alpha, beta)
-        # Map [0, 1] → [-10, +10]
-        return (sample - 0.5) * 20.0
+        model_n = self.learning.model_requests(intent, model_id)
+        # More samples → trust the draw; cold models → lean on mean
+        weight = min(1.0, model_n / 12.0)
+        blended = weight * sample + (1.0 - weight) * mean
+        # Map [0, 1] → [-8, +8] (slightly tighter than before for stability)
+        return (blended - 0.5) * 16.0
 
     def _doc_keyword_bonus(
         self, model_id: str, mid_lower: str, intent: str
@@ -586,7 +669,7 @@ class LadderService:
     # ------------------------------------------------------------------
 
     def _build_ladder(self, intent: str, *, variant: str = "default") -> LadderSnapshot:
-        """Greedy best-first: score all live models, sort descending, take top K."""
+        """Greedy best-first + family diversity for resilient multi-provider fallback."""
         scored: list[ScoredModel] = []
         for mid in self.live_ids:
             s = self.score_model(mid, intent, variant=variant)
@@ -603,6 +686,9 @@ class LadderService:
             reverse=True,
         )
 
+        # Diversify head of chain so fallback isn't 6 near-identical models
+        scored = self._diversify_scored(scored)
+
         ladder = [s.model_id for s in scored]
         scores = {s.model_id: round(s.score, 2) for s in scored}
         return LadderSnapshot(
@@ -611,6 +697,72 @@ class LadderService:
             scores=scores,
             built_from_live=len(self.live_ids),
         )
+
+    def _diversify_scored(self, scored: list[ScoredModel]) -> list[ScoredModel]:
+        """
+        Interleave families at the head of the ladder.
+
+        Keeps global quality order when families differ; when the same family
+        would dominate the top slots, pull the next-best different family
+        forward so fallback actually changes backends/models.
+        """
+        if len(scored) <= 2:
+            return scored
+
+        def family_of(mid: str) -> str:
+            bare = scoring_model_id(mid, self.provider_ids).lower()
+            for fam in (
+                "mimo",
+                "opencode",
+                "deepseek",
+                "claude",
+                "kimi",
+                "moonshot",
+                "grok",
+                "qwen",
+                "gemini",
+                "gpt",
+                "nemotron",
+                "glm",
+                "step",
+                "minimax",
+                "llama",
+                "gemma",
+                "mistral",
+                "mixtral",
+            ):
+                if fam in bare:
+                    return fam
+            # Provider prefix as weak family (groq/..., openrouter/...)
+            if "/" in mid:
+                return mid.split("/", 1)[0].lower()
+            return bare[:12] if bare else "unknown"
+
+        out: list[ScoredModel] = []
+        remaining = list(scored)
+        streak_fam: str | None = None
+        streak = 0
+
+        while remaining:
+            pick_idx = 0
+            if streak >= _MAX_HEAD_FAMILY_STREAK and streak_fam is not None:
+                for i, s in enumerate(remaining):
+                    if family_of(s.model_id) != streak_fam:
+                        # Only jump if score is within 25% of the head (don't
+                        # promote garbage just for diversity)
+                        if s.score >= remaining[0].score * 0.75:
+                            pick_idx = i
+                        break
+            chosen = remaining.pop(pick_idx)
+            fam = family_of(chosen.model_id)
+            if fam == streak_fam:
+                streak += 1
+            else:
+                streak_fam = fam
+                streak = 1
+            out.append(chosen)
+
+        return out
 
     # ------------------------------------------------------------------
     # Helpers

@@ -17,7 +17,7 @@ QWEN_EXCLUDE = re.compile(r"(image|edit|vlb?$|vision)", re.I)
 
 VERSION_RE = re.compile(
     r"(?:^|[^0-9])(\d+(?:\.\d+){1,3})(?:[^0-9b]|$)|(?:^|-)v(\d+(?:\.\d+)*)|"
-    r"(?:^|[^0-9])(\d{1,2})(?:-[a-z]|$)",
+    r"(?:^|[^0-9])(\d{1,2})(?:-?[a-z]|$)",
     re.I,
 )
 
@@ -79,7 +79,7 @@ def version_key(model_id: str) -> tuple:
     """
     mid = model_id.lower()
     # Strip param-size tokens so 397b / 120b are not treated as versions
-    stripped = re.sub(r"\d{1,4}b\b", "", mid)
+    stripped = re.sub(r"(?:-|_)?\d{1,4}b\b", "", mid)
     versions: list[tuple[int, ...]] = []
     for m in VERSION_RE.finditer(stripped):
         raw = m.group(1) or m.group(2) or m.group(3)

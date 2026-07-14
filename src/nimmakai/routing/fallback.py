@@ -43,9 +43,6 @@ class StreamResult:
     decision: RouteDecision
 
 
-from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
-
 @dataclass
 class TokenStats:
     prompt_tokens: int = 0
@@ -189,9 +186,31 @@ class FallbackExecutor:
             return client, upstream_mid
         return self.upstream, model
 
+    def _provider_available(self, model: str) -> bool:
+        if self.hub is None:
+            return True
+        try:
+            from nimmakai.catalog.providers import split_provider_model
+
+            pid, _ = split_provider_model(
+                model, self.hub.provider_ids, default_provider="nim"
+            )
+            return self.hub.has_runtime(pid)
+        except Exception:
+            return True
+
     def _chain(self, decision: RouteDecision) -> list[str]:
         max_n = self.settings.max_model_fallbacks
-        chain = list(decision.chain)[: max(1, max_n)]
+        raw = list(decision.chain)
+        # Drop models whose provider has no active keys/runtime (production safety)
+        available = [m for m in raw if self._provider_available(m)]
+        if not available and raw:
+            logger.warning(
+                "all %s chain models have unavailable providers; keeping raw chain",
+                len(raw),
+            )
+            available = raw
+        chain = available[: max(1, max_n)]
         return chain
 
     def routing_headers(
@@ -269,10 +288,22 @@ class FallbackExecutor:
                 )
             except RuntimeError as exc:
                 msg = str(exc).lower()
-                if "rate-limited" in msg or "cooling" in msg or "unavailable" in msg:
+                retryable_pool = (
+                    "rate-limited" in msg
+                    or "cooling" in msg
+                    or "unavailable" in msg
+                    or "no api keys" in msg
+                    or "not available" in msg
+                    or "provider" in msg
+                )
+                if retryable_pool:
                     if advance_on_pool and idx < len(chain) - 1:
                         self.stats.fallback_advances += 1
-                        logger.info("pool exhausted on %s; advancing model", model)
+                        logger.info(
+                            "provider/pool unavailable on %s (%s); advancing model",
+                            model,
+                            exc,
+                        )
                         continue
                     return UpstreamResult(
                         status_code=503,
@@ -446,10 +477,14 @@ class FallbackExecutor:
         """
         chain = self._chain(decision)
         if not chain:
+            payload = (
+                b'{"error":{"message":"No models available in routing chain. '
+                b'Add provider API keys and refresh the catalog.",'
+                b'"type":"server_error","code":"nimmakai_catalog_empty"}}'
+            )
+
             async def empty() -> AsyncIterator[bytes]:
-                if False:  # pragma: no cover
-                    yield b""
-                return
+                yield payload
 
             return StreamResult(
                 status_code=503,

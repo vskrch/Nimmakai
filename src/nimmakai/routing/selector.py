@@ -110,6 +110,9 @@ class ModelSelector:
 
         if self.registry.is_auto(raw) or raw == "":
             chain = self.registry.chain_for_intent(intent_key, variant=variant)
+            # Cold-start / empty catalog: any live model is better than 503
+            if not chain and self.registry.live_ids:
+                chain = self.registry.health_reorder(sorted(self.registry.live_ids))
             return RouteDecision(
                 chain=self.registry.health_reorder(chain),
                 mode="auto",
@@ -149,8 +152,12 @@ class ModelSelector:
             if self.settings.enable_fallback_on_explicit:
                 siblings = self.registry.chain_for_intent(intent_key, variant=variant)
                 bare = resolved.split("/")[-1] if "/" in resolved else resolved
-                # Explicit horizontal fallback: inject other providers of the exact same model first
-                horizontals = [m for m in siblings if (m.split("/")[-1] if "/" in m else m) == bare and m != resolved]
+                # Same bare model on other providers first (horizontal failover)
+                horizontals = [
+                    m
+                    for m in siblings
+                    if (m.split("/")[-1] if "/" in m else m) == bare and m != resolved
+                ]
                 rest = [m for m in siblings if m != resolved and m not in horizontals]
                 chain = [resolved] + horizontals + rest
                 mode: RouteMode = "passthrough_with_fallback"

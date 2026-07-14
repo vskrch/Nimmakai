@@ -17,6 +17,25 @@ logger = logging.getLogger(__name__)
 _ENV_KEYS = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
+def _resolve_config_path(path: str | Path) -> Path:
+    """Resolve config path for local dev, Heroku, and installed wheels."""
+    p = Path(path)
+    candidates = [
+        p,
+        Path.cwd() / p,
+        Path(__file__).resolve().parents[3] / p,  # repo root when src layout
+        Path(__file__).resolve().parents[2] / p,  # nimmakai parent
+        Path(__file__).resolve().parent.parent.parent / p,
+    ]
+    for c in candidates:
+        try:
+            if c.is_file():
+                return c
+        except OSError:
+            continue
+    return p  # may not exist; caller handles empty
+
+
 @dataclass
 class ProviderConfig:
     id: str
@@ -127,13 +146,18 @@ class ProviderStore:
         nim_rpd: int = 2000,
         nim_max_in_flight: int = 3,
     ) -> ProviderStore:
-        p = Path(path)
+        p = _resolve_config_path(path)
         overlay = Path(overlay_path)
         store = cls(path=p, overlay_path=overlay)
         data: dict[str, Any] = {}
         if p.is_file():
             with p.open(encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
+            logger.info("loaded providers config from %s", p)
+        else:
+            logger.warning(
+                "providers config not found at %s — using NIM env only", path
+            )
         for item in data.get("providers") or []:
             if not isinstance(item, dict) or not item.get("id"):
                 continue
@@ -148,6 +172,7 @@ class ProviderStore:
                         continue
                     cfg = _cfg_from_dict(item)
                     store.providers[cfg.id] = cfg
+                logger.info("loaded providers overlay from %s", overlay)
             except Exception:
                 logger.exception("failed to load providers overlay")
 
@@ -175,7 +200,47 @@ class ProviderStore:
             nim.rpd_limit = nim_rpd
             nim.max_in_flight_per_key = nim_max_in_flight
 
+        # Auto-register free providers when their env keys are present
+        store._bootstrap_env_presets()
+
         return store
+
+    def _bootstrap_env_presets(self) -> None:
+        """If GROQ_API_KEYS / etc. are set, register that free provider automatically."""
+        from nimmakai.catalog.presets import ENV_PROVIDER_BOOTSTRAP, get_preset
+
+        for env_name, preset_id in ENV_PROVIDER_BOOTSTRAP:
+            raw = os.environ.get(env_name, "").strip()
+            if not raw:
+                continue
+            if preset_id in self.providers:
+                # Ensure env name is wired so resolved_keys picks it up
+                cfg = self.providers[preset_id]
+                if not cfg.api_keys_env:
+                    cfg.api_keys_env = env_name
+                continue
+            preset = get_preset(preset_id)
+            if not preset or preset.get("custom"):
+                continue
+            base = str(preset.get("base_url") or "").strip()
+            if not base or "{ACCOUNT_ID}" in base:
+                continue
+            self.providers[preset_id] = ProviderConfig(
+                id=preset_id,
+                name=str(preset.get("name") or preset_id),
+                base_url=base.rstrip("/"),
+                api_keys=[],
+                api_keys_env=env_name,
+                enabled=True,
+                rpm_limit=float(preset.get("rpm_limit", 40)),
+                rpd_limit=int(preset.get("rpd_limit", 2000)),
+                max_in_flight_per_key=int(preset.get("max_in_flight_per_key", 3)),
+                api_style="openai",
+                builtin=False,
+            )
+            logger.info(
+                "auto-registered free provider %s from env %s", preset_id, env_name
+            )
 
     def enabled_providers(self) -> list[ProviderConfig]:
         return [p for p in self.providers.values() if p.enabled]

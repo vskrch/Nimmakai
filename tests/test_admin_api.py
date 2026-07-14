@@ -230,15 +230,25 @@ async def test_preferences_invalid_intent():
 
 
 @pytest.mark.asyncio
-async def test_preferences_empty_chain():
+async def test_preferences_empty_chain_clears():
+    """Empty chain clears a preference (reverts to intelligent routing)."""
     app = _make_app()
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as c:
+        await c.post("/preferences", headers=AUTH, json={
+            "intent": "coding_agentic", "chain": ["nim/foo"],
+        })
         r = await c.post("/preferences", headers=AUTH, json={
             "intent": "coding_agentic", "chain": [],
         })
-        assert r.status_code == 400
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body.get("cleared") is True
+        listed = await c.get("/preferences", headers=AUTH)
+        intents = [p["intent"] for p in listed.json()["preferences"]]
+        assert "coding_agentic" not in intents
 
 
 @pytest.mark.asyncio

@@ -20,32 +20,70 @@ async def health(request: Request) -> JSONResponse:
     pool = getattr(request.app.state, "pool", None)
     registry = getattr(request.app.state, "registry", None)
     hub = getattr(request.app.state, "hub", None)
+    settings = getattr(request.app.state, "settings", None) or get_settings()
     keys = len(pool) if pool is not None else 0
     keys_available = pool.available_count() if pool is not None else 0
+    total_keys = keys
+    active_providers = 0
     catalog_ok = True
+    live_models = 0
     if registry is not None:
+        live_models = len(registry.live_ids)
         catalog_ok = registry.last_refresh_ok or not registry.live_ids
         if registry.last_refresh_at is None:
             catalog_ok = registry.catalog is not None
+        if live_models == 0 and registry.last_refresh_at is not None:
+            catalog_ok = False
     providers = []
     if hub is not None:
-        providers = [
-            {"id": p.id, "enabled": p.enabled, "key_count": len(p.resolved_keys())}
-            for p in hub.store.enabled_providers()
-        ]
+        total_keys = 0
+        for p in hub.store.providers.values():
+            kc = len(p.resolved_keys())
+            total_keys += kc
+            has_rt = hub.has_runtime(p.id)
+            if has_rt:
+                active_providers += 1
+            providers.append(
+                {
+                    "id": p.id,
+                    "enabled": p.enabled,
+                    "key_count": kc,
+                    "runtime": has_rt,
+                }
+            )
+        # Sum available keys across active runtimes
+        keys_available = sum(
+            rt.pool.available_count()
+            for rt in hub.runtimes.values()
+            if rt.config.enabled
+        )
+    proxy_configured = bool(settings.proxy_api_keys) or settings.allow_insecure_auth
+    status = "ok"
+    # Degraded only when clearly unusable in production (no keys at all, or
+    # a refresh already ran and still produced zero models).
+    no_keys = total_keys == 0
+    failed_catalog = (
+        registry is not None
+        and live_models == 0
+        and registry.last_refresh_at is not None
+        and not registry.last_refresh_ok
+    )
+    if no_keys or failed_catalog:
+        status = "degraded"
     return JSONResponse(
         {
-            "status": "ok",
+            "status": status,
             "version": __version__,
-            "nim_keys_configured": keys,
+            "nim_keys_configured": keys,  # legacy field (default pool size)
+            "keys_configured": total_keys,
             "keys_available": keys_available,
+            "active_providers": active_providers,
+            "live_models": live_models,
             "catalog_ok": catalog_ok,
+            "proxy_auth_configured": proxy_configured,
             "providers": providers,
-            "routing_enabled": getattr(
-                getattr(request.app.state, "settings", None),
-                "routing_enabled",
-                True,
-            ),
+            "routing_enabled": getattr(settings, "routing_enabled", True),
+            "dashboard": "/dashboard",
         }
     )
 
@@ -173,8 +211,151 @@ async def list_providers(request: Request) -> JSONResponse:
     require_proxy_auth(request, settings)
     hub = getattr(request.app.state, "hub", None)
     if hub is None:
-        return JSONResponse({"providers": []})
-    return JSONResponse({"providers": hub.store.list_masked()})
+        return JSONResponse({"providers": [], "presets": []})
+    from nimmakai.catalog.presets import list_presets
+
+    providers = hub.store.list_masked()
+    # Annotate with runtime status for the admin UI
+    for p in providers:
+        p["runtime"] = hub.has_runtime(p["id"])
+        rt = hub.runtimes.get(p["id"])
+        p["available_keys"] = rt.pool.available_count() if rt else 0
+    return JSONResponse(
+        {
+            "providers": providers,
+            "presets": list_presets(),
+            "pool_note": (
+                "All enabled providers with keys are merged into one model pool. "
+                "Routing scores quality × affinity × health × free-provider speed."
+            ),
+        }
+    )
+
+
+@router.get("/admin/providers/presets")
+async def provider_presets(request: Request) -> JSONResponse:
+    """Free / popular OpenAI-compatible endpoint templates for the admin UI."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    from nimmakai.catalog.presets import list_presets
+
+    hub = getattr(request.app.state, "hub", None)
+    configured = set(hub.store.providers.keys()) if hub else set()
+    presets = list_presets()
+    for p in presets:
+        p["already_configured"] = p["id"] in configured and p["id"] != "custom"
+    return JSONResponse({"presets": presets})
+
+
+@router.post("/admin/providers/test")
+async def test_provider(request: Request) -> JSONResponse:
+    """
+    Probe an OpenAI-compatible base URL + key without saving.
+    Body: {base_url, api_keys: [str], ...} or {id} to test an existing provider.
+    """
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    body: dict[str, Any] = await request.json()
+    hub = getattr(request.app.state, "hub", None)
+
+    base_url = str(body.get("base_url") or "").strip().rstrip("/")
+    keys = body.get("api_keys") or []
+    if isinstance(keys, str):
+        keys = [k.strip() for k in keys.split(",") if k.strip()]
+    keys = [str(k).strip() for k in keys if str(k).strip()]
+
+    # Test existing provider by id
+    pid = str(body.get("id") or "").strip().lower()
+    if pid and hub is not None and pid in hub.runtimes:
+        rt = hub.runtimes[pid]
+        try:
+            status, resp, _h, _k = await rt.upstream.request_json("GET", "/models")
+            n = 0
+            if isinstance(resp, dict) and isinstance(resp.get("data"), list):
+                n = len(resp["data"])
+            ok = status < 400
+            return JSONResponse(
+                {
+                    "ok": ok,
+                    "status_code": status,
+                    "model_count": n,
+                    "message": (
+                        f"OK — {n} models from {pid}"
+                        if ok
+                        else f"HTTP {status} from {pid}"
+                    ),
+                },
+                status_code=200 if ok else 502,
+            )
+        except Exception as exc:
+            return JSONResponse(
+                {"ok": False, "message": f"Connection failed: {exc}"},
+                status_code=502,
+            )
+
+    if not base_url:
+        return JSONResponse(
+            {"error": {"message": "base_url is required", "code": "invalid_request"}},
+            status_code=400,
+        )
+    if not keys:
+        return JSONResponse(
+            {
+                "error": {
+                    "message": "At least one API key is required to test",
+                    "code": "invalid_request",
+                }
+            },
+            status_code=400,
+        )
+
+    from nimmakai.balancer import KeyPool
+    from nimmakai.upstream import UpstreamClient
+
+    pool = KeyPool(
+        api_keys=keys,
+        rpm_limit=60,
+        rpd_limit=10000,
+        max_in_flight_per_key=1,
+    )
+    client = UpstreamClient(
+        base_url=base_url,
+        pool=pool,
+        timeout=min(30.0, settings.upstream_timeout),
+        user_agent=settings.upstream_user_agent,
+    )
+    try:
+        await client.start()
+        status, resp, _h, _k = await client.request_json("GET", "/models")
+        n = 0
+        sample: list[str] = []
+        if isinstance(resp, dict) and isinstance(resp.get("data"), list):
+            n = len(resp["data"])
+            for item in resp["data"][:8]:
+                if isinstance(item, dict) and item.get("id"):
+                    sample.append(str(item["id"]))
+        ok = status < 400
+        return JSONResponse(
+            {
+                "ok": ok,
+                "status_code": status,
+                "model_count": n,
+                "sample_models": sample,
+                "message": (
+                    f"OK — {n} models reachable"
+                    if ok
+                    else f"Upstream returned HTTP {status}"
+                ),
+            },
+            status_code=200 if ok else 502,
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {"ok": False, "message": f"Connection failed: {exc}"},
+            status_code=502,
+        )
+    finally:
+        await client.stop()
 
 
 @router.post("/admin/providers")
@@ -182,6 +363,9 @@ async def upsert_provider(request: Request) -> JSONResponse:
     """
     Register or update an OpenAI-compatible provider.
     Body: {id, base_url, api_keys?, api_keys_env?, rpm_limit?, enabled?, name?}
+
+    Models from every enabled provider with keys are namespaced (provider/model)
+    and merged into the global routing pool.
     """
     settings = getattr(request.app.state, "settings", None) or get_settings()
     require_proxy_auth(request, settings)
@@ -193,13 +377,49 @@ async def upsert_provider(request: Request) -> JSONResponse:
             status_code=503,
         )
     body: dict[str, Any] = await request.json()
+
+    # Expand from free-provider preset when requested
+    preset_id = str(body.get("preset") or body.get("from_preset") or "").strip().lower()
+    if preset_id and preset_id != "custom":
+        from nimmakai.catalog.presets import get_preset
+
+        preset = get_preset(preset_id)
+        if preset and not preset.get("custom"):
+            body.setdefault("id", preset["id"])
+            body.setdefault("name", preset["name"])
+            if not body.get("base_url"):
+                body["base_url"] = preset.get("base_url")
+            body.setdefault("rpm_limit", preset.get("rpm_limit", 40))
+            body.setdefault("rpd_limit", preset.get("rpd_limit", 2000))
+            body.setdefault(
+                "max_in_flight_per_key", preset.get("max_in_flight_per_key", 3)
+            )
+            if preset.get("api_keys_env") and not body.get("api_keys_env"):
+                body["api_keys_env"] = preset["api_keys_env"]
+
     provider_id = body.get("id")
     if not provider_id:
         return JSONResponse(
             {"error": {"message": "Provider ID is required", "code": "invalid_request"}},
             status_code=400,
         )
-    provider_id = provider_id.strip().lower()
+    provider_id = str(provider_id).strip().lower()
+    # Sanitize id for namespacing (alphanumeric + hyphen/underscore)
+    import re
+
+    if not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", provider_id):
+        return JSONResponse(
+            {
+                "error": {
+                    "message": (
+                        "Provider ID must be lowercase alphanumeric "
+                        "(start with a letter), max 64 chars"
+                    ),
+                    "code": "invalid_request",
+                }
+            },
+            status_code=400,
+        )
 
     existing = hub.store.providers.get(provider_id)
     if existing:
@@ -217,8 +437,14 @@ async def upsert_provider(request: Request) -> JSONResponse:
             "builtin": existing.builtin,
         }
         for k, v in body.items():
-            if v is not None and v != "_":
-                merged_body[k] = v
+            if v is None or v == "_":
+                continue
+            # Empty api_keys list on partial update keeps existing keys
+            if k == "api_keys" and isinstance(v, list) and len(v) == 0:
+                continue
+            if k == "api_keys" and isinstance(v, str) and not v.strip():
+                continue
+            merged_body[k] = v
         body = merged_body
 
     try:
@@ -238,11 +464,49 @@ async def upsert_provider(request: Request) -> JSONResponse:
             },
             status_code=400,
         )
+    if not cfg.base_url:
+        return JSONResponse(
+            {
+                "error": {
+                    "message": "base_url is required (OpenAI-compatible …/v1 root)",
+                    "code": "invalid_request",
+                }
+            },
+            status_code=400,
+        )
+    if not cfg.resolved_keys():
+        return JSONResponse(
+            {
+                "error": {
+                    "message": (
+                        "At least one API key is required (api_keys or api_keys_env)"
+                    ),
+                    "code": "invalid_request",
+                }
+            },
+            status_code=400,
+        )
+
     masked = await hub.upsert_provider(cfg)
+    live_added = 0
     if registry is not None:
         registry.ladder.provider_ids = set(hub.provider_ids)
-        await registry.refresh_from_hub(hub, fetch_docs=False, run_probes=False)
-    return JSONResponse({"ok": True, "provider": masked})
+        ok = await registry.refresh_from_hub(hub, fetch_docs=False, run_probes=False)
+        live_added = len(registry.live_ids)
+    else:
+        ok = True
+    return JSONResponse(
+        {
+            "ok": True,
+            "provider": masked,
+            "catalog_ok": ok,
+            "live_model_count": live_added,
+            "message": (
+                f"Provider '{cfg.id}' saved — "
+                f"{live_added} models in the unified pool"
+            ),
+        }
+    )
 
 
 @router.delete("/admin/providers/{provider_id}")
@@ -322,17 +586,21 @@ async def set_preference(request: Request) -> JSONResponse:
         )
     body: dict[str, Any] = await request.json()
     intent = str(body.get("intent") or "")
-    chain = body.get("chain") or []
-    if not intent or not isinstance(chain, list) or len(chain) == 0:
+    chain = body.get("chain") if isinstance(body.get("chain"), list) else None
+    if not intent or chain is None:
         return JSONResponse(
             {
                 "error": {
-                    "message": "intent and non-empty chain are required",
+                    "message": "intent and chain (list) are required",
                     "code": "invalid_request",
                 }
             },
             status_code=400,
         )
+    # Empty chain clears the preference (revert to intelligent routing)
+    if len(chain) == 0:
+        prefs.clear(intent)
+        return JSONResponse({"ok": True, "preference": None, "cleared": True})
     try:
         pref = prefs.set(
             intent,
