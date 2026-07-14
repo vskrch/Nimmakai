@@ -1,7 +1,23 @@
 # Scratchpad
 
 ## Current task
-All done — merged to main, Heroku-ready, 97 tests.
+AUDIT — "why isn't this working". 107 tests pass; runtime repro done.
+
+## Findings (audit 2026-07-13)
+- [X] Catalog is 100% live-dependent: models.yaml has `models:{}` + empty `chain:[]`
+      per intent. Everything is `dynamic_families`. No static fallback if /models
+      refresh fails -> every chain resolves EMPTY -> 503 `nimmakai_catalog_empty`.
+- [X] NO real upstream configured: only `nim` in providers.yaml (no NIM_API_KEYS),
+      groq overlay has fake `gsk-test-key`. With no live refresh the app serves
+      only stale snapshot; with bad proxy key NIM returns 401.
+- [X] Config drift: models.yaml families reference mimo/opencode/grok — NONE exist on
+      nim/groq live catalog (0 models). Only nemotron/deepseek/qwen/glm/step/minimax/kimi
+      exist. So "coding_primary: mimo" resolves to nothing meaningful.
+- [X] Stale snapshot hazard: .nimmakai/catalog_snapshot.json persists cross-run; if a
+      refresh fails the server keeps serving old/foreign-provider IDs. Snapshot had
+      `nvidia/`,`qwen/`,`zai/` prefixes while only `nim`/`groq` are configured.
+- [X] 500 on unreachable upstream: _chat_like lets httpx errors bubble as 500 instead of
+      a clean 503 (no try/except around execute_json in _chat_like for transport errors).
 
 ## Branches
 - `main` @ 162ddf3 — stable published (default), Heroku-deployable
