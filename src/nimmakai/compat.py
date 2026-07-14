@@ -106,6 +106,10 @@ def _normalize_delta(delta: dict[str, Any]) -> dict[str, Any]:
     if empty and isinstance(reasoning, str) and reasoning:
         # Cursor only renders content — mirror reasoning into content
         d["content"] = reasoning
+    # Ensure role on first useful delta (Cursor OpenAI client)
+    if d.get("content") and "role" not in d:
+        d["role"] = "assistant"
+    # tool_calls must stay intact (Cursor agent mode)
     return d
 
 

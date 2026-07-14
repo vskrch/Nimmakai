@@ -137,6 +137,24 @@ class ModelHealthStore:
         unhealthy = [m for m in chain if self.is_unhealthy(m)]
         return healthy + unhealthy
 
+    def expire_stale_cooldowns(self) -> int:
+        """Clear cooldowns that have elapsed — self-healing after rate limits."""
+        now = time.monotonic()
+        cleared = 0
+        for h in self._by_model.values():
+            if h.cooldown_until > 0 and h.cooldown_until <= now:
+                h.cooldown_until = 0.0
+                cleared += 1
+        return cleared
+
+    def soften_all_cooldowns(self, factor: float = 0.5) -> None:
+        """Shrink remaining cooldowns (used after successful heal refresh)."""
+        now = time.monotonic()
+        for h in self._by_model.values():
+            if h.cooldown_until > now:
+                remain = h.cooldown_until - now
+                h.cooldown_until = now + remain * max(0.1, min(1.0, factor))
+
     def snapshot(self) -> dict[str, dict]:
         now = time.monotonic()
         out: dict[str, dict] = {}

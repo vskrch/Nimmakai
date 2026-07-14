@@ -53,7 +53,11 @@ class Settings(BaseSettings):
     routing_enabled: bool = True
     classify_mode: Literal["rules_only", "rules_then_llm"] = "rules_only"
     enable_fallback_on_explicit: bool = True
-    max_model_fallbacks: int = 6
+    max_model_fallbacks: int = 10  # deeper ladder for resilient coding agents
+    # Extra fallbacks for coding_agentic / Cursor tool loops
+    coding_max_fallbacks: int = 12
+    # Self-heal catalog/providers every N seconds (0 = only with catalog refresh)
+    self_heal_seconds: int = 120
     catalog_refresh_seconds: int = 300
     strict_catalog: bool = False
     inject_auto_model: bool = True

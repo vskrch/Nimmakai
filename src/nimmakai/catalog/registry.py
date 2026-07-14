@@ -198,7 +198,22 @@ class ModelRegistry:
         )
 
     def auto_tokens(self) -> set[str]:
-        return {normalize_model_name(t) for t in self.catalog.defaults.auto_mode_model_tokens}
+        base = {
+            normalize_model_name(t) for t in self.catalog.defaults.auto_mode_model_tokens
+        }
+        base |= {
+            "nimmakai/auto-coding",
+            "nimmakai/best",
+            "nimmakai/coding",
+            "best",
+            "coding",
+            "auto-coding",
+            "nimmakai/auto-fast",
+            "nimmakai/auto-cheap",
+            "auto-fast",
+            "auto-cheap",
+        }
+        return base
 
     def is_auto(self, model: str | None) -> bool:
         return normalize_model_name(model) in self.auto_tokens()
@@ -620,6 +635,8 @@ class ModelRegistry:
         }
         return [
             {**base, "id": "nimmakai/auto", "root": "nimmakai/auto"},
+            {**base, "id": "nimmakai/auto-coding", "root": "nimmakai/auto-coding"},
+            {**base, "id": "nimmakai/best", "root": "nimmakai/best"},
             {**base, "id": "nimmakai/auto-fast", "root": "nimmakai/auto-fast"},
             {**base, "id": "nimmakai/auto-cheap", "root": "nimmakai/auto-cheap"},
             {**base, "id": "auto", "root": "auto"},

@@ -41,19 +41,29 @@ logger = logging.getLogger(__name__)
 # (family_regex, size_or_tier_regex | None) → base quality score
 # Ordered most-specific first; first match wins.
 QUALITY_TIERS: list[tuple[str, str | None, float]] = [
-    # OpenCode / MiMo
+    # OpenCode Zen free coding (speed + intelligence — highest priority)
+    (r"mimo-v2\.5-free|mimo.*2\.5.*free", None, 99.5),
+    (r"deepseek-v4-flash-free|deepseek.*v4.*flash.*free", None, 98.5),
+    (r"north-mini-code-free|north.*mini.*code", None, 97.5),
+    (r"big-pickle", None, 96.5),
+    (r"nemotron-3-ultra-free|nemotron.*ultra.*free", None, 96.0),
+    (r"qwen3\.6-plus-free|qwen.*3\.6.*free", None, 96.5),
+    (r"minimax-m3-free|minimax.*m3.*free", None, 95.0),
+    # OpenCode / MiMo paid+general
     (r"mimo.*2\.5.*pro|opencode.*mimo.*pro", None, 99.0),
-    (r"mimo.*2\.5|opencode.*mimo", None, 97.0),
+    (r"mimo.*2\.5|opencode.*mimo|mimo-v2", None, 97.5),
     (r"mimo|opencode", None, 95.0),
-    # DeepSeek
-    (r"deepseek.*v4.*pro", None, 98.0),
+    # DeepSeek (SOTA coding)
+    (r"deepseek.*v4.*pro", None, 98.5),
     (r"deepseek.*r1", None, 97.0),
-    (r"deepseek.*v4", None, 95.0),
+    (r"deepseek.*v4.*flash", None, 96.5),
+    (r"deepseek.*v4", None, 96.0),
     (r"deepseek.*v3", None, 89.0),
     (r"deepseek.*coder", None, 86.0),
     (r"deepseek", None, 78.0),
-    # Kimi / Moonshot
-    (r"kimi.*2\.6|kimi.*k2", None, 96.0),
+    # Kimi / Moonshot coding
+    (r"kimi.*k2\.7.*code|k2\.7.*code", None, 97.5),
+    (r"kimi.*2\.6|kimi.*k2\.6|kimi.*k2", None, 96.5),
     (r"kimi|moonshot", None, 78.0),
     # Grok
     (r"grok.*4\.5", None, 96.0),
@@ -170,19 +180,23 @@ def _quality_from_params(param_b: int) -> float:
 
 INTENT_AFFINITY: dict[str, dict[str, float]] = {
     "coding_agentic": {
-        "mimo": 1.40,
-        "opencode": 1.40,
-        "deepseek": 1.35,
+        "mimo": 1.50,
+        "opencode": 1.45,
+        "north-mini": 1.42,
+        "north_mini": 1.42,
+        "big-pickle": 1.40,
+        "big_pickle": 1.40,
+        "deepseek": 1.42,
+        "kimi": 1.35,
         "claude": 1.32,
-        "kimi": 1.30,
-        "qwen": 1.30,
-        "grok": 1.20,
+        "qwen": 1.32,
+        "minimax": 1.20,
+        "grok": 1.22,
         "gpt": 1.18,
         "gemini": 1.15,
-        "glm": 1.15,
-        "nemotron": 1.10,
+        "glm": 1.18,
+        "nemotron": 1.12,
         "step": 1.05,
-        "minimax": 1.00,
         "llama": 1.05,
         "gemma": 0.90,
         "mistral": 0.95,
@@ -471,20 +485,42 @@ class LadderService:
             reasons.append(f"fast_mult={variant_mult:.2f}")
 
         # ── 5b. Provider speed prior (best+fast across free pool) ─
-        # Soft boost so equally-good models on Groq/Cerebras win on default
-        # without crushing pure quality ranking for coding.
         provider_prior = self._provider_speed_prior(model_id)
         if variant == "default":
-            # Blend: ~half of full prior so quality still dominates
-            provider_prior = 1.0 + (provider_prior - 1.0) * 0.55
+            # Coding: lean into free fast hosts (Zen/Groq/Cerebras)
+            if intent == "coding_agentic":
+                provider_prior = 1.0 + (provider_prior - 1.0) * 0.85
+            else:
+                provider_prior = 1.0 + (provider_prior - 1.0) * 0.55
         elif variant == "cheap":
             provider_prior = 1.0 + (provider_prior - 1.0) * 0.25
-        # fast variant already multiplies measured TPS; keep full prior
         if abs(provider_prior - 1.0) > 0.02:
             reasons.append(f"provider_prior={provider_prior:.2f}")
 
+        # ── 5c. Coding elite boost (OpenCode Zen free + SOTA coders) ─
+        coding_boost = 1.0
+        if intent == "coding_agentic":
+            coding_boost = self._coding_elite_boost(model_id, mid)
+            if coding_boost > 1.01:
+                reasons.append(f"coding_elite={coding_boost:.2f}")
+            # speed+intelligence: blend measured/prior speed into default coding
+            if variant == "default":
+                speed_f = self._speed_multiplier(model_id)
+                # geometric-ish blend so fast elite wins over slow elite
+                speed_blend = 0.62 + 0.38 * min(2.5, max(0.4, speed_f)) / 2.5
+                coding_boost *= speed_blend
+                reasons.append(f"speed_intel={speed_blend:.2f}")
+
         # ── Composite multiplicative score ───────────────────────
-        composite = quality * affinity * capability * health_s * variant_mult * provider_prior
+        composite = (
+            quality
+            * affinity
+            * capability
+            * health_s
+            * variant_mult
+            * provider_prior
+            * coding_boost
+        )
 
         # ── 6. UCB1 exploration bonus (additive) ─────────────────
         ucb = self._ucb_bonus(model_id, intent)
@@ -606,6 +642,40 @@ class LadderService:
             model_id, self.provider_ids, default_provider="nim"
         )
         return speed_prior_for_provider(pid)
+
+    def _coding_elite_boost(self, model_id: str, mid_lower: str) -> float:
+        """
+        Strong multiplicative boost for proven coding models.
+
+        Priority: OpenCode Zen free (mimo, deepseek-v4-flash-free, north-mini-code,
+        big-pickle) > frontier coding (deepseek v4, kimi k2.6/k2.7, qwen3.5/3.6).
+        """
+        from nimmakai.catalog.presets import ZEN_FREE_CODING_MODELS
+        from nimmakai.catalog.providers import split_provider_model
+
+        pid, upstream = split_provider_model(
+            model_id, self.provider_ids, default_provider="nim"
+        )
+        bare = upstream.lower().rsplit("/", 1)[-1]
+
+        # Zen free / curated coding ids
+        for zid in ZEN_FREE_CODING_MODELS:
+            if zid in bare or bare == zid or bare.endswith(zid):
+                if "free" in zid or zid == "big-pickle":
+                    return 1.55 if pid == "zen" else 1.40
+                return 1.35 if pid == "zen" else 1.28
+
+        if pid == "zen":
+            return 1.22  # any Zen model — curated for coding agents
+
+        if re.search(r"mimo|deepseek.*v4|kimi.*k2|qwen3\.[56]|north.*code|big.pickle", mid_lower):
+            return 1.25
+        if re.search(r"coder|codestral|codellama|devstral", mid_lower):
+            return 1.12
+        # Embed/rerank already excluded; slight penalty for pure chat-tiny
+        if re.search(r"nano|tiny|1b|2b|3b", mid_lower) and "nemotron" not in mid_lower:
+            return 0.85
+        return 1.0
 
     def _ucb_bonus(self, model_id: str, intent: str) -> float:
         """

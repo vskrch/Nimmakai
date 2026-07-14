@@ -12,6 +12,24 @@ from typing import Any
 # base_url must end at the OpenAI-compatible root (…/v1).
 PROVIDER_PRESETS: list[dict[str, Any]] = [
     {
+        "id": "zen",
+        "name": "OpenCode Zen",
+        "base_url": "https://opencode.ai/zen/v1",
+        "api_keys_env": "OPENCODE_ZEN_API_KEYS",
+        "rpm_limit": 60,
+        "rpd_limit": 50000,
+        "max_in_flight_per_key": 6,
+        "free_tier": True,
+        "speed_tier": "fast",
+        "signup_url": "https://opencode.ai/auth",
+        "description": (
+            "OpenCode Zen — curated coding agents. Free: mimo-v2.5-free, "
+            "deepseek-v4-flash-free, north-mini-code-free, big-pickle, nemotron-3-ultra-free."
+        ),
+        "tags": ["free", "coding", "opencode", "openai-compatible", "best"],
+        "coding_priority": True,
+    },
+    {
         "id": "groq",
         "name": "Groq",
         "base_url": "https://api.groq.com/openai/v1",
@@ -215,6 +233,7 @@ PROVIDER_PRESETS: list[dict[str, Any]] = [
 # Known provider speed priors (multiplicative) used by the ladder for
 # best+fast combined ranking across free backends.
 PROVIDER_SPEED_PRIOR: dict[str, float] = {
+    "zen": 1.28,  # OpenCode Zen free coding hosts — high priority
     "groq": 1.35,
     "cerebras": 1.40,
     "sambanova": 1.30,
@@ -227,11 +246,14 @@ PROVIDER_SPEED_PRIOR: dict[str, float] = {
     "openrouter": 1.05,
     "github": 1.00,
     "cloudflare": 1.00,
-    "nim": 1.00,
+    "nim": 1.05,  # slight bump — deepseek-v4 / qwen live here often
 }
 
 # Env var → preset id for auto-registration at boot
 ENV_PROVIDER_BOOTSTRAP: list[tuple[str, str]] = [
+    ("OPENCODE_ZEN_API_KEYS", "zen"),
+    ("OPENCODE_API_KEYS", "zen"),  # alias
+    ("ZEN_API_KEYS", "zen"),
     ("GROQ_API_KEYS", "groq"),
     ("CEREBRAS_API_KEYS", "cerebras"),
     ("OPENROUTER_API_KEYS", "openrouter"),
@@ -244,6 +266,24 @@ ENV_PROVIDER_BOOTSTRAP: list[tuple[str, str]] = [
     ("MISTRAL_API_KEYS", "mistral"),
     ("HYPERBOLIC_API_KEYS", "hyperbolic"),
 ]
+
+# Free OpenCode Zen coding model ids (bare, before namespacing)
+ZEN_FREE_CODING_MODELS: tuple[str, ...] = (
+    "mimo-v2.5-free",
+    "deepseek-v4-flash-free",
+    "north-mini-code-free",
+    "nemotron-3-ultra-free",
+    "big-pickle",
+    "qwen3.6-plus-free",
+    "minimax-m3-free",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+    "mimo-v2.5",
+    "kimi-k2.6",
+    "kimi-k2.7-code",
+    "minimax-m3",
+    "glm-5.2",
+)
 
 
 def list_presets(*, free_only: bool = False) -> list[dict[str, Any]]:

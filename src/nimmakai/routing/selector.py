@@ -65,6 +65,18 @@ class ModelSelector:
         elif raw in ("auto-fast", "nimmakai/auto-fast"):
             variant = "fast"
             raw = "auto"
+        elif raw in (
+            "auto-coding",
+            "nimmakai/auto-coding",
+            "nimmakai/best",
+            "nimmakai/coding",
+            "best",
+            "coding",
+        ):
+            # Force coding ladder with speed+intelligence scoring
+            intent = Intent.CODING_AGENTIC
+            intent_key = intent.value
+            raw = "auto"
 
         if routing_disabled:
             chain = [raw] if raw else []
@@ -112,7 +124,14 @@ class ModelSelector:
             chain = self.registry.chain_for_intent(intent_key, variant=variant)
             # Cold-start / empty catalog: any live model is better than 503
             if not chain and self.registry.live_ids:
-                chain = self.registry.health_reorder(sorted(self.registry.live_ids))
+                if intent_key == "coding_agentic":
+                    from nimmakai.resilience import emergency_coding_chain
+
+                    chain = emergency_coding_chain(self.registry)
+                if not chain:
+                    chain = self.registry.health_reorder(
+                        sorted(self.registry.live_ids)
+                    )
             return RouteDecision(
                 chain=self.registry.health_reorder(chain),
                 mode="auto",

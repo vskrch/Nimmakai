@@ -201,16 +201,40 @@ class FallbackExecutor:
             return True
 
     def _chain(self, decision: RouteDecision) -> list[str]:
-        max_n = self.settings.max_model_fallbacks
+        max_n = int(getattr(self.settings, "max_model_fallbacks", 10) or 10)
+        if decision.intent.value == "coding_agentic":
+            max_n = max(
+                max_n,
+                int(getattr(self.settings, "coding_max_fallbacks", 12) or 12),
+            )
         raw = list(decision.chain)
         # Drop models whose provider has no active keys/runtime (production safety)
         available = [m for m in raw if self._provider_available(m)]
+        if not available:
+            # Self-heal: rebuild emergency chain from live catalog
+            try:
+                from nimmakai.resilience import emergency_coding_chain
+
+                available = [
+                    m
+                    for m in emergency_coding_chain(self.registry, max_n=max_n)
+                    if self._provider_available(m)
+                ]
+                if available:
+                    logger.warning(
+                        "empty chain healed with %s emergency models", len(available)
+                    )
+            except Exception:
+                logger.exception("emergency chain rebuild failed")
         if not available and raw:
             logger.warning(
                 "all %s chain models have unavailable providers; keeping raw chain",
                 len(raw),
             )
             available = raw
+        # Prefer healthy heads first (self-heal soft demotion of cooldowns)
+        if available and hasattr(self.registry, "health"):
+            available = self.registry.health.health_reorder(available)
         chain = available[: max(1, max_n)]
         return chain
 

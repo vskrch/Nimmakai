@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -148,20 +149,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             async def _refresh_loop() -> None:
                 assert registry is not None
+                from nimmakai.resilience import heal_and_refresh
+
                 cycle = 0
                 every = max(1, int(settings.probe_every_n_refreshes))
+                heal_every = max(30, int(getattr(settings, "self_heal_seconds", 120) or 120))
+                last_heal = time.monotonic()
                 while True:
-                    await asyncio.sleep(settings.catalog_refresh_seconds)
+                    # Wake at the earlier of catalog refresh vs self-heal interval
+                    sleep_for = min(
+                        float(settings.catalog_refresh_seconds), float(heal_every)
+                    )
+                    await asyncio.sleep(max(15.0, sleep_for))
                     cycle += 1
-                    run_probes = settings.catalog_run_probes and cycle % every == 0
-                    try:
-                        await registry.refresh_from_hub(
-                            hub,
-                            fetch_docs=settings.catalog_fetch_docs,
-                            run_probes=run_probes,
+                    now = time.monotonic()
+                    # Lightweight heal often
+                    if now - last_heal >= heal_every:
+                        try:
+                            empty = not registry.live_ids
+                            report = await heal_and_refresh(
+                                hub=hub,
+                                registry=registry,
+                                settings=settings,
+                                force=empty,
+                            )
+                            last_heal = now
+                            if report.get("healed_models") or report.get("refreshed"):
+                                logger.info("self-heal: %s", report)
+                        except Exception:
+                            logger.exception("self-heal loop failed")
+                    # Full catalog refresh on its own cadence
+                    if cycle % max(
+                        1, int(settings.catalog_refresh_seconds / max(15.0, sleep_for))
+                    ) == 0:
+                        run_probes = (
+                            settings.catalog_run_probes and cycle % every == 0
                         )
-                    except Exception:
-                        logger.exception("periodic catalog refresh failed")
+                        try:
+                            await registry.refresh_from_hub(
+                                hub,
+                                fetch_docs=settings.catalog_fetch_docs,
+                                run_probes=run_probes,
+                            )
+                        except Exception:
+                            logger.exception("periodic catalog refresh failed")
 
             refresh_task = asyncio.create_task(_refresh_loop())
 

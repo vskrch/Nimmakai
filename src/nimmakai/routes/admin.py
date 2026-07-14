@@ -41,6 +41,21 @@ async def storage_info(request: Request) -> JSONResponse:
     )
 
 
+@router.post("/admin/heal")
+async def admin_heal(request: Request) -> JSONResponse:
+    """Force self-heal: restore provider runtimes + refresh catalog if empty."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    from nimmakai.resilience import heal_and_refresh
+
+    hub = getattr(request.app.state, "hub", None)
+    registry = getattr(request.app.state, "registry", None)
+    report = await heal_and_refresh(
+        hub=hub, registry=registry, settings=settings, force=True
+    )
+    return JSONResponse({"ok": True, "heal": report})
+
+
 @router.get("/admin/logs")
 async def admin_logs(request: Request) -> JSONResponse:
     """
