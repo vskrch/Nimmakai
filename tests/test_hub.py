@@ -42,6 +42,8 @@ def store(tmp_path: Path):
         overlay,
         nim_base_url="https://integrate.api.nvidia.com/v1",
         nim_api_keys=["test-key"],
+        sqlite_path=tmp_path / "hub.db",
+        seed_free_presets=False,
     )
 
 

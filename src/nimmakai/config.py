@@ -65,6 +65,10 @@ class Settings(BaseSettings):
     llm_classify_cache_size: int = 256
     providers_config_path: str = "config/providers.yaml"
     providers_overlay_path: str = ".nimmakai/providers.json"
+    # Durable store for providers + preferences (stdlib sqlite3)
+    sqlite_path: str = ".nimmakai/nimmakai.db"
+    # One-time: seed free-provider templates (no keys) into SQLite on first boot
+    sqlite_seed_free_presets: bool = True
 
     # Account safety
     safety_jitter_enabled: bool = True

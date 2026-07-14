@@ -34,6 +34,8 @@ def _make_app():
         nim_max_in_flight_per_key=3,
         providers_overlay_path=str(Path(td.name) / "providers.json"),
         catalog_snapshot_path=str(Path(td.name) / "catalog_snapshot.json"),
+        sqlite_path=str(Path(td.name) / "nimmakai.db"),
+        sqlite_seed_free_presets=False,
     )
     app = create_app(settings)
     # Manually wire state (no lifespan in tests)
@@ -55,6 +57,8 @@ def _make_app():
         nim_rpm=settings.nim_rpm_limit,
         nim_rpd=settings.nim_rpd_limit,
         nim_max_in_flight=settings.nim_max_in_flight_per_key,
+        sqlite_path=settings.sqlite_path,
+        seed_free_presets=False,
     )
     hub = ProviderHub(store, settings)
     # Can't run async hub.start() here; set hub and store
@@ -65,7 +69,11 @@ def _make_app():
     app.state.fallback = None
     app.state.guard = AccountGuard(settings, pool)
     app.state.routing_stats = RoutingStats()
-    app.state.preferences = UserPreferences()
+    app.state.preferences = UserPreferences(
+        path=Path(td.name) / "prefs.json",
+        db_path=Path(settings.sqlite_path),
+    )
+    app.state.preferences.load()
     return app
 
 

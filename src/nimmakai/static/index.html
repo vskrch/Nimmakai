@@ -276,8 +276,9 @@ select.input { appearance: auto; }
         <div>
           <h2 style="font-size: 20px; font-weight: 600;">Providers</h2>
           <p style="color: var(--dim); font-size: 13px; margin-top: 4px; max-width: 560px;">
-            Add free OpenAI-compatible endpoints. Every key’s models join the shared pool —
-            the router picks the best + fastest model across all of them.
+            Add free OpenAI-compatible endpoints. Keys are stored in local SQLite
+            (<code style="color:var(--text)">.nimmakai/nimmakai.db</code>) so they survive restarts.
+            Every key’s models join the shared pool — the router picks best + fastest.
           </p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">

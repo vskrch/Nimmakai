@@ -23,6 +23,8 @@ def multi_app(monkeypatch):
         nim_base_url="https://nim.test/v1",
         providers_overlay_path=str(Path(td) / "providers.json"),
         catalog_snapshot_path=str(Path(td) / "catalog.json"),
+        sqlite_path=str(Path(td) / "nimmakai.db"),
+        sqlite_seed_free_presets=False,
         models_config_path="config/models.yaml",
         routing_enabled=True,
         catalog_fetch_docs=False,

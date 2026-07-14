@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -13,6 +14,31 @@ from nimmakai.catalog.providers import provider_from_request_body
 from nimmakai.config import get_settings
 
 router = APIRouter(tags=["admin"])
+
+
+@router.get("/admin/storage")
+async def storage_info(request: Request) -> JSONResponse:
+    """Where providers / prefs are persisted (sqlite path, counts)."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    hub = getattr(request.app.state, "hub", None)
+    prefs = getattr(request.app.state, "preferences", None)
+    db_path = Path(settings.sqlite_path)
+    return JSONResponse(
+        {
+            "backend": "sqlite",
+            "sqlite_path": str(db_path),
+            "sqlite_exists": db_path.is_file(),
+            "providers_count": len(hub.store.providers) if hub else 0,
+            "preferences_count": len(prefs.preferences) if prefs else 0,
+            "note": (
+                "Providers and routing preferences are stored in SQLite. "
+                "Free-provider templates are seeded without keys; add keys in the UI "
+                "or via env vars (GROQ_API_KEYS, …). On ephemeral hosts, mount a volume "
+                "on the sqlite path so keys survive restarts."
+            ),
+        }
+    )
 
 
 @router.get("/health")

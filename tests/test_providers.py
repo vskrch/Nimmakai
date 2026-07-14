@@ -33,6 +33,8 @@ def test_provider_store_nim_from_env(tmp_path: Path) -> None:
         overlay,
         nim_base_url="https://integrate.api.nvidia.com/v1",
         nim_api_keys=["nvapi-test"],
+        sqlite_path=tmp_path / "t.db",
+        seed_free_presets=False,
     )
     assert "nim" in store.providers
     assert store.providers["nim"].resolved_keys() == ["nvapi-test"]
@@ -43,8 +45,14 @@ def test_upsert_overlay(tmp_path: Path) -> None:
     yaml_path = tmp_path / "providers.yaml"
     yaml_path.write_text("providers: []\n", encoding="utf-8")
     overlay = tmp_path / "overlay.json"
+    db = tmp_path / "t.db"
     store = ProviderStore.load(
-        yaml_path, overlay, nim_api_keys=["k1"], nim_base_url="https://n/v1"
+        yaml_path,
+        overlay,
+        nim_api_keys=["k1"],
+        nim_base_url="https://n/v1",
+        sqlite_path=db,
+        seed_free_presets=False,
     )
     store.upsert(
         ProviderConfig(
@@ -56,8 +64,14 @@ def test_upsert_overlay(tmp_path: Path) -> None:
         )
     )
     assert overlay.is_file()
+    assert db.is_file()
     store2 = ProviderStore.load(
-        yaml_path, overlay, nim_api_keys=["k1"], nim_base_url="https://n/v1"
+        yaml_path,
+        overlay,
+        nim_api_keys=["k1"],
+        nim_base_url="https://n/v1",
+        sqlite_path=db,
+        seed_free_presets=False,
     )
     assert "groq" in store2.providers
     assert store2.providers["groq"].resolved_keys() == ["gsk-test"]

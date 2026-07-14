@@ -42,6 +42,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             nim_rpm=settings.nim_rpm_limit,
             nim_rpd=settings.nim_rpd_limit,
             nim_max_in_flight=settings.nim_max_in_flight_per_key,
+            sqlite_path=settings.sqlite_path,
+            seed_free_presets=settings.sqlite_seed_free_presets,
         )
         hub = ProviderHub(store, settings)
         try:
@@ -102,8 +104,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         guard = AccountGuard(settings, pool)
 
-        # Load user preferences (per-intent model overrides)
-        preferences = UserPreferences()
+        # Load user preferences (SQLite + legacy JSON)
+        preferences = UserPreferences(
+            path=Path(".nimmakai/user_preferences.json"),
+            db_path=Path(settings.sqlite_path),
+        )
         preferences.load()
 
         if registry is not None:

@@ -128,11 +128,13 @@ def scoring_model_id(namespaced: str, provider_ids: set[str]) -> str:
 
 @dataclass
 class ProviderStore:
-    """YAML base + optional runtime overlay (.nimmakai/providers.json)."""
+    """YAML base + SQLite durable store (migrates legacy providers.json)."""
 
     path: Path
     overlay_path: Path
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
+    db_path: Path | None = None
+    _db: Any = field(default=None, repr=False)
 
     @classmethod
     def load(
@@ -145,10 +147,16 @@ class ProviderStore:
         nim_rpm: float = 36.0,
         nim_rpd: int = 2000,
         nim_max_in_flight: int = 3,
+        sqlite_path: str | Path | None = ".nimmakai/nimmakai.db",
+        seed_free_presets: bool = True,
     ) -> ProviderStore:
+        from nimmakai.catalog.db import get_db
+
         p = _resolve_config_path(path)
         overlay = Path(overlay_path)
-        store = cls(path=p, overlay_path=overlay)
+        db_path = Path(sqlite_path) if sqlite_path else None
+        db = get_db(db_path) if db_path is not None else None
+        store = cls(path=p, overlay_path=overlay, db_path=db_path, _db=db)
         data: dict[str, Any] = {}
         if p.is_file():
             with p.open(encoding="utf-8") as f:
@@ -164,7 +172,15 @@ class ProviderStore:
             cfg = _cfg_from_dict(item)
             store.providers[cfg.id] = cfg
 
-        if overlay.is_file():
+        # SQLite is the durable source of truth (admin UI saves here)
+        if db is not None:
+            store._load_from_sqlite(db)
+            store._migrate_json_overlay_once(db, overlay)
+            if seed_free_presets:
+                store._seed_free_presets_once(db)
+
+        # Legacy JSON overlay still applied if no sqlite (or as already-migrated)
+        if db is None and overlay.is_file():
             try:
                 raw = json.loads(overlay.read_text(encoding="utf-8"))
                 for item in raw.get("providers") or []:
@@ -203,10 +219,106 @@ class ProviderStore:
         # Auto-register free providers when their env keys are present
         store._bootstrap_env_presets()
 
+        # Persist merged state (nim env sync + env presets) so next boot is fast
+        if db is not None:
+            store._persist_all()
+
         return store
 
+    def _load_from_sqlite(self, db: Any) -> None:
+        rows = db.list_providers()
+        for item in rows:
+            try:
+                cfg = _cfg_from_dict(item)
+                self.providers[cfg.id] = cfg
+            except Exception:
+                logger.exception("skip bad provider row %s", item.get("id"))
+        if rows:
+            logger.info("loaded %s provider(s) from sqlite %s", len(rows), self.db_path)
+
+    def _migrate_json_overlay_once(self, db: Any, overlay: Path) -> None:
+        if db.get_meta("migrated_providers_json") == "1":
+            return
+        if not overlay.is_file():
+            db.set_meta("migrated_providers_json", "1")
+            return
+        try:
+            raw = json.loads(overlay.read_text(encoding="utf-8"))
+            n = 0
+            for item in raw.get("providers") or []:
+                if not isinstance(item, dict) or not item.get("id"):
+                    continue
+                cfg = _cfg_from_dict(item)
+                self.providers[cfg.id] = cfg
+                n += 1
+            if n:
+                self._persist_all()
+                logger.info(
+                    "migrated %s provider(s) from %s → sqlite", n, overlay
+                )
+            db.set_meta("migrated_providers_json", "1")
+        except Exception:
+            logger.exception("failed to migrate providers.json → sqlite")
+
+    def _seed_free_presets_once(self, db: Any) -> None:
+        """Insert free provider templates (no keys) so they appear ready to fill."""
+        if db.get_meta("seeded_free_presets") == "1":
+            return
+        from nimmakai.catalog.presets import list_presets
+
+        seeded = 0
+        for preset in list_presets():
+            pid = str(preset.get("id") or "")
+            if not pid or pid in {"custom", "nim"}:
+                continue
+            if "{ACCOUNT_ID}" in str(preset.get("base_url") or ""):
+                continue
+            if pid in self.providers:
+                continue
+            # Template only — disabled until user adds keys (or env provides them)
+            self.providers[pid] = ProviderConfig(
+                id=pid,
+                name=str(preset.get("name") or pid),
+                base_url=str(preset.get("base_url") or "").rstrip("/"),
+                api_keys=[],
+                api_keys_env=preset.get("api_keys_env"),
+                enabled=False,
+                rpm_limit=float(preset.get("rpm_limit", 40)),
+                rpd_limit=int(preset.get("rpd_limit", 2000)),
+                max_in_flight_per_key=int(preset.get("max_in_flight_per_key", 3)),
+                api_style="openai",
+                builtin=False,
+            )
+            seeded += 1
+        if seeded:
+            self._persist_all()
+            logger.info("seeded %s free-provider templates into sqlite", seeded)
+        db.set_meta("seeded_free_presets", "1")
+
+    def _persist_all(self) -> None:
+        if self._db is None:
+            return
+        payload = []
+        for p in self.providers.values():
+            payload.append(
+                {
+                    "id": p.id,
+                    "name": p.name,
+                    "base_url": p.base_url,
+                    "api_keys": p.api_keys,
+                    "api_keys_env": p.api_keys_env,
+                    "enabled": p.enabled,
+                    "rpm_limit": p.rpm_limit,
+                    "rpd_limit": p.rpd_limit,
+                    "max_in_flight_per_key": p.max_in_flight_per_key,
+                    "api_style": p.api_style,
+                    "builtin": p.builtin,
+                }
+            )
+        self._db.replace_all_providers(payload)
+
     def _bootstrap_env_presets(self) -> None:
-        """If GROQ_API_KEYS / etc. are set, register that free provider automatically."""
+        """If GROQ_API_KEYS / etc. are set, register/enable that free provider."""
         from nimmakai.catalog.presets import ENV_PROVIDER_BOOTSTRAP, get_preset
 
         for env_name, preset_id in ENV_PROVIDER_BOOTSTRAP:
@@ -218,6 +330,12 @@ class ProviderStore:
                 cfg = self.providers[preset_id]
                 if not cfg.api_keys_env:
                     cfg.api_keys_env = env_name
+                # Seeded templates start disabled — env keys mean go live
+                if not cfg.enabled and cfg.resolved_keys():
+                    cfg.enabled = True
+                    logger.info(
+                        "enabled free provider %s from env %s", preset_id, env_name
+                    )
                 continue
             preset = get_preset(preset_id)
             if not preset or preset.get("custom"):
@@ -268,32 +386,45 @@ class ProviderStore:
             self.save_overlay()
             return True
         del self.providers[pid]
+        if self._db is not None:
+            self._db.delete_provider(pid)
         self.save_overlay()
         return True
 
     def save_overlay(self) -> None:
-        self.overlay_path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {
-            "providers": [
-                {
-                    "id": p.id,
-                    "name": p.name,
-                    "base_url": p.base_url,
-                    "api_keys": p.api_keys,
-                    "api_keys_env": p.api_keys_env,
-                    "enabled": p.enabled,
-                    "rpm_limit": p.rpm_limit,
-                    "rpd_limit": p.rpd_limit,
-                    "max_in_flight_per_key": p.max_in_flight_per_key,
-                    "api_style": p.api_style,
-                    "builtin": p.builtin,
-                }
-                for p in self.providers.values()
-            ]
-        }
-        tmp = self.overlay_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-        tmp.replace(self.overlay_path)
+        """Persist providers to SQLite (primary) and legacy JSON (backup)."""
+        if self._db is not None:
+            # Single-row upsert for the common case is covered by full rewrite
+            # to keep remove/disable consistent with in-memory map.
+            self._persist_all()
+        # Keep JSON as a human-readable backup / export
+        try:
+            self.overlay_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "providers": [
+                    {
+                        "id": p.id,
+                        "name": p.name,
+                        "base_url": p.base_url,
+                        "api_keys": p.api_keys,
+                        "api_keys_env": p.api_keys_env,
+                        "enabled": p.enabled,
+                        "rpm_limit": p.rpm_limit,
+                        "rpd_limit": p.rpd_limit,
+                        "max_in_flight_per_key": p.max_in_flight_per_key,
+                        "api_style": p.api_style,
+                        "builtin": p.builtin,
+                    }
+                    for p in self.providers.values()
+                ],
+                "backend": "sqlite" if self._db is not None else "json",
+                "sqlite_path": str(self.db_path) if self.db_path else None,
+            }
+            tmp = self.overlay_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            tmp.replace(self.overlay_path)
+        except Exception:
+            logger.exception("failed to write providers.json backup")
 
     def list_masked(self) -> list[dict[str, Any]]:
         return [p.mask() for p in sorted(self.providers.values(), key=lambda x: x.id)]

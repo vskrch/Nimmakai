@@ -41,6 +41,8 @@ def test_env_bootstrap_registers_groq(tmp_path: Path, monkeypatch) -> None:
         overlay,
         nim_api_keys=["nvapi-x"],
         nim_base_url="https://integrate.api.nvidia.com/v1",
+        sqlite_path=tmp_path / "p.db",
+        seed_free_presets=False,
     )
     assert "groq" in store.providers
     assert store.providers["groq"].base_url.startswith("https://api.groq.com")
