@@ -25,9 +25,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Weights: intelligence + speed >> everything (user priority)
-_ALPHA_INTEL = 0.50
-_BETA_SPEED = 0.38
+# Weights: intelligence + speed dominate (continuous adaptive ranking)
+_ALPHA_INTEL = 0.48
+_BETA_SPEED = 0.40
 _GAMMA_HEALTH = 0.08
 _DELTA_PROVIDER = 0.04
 
@@ -52,26 +52,33 @@ def _intelligence_prior(
 
 def _speed_factor(health: Any, model_id: str) -> float:
     """
-    Live speed 0.25–2.2.
-    Unknown models get a mild optimistic prior so they can be explored once.
+    Live speed 0.25–2.4 — continuously adapts from TTFT + tokens/s.
+    Unknown models get a mild prior; proven fast models climb hard.
     """
     h = health._by_model.get(model_id) if health is not None else None
-    if h is None or h.samples == 0:
+    if h is None or (h.samples == 0 and h.ewma_tok_per_s <= 0):
         return 0.85  # unexplored — slight discount vs proven fast
 
-    # Tokens/sec (normalize ~40 TPS = 1.0)
+    # Tokens/sec (normalize ~40 TPS = 1.0, 120+ = elite)
     tps = h.ewma_tok_per_s
     if tps > 0:
-        tps_f = min(2.2, max(0.25, tps / 40.0))
+        tps_f = min(2.4, max(0.25, tps / 40.0))
     else:
         tps_f = 0.8
 
-    # Latency (1.0s → ~1.0, 0.2s → boost, 3s+ → cut)
+    # Latency / TTFT (0.15s → boost, 1s → ~1.0, 3s+ → cut)
     lat = h.ewma_latency if h.ewma_latency > 0 else 1.0
-    lat_f = min(2.0, max(0.25, 1.2 / (0.35 + lat)))
+    lat_f = min(2.2, max(0.2, 1.15 / (0.3 + lat)))
 
-    # Blend: prefer throughput, respect latency
-    return 0.55 * tps_f + 0.45 * lat_f
+    # Recent success streak → small boost (model is hot)
+    streak = 1.0
+    if h.consecutive_successes >= 3:
+        streak = 1.12
+    elif h.consecutive_fails >= 2:
+        streak = 0.75
+
+    # Blend: throughput + latency + hot streak
+    return (0.50 * tps_f + 0.40 * lat_f + 0.10) * streak
 
 
 def _provider_factor(model_id: str, provider_ids: set[str]) -> float:

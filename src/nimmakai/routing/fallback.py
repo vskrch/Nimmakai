@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from collections.abc import AsyncIterator
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -382,10 +383,21 @@ class FallbackExecutor:
                 empty_reply, tool_ok = _analyze_success_body(
                     resp_body, had_tools=had_tools
                 )
+            # Adaptive speed signal: JSON path latency (if measured upstream)
+            latency = None
+            tokens = None
+            if success and isinstance(resp_body, dict):
+                usage = resp_body.get("usage")
+                if isinstance(usage, dict):
+                    pt = int(usage.get("prompt_tokens") or 0)
+                    ct = int(usage.get("completion_tokens") or 0)
+                    tokens = pt + ct if (pt or ct) else None
             self.registry.record_outcome(
                 model,
                 key_id,
                 success=success,
+                latency=latency,
+                tokens=tokens,
                 status_code=status,
                 unavailable=unavailable,
                 intent=decision.intent.value,
@@ -572,16 +584,17 @@ class FallbackExecutor:
                 import asyncio
 
                 ttft = float(
-                    getattr(self.settings, "stream_ttft_timeout_seconds", 90.0) or 90.0
+                    getattr(self.settings, "stream_ttft_timeout_seconds", 12.0) or 12.0
                 )
                 idle = float(
                     getattr(self.settings, "stream_idle_timeout_seconds", 180.0) or 180.0
                 )
+                t_stream0 = time.monotonic()
                 try:
                     first_chunk = await asyncio.wait_for(anext(byte_iter), timeout=ttft)
                 except StopAsyncIteration:
                     first_chunk = b""
-                except TimeoutError as exc:
+                except TimeoutError:
                     logger.warning(
                         "Stream TTFT stalled on %s after %.0fs; falling back",
                         model,
@@ -595,6 +608,7 @@ class FallbackExecutor:
                         model,
                         key.key_id if key else None,
                         success=False,
+                        latency=ttft,
                         status_code=504,
                         intent=decision.intent.value,
                     )
@@ -616,11 +630,14 @@ class FallbackExecutor:
                     )
                     continue
 
+                ttft_latency = max(0.01, time.monotonic() - t_stream0)
                 self.stats.record(decision.intent.value, model, advanced=idx > 0)
+                # Adaptive: first-token latency feeds speed score immediately
                 self.registry.record_outcome(
                     model,
                     key.key_id if key else None,
                     success=True,
+                    latency=ttft_latency,
                     status_code=status,
                     intent=decision.intent.value,
                     had_tools=bool(body.get("tools") or body.get("functions")),
@@ -630,6 +647,7 @@ class FallbackExecutor:
                 bound_model = model
                 bound_key_id = key.key_id if key else None
                 bound_idle = idle
+                bound_t0 = t_stream0
 
                 async def robust_iter(
                     first: bytes,
@@ -638,17 +656,21 @@ class FallbackExecutor:
                     mid: str = bound_model,
                     kid: str | None = bound_key_id,
                     idle_s: float = bound_idle,
+                    t0: float = bound_t0,
                 ) -> AsyncIterator[bytes]:
+                    total_tokens = 0
+
                     def _scan_for_tokens(c: bytes) -> None:
-                        if b'"usage"' in c:
+                        nonlocal total_tokens
+                        if b'"usage"' in c or b"completion_tokens" in c:
                             import re
 
                             p = re.search(rb'"prompt_tokens"\s*:\s*(\d+)', c)
                             ct = re.search(rb'"completion_tokens"\s*:\s*(\d+)', c)
                             if p and ct:
-                                self.stats.record_tokens(
-                                    mid, kid, int(p.group(1)), int(ct.group(1))
-                                )
+                                pt_i, ct_i = int(p.group(1)), int(ct.group(1))
+                                total_tokens = pt_i + ct_i
+                                self.stats.record_tokens(mid, kid, pt_i, ct_i)
 
                     if first:
                         _scan_for_tokens(first)
@@ -660,22 +682,41 @@ class FallbackExecutor:
                                     anext(rest), timeout=idle_s
                                 )
                             except TimeoutError:
-                                # Do NOT crash the ASGI app (Cursor H18). End SSE cleanly.
                                 logger.warning(
                                     "Stream idle timeout on %s after %.0fs — closing SSE cleanly",
                                     mid,
                                     idle_s,
+                                )
+                                # Adaptive: slow stream → slight demotion via latency
+                                elapsed = max(0.01, time.monotonic() - t0)
+                                self.registry.record_outcome(
+                                    mid,
+                                    kid,
+                                    success=True,
+                                    latency=elapsed,
+                                    tokens=total_tokens or None,
+                                    status_code=200,
                                 )
                                 yield b"data: [DONE]\n\n"
                                 return
                             _scan_for_tokens(chunk)
                             yield chunk
                     except StopAsyncIteration:
+                        # Full stream done — update speed with total time + tokens
+                        elapsed = max(0.01, time.monotonic() - t0)
+                        if total_tokens > 0:
+                            self.registry.record_outcome(
+                                mid,
+                                kid,
+                                success=True,
+                                latency=elapsed,
+                                tokens=total_tokens,
+                                status_code=200,
+                            )
                         return
                     except (asyncio.CancelledError, GeneratorExit):
                         raise
                     except Exception as e:
-                        # Client disconnect / upstream drop — end cleanly for Cursor
                         logger.warning(
                             "Stream ended early on %s: %s — closing SSE", mid, e
                         )
