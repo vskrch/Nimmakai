@@ -331,8 +331,9 @@ class LadderService:
         - UCB1: upper confidence bound exploration bonus
         - Thompson Sampling: Bayesian online learning from outcomes
 
-    Lifecycle: call `rebuild(live_ids, docs)` after each catalog refresh.
-    Routing: call `ladder_for(intent)` to get best → fallback order.
+    Lifecycle: call `rebuild(live_ids)` at startup / explicit cache refresh.
+    When ``frozen=True`` (default after rebuild), ``ladder_for`` serves the
+    precomputed cache — no per-request re-score (stable + fast for production).
     """
 
     def __init__(
@@ -342,13 +343,16 @@ class LadderService:
     ) -> None:
         self.health = health or ModelHealthStore()
         self.learning = learning or LearningStore()
-        self._ladders: dict[str, LadderSnapshot] = {}
+        self._ladders: dict[tuple[str, str], LadderSnapshot] = {}
         self._docs_by_slug: dict[str, DocModel] = {}
         self.live_ids: set[str] = set()
         # Capability hints learned from probes / docs: model_id → flags
         self.capabilities: dict[str, dict[str, bool]] = {}
         # Overridable from config/models.yaml
         self.provider_ids: set[str] = {"nim"}
+        # Sticky rankings: freeze after precompute until explicit refresh
+        self.frozen: bool = False
+        self.computed_at: float = 0.0
 
     def apply_catalog_policy(
         self,
@@ -370,7 +374,16 @@ class LadderService:
     def set_docs(self, docs: list[DocModel]) -> None:
         self._docs_by_slug = {d.slug.lower().replace("_", "-"): d for d in docs}
 
-    def rebuild(self, live_ids: set[str], *, intents: list[str] | None = None) -> None:
+    def rebuild(
+        self,
+        live_ids: set[str],
+        *,
+        intents: list[str] | None = None,
+        freeze: bool = True,
+    ) -> None:
+        """Precompute all intent ladders (expensive). Call at startup / cache refresh."""
+        import time as _time
+
         self.live_ids = set(live_ids)
         targets = intents or [
             "coding_agentic",
@@ -383,29 +396,111 @@ class LadderService:
         variants = ["default", "cheap", "fast"]
         for intent in targets:
             for variant in variants:
-                self._ladders[(intent, variant)] = self._build_ladder(intent, variant=variant)
+                self._ladders[(intent, variant)] = self._build_ladder(
+                    intent, variant=variant
+                )
+        self.computed_at = _time.time()
+        self.frozen = freeze
         logger.info(
-            "ladder rebuilt (%s intents × 3 variants, %s live): %s",
+            "ladder precomputed frozen=%s (%s intents × 3 variants, %s live): %s",
+            freeze,
             len(targets),
             len(live_ids),
-            {k[0]: v.ladder[:3] for k, v in self._ladders.items() if k[1] == "default"},
+            {
+                k[0]: v.ladder[:3]
+                for k, v in self._ladders.items()
+                if k[1] == "default"
+            },
         )
+
+    def freeze(self) -> None:
+        self.frozen = True
+
+    def unfreeze(self) -> None:
+        self.frozen = False
+
+    def export_cache(self) -> dict:
+        """Serialize precomputed ladders for SQLite / disk persistence."""
+        ladders: dict[str, dict] = {}
+        for (intent, variant), snap in self._ladders.items():
+            key = f"{intent}::{variant}"
+            ladders[key] = {
+                "intent": intent,
+                "variant": variant,
+                "ladder": list(snap.ladder),
+                "scores": dict(snap.scores),
+                "built_from_live": snap.built_from_live,
+            }
+        return {
+            "version": 1,
+            "computed_at": self.computed_at,
+            "frozen": self.frozen,
+            "live_ids": sorted(self.live_ids),
+            "ladders": ladders,
+            "best_coding": list(
+                (self._ladders.get(("coding_agentic", "default")) or LadderSnapshot("", [], {}, 0)).ladder[:12]
+            ),
+            "best_chat": list(
+                (self._ladders.get(("chat_fast", "default")) or LadderSnapshot("", [], {}, 0)).ladder[:8]
+            ),
+        }
+
+    def import_cache(self, data: dict, *, freeze: bool = True) -> bool:
+        """Restore ladders from persisted cache. Returns False if unusable."""
+        ladders = data.get("ladders") if isinstance(data, dict) else None
+        if not isinstance(ladders, dict) or not ladders:
+            return False
+        restored: dict[tuple[str, str], LadderSnapshot] = {}
+        for _k, raw in ladders.items():
+            if not isinstance(raw, dict):
+                continue
+            intent = str(raw.get("intent") or "")
+            variant = str(raw.get("variant") or "default")
+            ladder = list(raw.get("ladder") or [])
+            if not intent or not ladder:
+                continue
+            scores = raw.get("scores") or {}
+            if not isinstance(scores, dict):
+                scores = {}
+            restored[(intent, variant)] = LadderSnapshot(
+                intent=intent,
+                ladder=ladder,
+                scores={str(a): float(b) for a, b in scores.items()},
+                built_from_live=int(raw.get("built_from_live") or len(ladder)),
+            )
+        if not restored:
+            return False
+        self._ladders = restored
+        cached_live = data.get("live_ids") or []
+        if isinstance(cached_live, list) and cached_live:
+            # Keep union so offline models drop via filter; new live ids still known
+            self.live_ids = set(self.live_ids) | {str(x) for x in cached_live}
+        self.computed_at = float(data.get("computed_at") or data.get("_updated_at") or 0)
+        self.frozen = freeze
+        logger.info(
+            "ladder cache restored (%s entries, computed_at=%.0f, best_coding=%s)",
+            len(restored),
+            self.computed_at,
+            (data.get("best_coding") or [])[:3],
+        )
+        return True
 
     def ladder_for(
         self, intent: str, *, variant: str = "default", max_n: int | None = None
     ) -> list[str]:
         """
-        Best-first chain for the given intent and variant. Re-scores on each call
-        so online learning (UCB1 + Thompson) applies immediately.
+        Best-first chain from the precomputed cache.
+
+        When frozen (production default), does **not** re-score — rankings stay
+        sticky until ``rebuild()`` / admin cache refresh. Offline models are
+        filtered out; health reorder still applies at the registry layer.
         """
-        if self.live_ids:
+        key = (intent, variant)
+        snap = self._ladders.get(key)
+        if snap is None or not self.frozen:
+            # Missing cache entry, or unfrozen (explicit recompute mode)
             snap = self._build_ladder(intent, variant=variant)
-            self._ladders[(intent, variant)] = snap
-        else:
-            snap = self._ladders.get((intent, variant))
-            if snap is None:
-                snap = self._build_ladder(intent, variant=variant)
-                self._ladders[(intent, variant)] = snap
+            self._ladders[key] = snap
 
         out: list[str] = []
         for mid in snap.ladder:
@@ -416,6 +511,7 @@ class LadderService:
                 break
 
         if not out and snap.ladder:
+            # Cache had models no longer live — serve cache head as last resort
             out = list(snap.ladder[: max_n or len(snap.ladder)])
         return out
 
@@ -843,6 +939,11 @@ class LadderService:
         return self._docs_by_slug.get(slug)
 
     def snapshot(self) -> dict:
+        import time as _time
+
+        age = None
+        if self.computed_at:
+            age = round(_time.time() - self.computed_at, 1)
         return {
             intent: {
                 "ladder_head": snap.ladder[:5],
@@ -852,6 +953,13 @@ class LadderService:
             }
             for (intent, variant), snap in self._ladders.items()
             if variant == "default"
+        } | {
+            "_cache": {
+                "frozen": self.frozen,
+                "computed_at": self.computed_at,
+                "age_s": age,
+                "entries": len(self._ladders),
+            }
         }
 
     def set_capability(self, model_id: str, **flags: bool) -> None:

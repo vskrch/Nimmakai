@@ -69,10 +69,15 @@ class ModelRegistry:
         self.docs_url = docs_url
         self.probe_budget = ProbeBudget(probe_budget_per_hour)
         self.enrich_doc_details = enrich_doc_details
+        # Sticky rankings: precompute once, serve until explicit refresh
+        self.rankings_sticky: bool = True
+        self.rankings_cache_key: str = "default"
+        self._db: Any = None
         self._load_disk_snapshot()
         if self.live_ids:
             self.ladder.set_docs(self.doc_models)
-            self.ladder.rebuild(self.live_ids)
+            # Prefer frozen rebuild; cache load may override in bind_db()
+            self.ladder.rebuild(self.live_ids, freeze=True)
             self._sync_chains_from_ladder()
 
     @classmethod
@@ -292,6 +297,10 @@ class ModelRegistry:
 
     def chain_for_intent(self, intent: str, *, variant: str = "default") -> list[str]:
         if self.catalog.defaults.dynamic_families:
+            # Prefer sticky dynamic_chains (precomputed at startup / cache refresh)
+            cache_key = intent if variant == "default" else f"{intent}::{variant}"
+            if cache_key in self.dynamic_chains and self.dynamic_chains[cache_key]:
+                return self._filter_available(list(self.dynamic_chains[cache_key]))
             # Intelligent ladder: strongest available → next → …
             ladder = self.ladder.ladder_for(intent, variant=variant)
             if ladder:
@@ -311,6 +320,92 @@ class ModelRegistry:
             return []
         return self._filter_available(list(entry.chain))
 
+    def bind_db(self, db: Any) -> None:
+        """Attach SQLite and try to restore sticky ranking cache."""
+        self._db = db
+        if db is None:
+            return
+        loaded = self.load_rankings_cache()
+        if loaded:
+            logger.info(
+                "using sticky ranking cache (coding head=%s)",
+                self.dynamic_chains.get("coding_agentic", [])[:3],
+            )
+
+    def load_rankings_cache(self) -> bool:
+        if self._db is None:
+            return False
+        try:
+            data = self._db.get_ranking_cache(self.rankings_cache_key)
+        except Exception:
+            logger.exception("load rankings cache failed")
+            return False
+        if not data:
+            return False
+        ok = self.ladder.import_cache(data, freeze=True)
+        if not ok:
+            return False
+        # Keep live_ids from catalog snapshot if newer set is empty
+        cached_live = data.get("live_ids") or []
+        if isinstance(cached_live, list) and cached_live and not self.live_ids:
+            self.live_ids = {str(x) for x in cached_live}
+            self.ladder.live_ids = set(self.live_ids)
+        self._sync_chains_from_ladder()
+        return True
+
+    def persist_rankings_cache(self) -> bool:
+        if self._db is None:
+            # Fallback to catalog snapshot path sibling
+            try:
+                path = self.snapshot_path.parent / "rankings_cache.json"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(
+                    __import__("json").dumps(self.ladder.export_cache(), indent=2),
+                    encoding="utf-8",
+                )
+                return True
+            except Exception:
+                logger.exception("persist rankings json failed")
+                return False
+        try:
+            payload = self.ladder.export_cache()
+            payload["live_ids"] = sorted(self.live_ids)
+            payload["dynamic_chains"] = {
+                k: list(v) for k, v in self.dynamic_chains.items()
+            }
+            self._db.set_ranking_cache(payload, cache_key=self.rankings_cache_key)
+            logger.info(
+                "ranking cache persisted (coding=%s)",
+                payload.get("best_coding", [])[:3],
+            )
+            return True
+        except Exception:
+            logger.exception("persist rankings cache failed")
+            return False
+
+    def recompute_rankings(self, *, persist: bool = True) -> dict:
+        """
+        Precompute best open models for all intents and freeze until next refresh.
+        Call at startup after catalog load and on admin cache refresh.
+        """
+        self.ladder.set_docs(self.doc_models)
+        self.ladder.provider_ids = set(self.ladder.provider_ids)
+        self.ladder.rebuild(self.live_ids, freeze=True)
+        self._sync_chains_from_ladder()
+        if persist:
+            self.persist_rankings_cache()
+            self._persist_snapshot()
+        best = {
+            "coding_agentic": self.dynamic_chains.get("coding_agentic", [])[:8],
+            "chat_fast": self.dynamic_chains.get("chat_fast", [])[:5],
+            "reasoning": self.dynamic_chains.get("reasoning", [])[:5],
+            "frozen": self.ladder.frozen,
+            "computed_at": self.ladder.computed_at,
+            "live_models": len(self.live_ids),
+        }
+        logger.info("best models precomputed: %s", best)
+        return best
+
     def _sync_chains_from_ladder(self) -> None:
         intents = list(self.catalog.intents.keys()) or [
             "coding_agentic",
@@ -319,17 +414,49 @@ class ModelRegistry:
             "long_horizon",
             "vision",
         ]
+        variants_default = {}
         for intent in intents:
-            self.dynamic_chains[intent] = self.ladder.ladder_for(intent)
+            variants_default[intent] = self.ladder.ladder_for(intent, variant="default")
+            # Store variant chains for auto-fast / auto-cheap
+            self.dynamic_chains[intent] = variants_default[intent]
+            self.dynamic_chains[f"{intent}::cheap"] = self.ladder.ladder_for(
+                intent, variant="cheap"
+            )
+            self.dynamic_chains[f"{intent}::fast"] = self.ladder.ladder_for(
+                intent, variant="fast"
+            )
 
-    def _rebuild_all_chains(self) -> None:
-        self.ladder.set_docs(self.doc_models)
-        self.ladder.rebuild(self.live_ids)
-        self._sync_chains_from_ladder()
-        logger.info(
-            "intelligent ladders rebuilt: %s",
-            {k: v[:3] for k, v in self.dynamic_chains.items()},
-        )
+    def _rebuild_all_chains(self, *, force: bool = False) -> None:
+        """
+        Rebuild dynamic chains from ladders.
+
+        Sticky mode: keep precomputed order unless ``force`` or the live catalog
+        contains models never ranked (then recompute so new providers join).
+        """
+        if force:
+            self.recompute_rankings(persist=True)
+            return
+        if self.rankings_sticky and self.ladder.frozen and self.ladder._ladders:
+            known: set[str] = set()
+            for snap in self.ladder._ladders.values():
+                known.update(snap.ladder)
+            unseen = set(self.live_ids) - known
+            if unseen:
+                logger.info(
+                    "rankings sticky but %s new model(s) unseen — recompute",
+                    len(unseen),
+                )
+                self.recompute_rankings(persist=True)
+                return
+            # Only update live set; keep precomputed order
+            self.ladder.live_ids = set(self.live_ids)
+            self._sync_chains_from_ladder()
+            logger.info(
+                "rankings sticky — kept cached ladders (coding head=%s)",
+                self.dynamic_chains.get("coding_agentic", [])[:3],
+            )
+            return
+        self.recompute_rankings(persist=True)
 
     def _filter_available(self, chain: list[str]) -> list[str]:
         if not self.live_ids:
@@ -381,7 +508,10 @@ class ModelRegistry:
                 had_tools=had_tools,
                 tool_ok=tool_ok,
             )
-            self._sync_chains_from_ladder()
+            # Sticky rankings: do NOT rebuild ladder on every outcome.
+            # Online learning still records; order refreshes only on cache refresh.
+            if not self.rankings_sticky or not self.ladder.frozen:
+                self._sync_chains_from_ladder()
 
     def _join_docs_to_ids(self) -> set[str]:
         """Map doc slugs/publishers onto live API ids."""
@@ -489,8 +619,16 @@ class ModelRegistry:
         *,
         fetch_docs: bool = True,
         run_probes: bool = True,
+        recompute_rankings: bool | None = None,
     ) -> bool:
-        """Refresh live catalog from all enabled OpenAI-compatible providers."""
+        """
+        Refresh live catalog from all enabled OpenAI-compatible providers.
+
+        ``recompute_rankings``:
+          - True  → force precompute + persist best-model cache
+          - False → keep sticky rankings (only update live_ids)
+          - None  → recompute only if rankings are empty / not sticky
+        """
         from nimmakai.catalog.providers import namespace_model
 
         self.ladder.provider_ids = set(hub.provider_ids)
@@ -548,7 +686,17 @@ class ModelRegistry:
 
         self._join_docs_to_ids()
         self._ingest_context_from_docs()
-        self._rebuild_all_chains()
+
+        force_rank = recompute_rankings
+        if force_rank is None:
+            force_rank = (not self.rankings_sticky) or (not self.ladder.frozen) or (
+                not self.ladder._ladders
+            )
+        if force_rank:
+            self.recompute_rankings(persist=True)
+        else:
+            self.ladder.live_ids = set(self.live_ids)
+            self._sync_chains_from_ladder()
 
         if run_probes and self.probe_budget.remaining() > 0:
             candidates: list[str] = []
@@ -573,7 +721,7 @@ class ModelRegistry:
                         )
                 except Exception:
                     logger.debug("probe failed for %s", mid, exc_info=True)
-            self._rebuild_all_chains()
+            # Probes update health only; sticky rankings stay frozen
 
         self.last_refresh_at = time.monotonic()
         self.last_refresh_ok = any_ok or bool(self.live_ids)
@@ -596,6 +744,11 @@ class ModelRegistry:
             "probe_budget_remaining": self.probe_budget.remaining(),
             "last_refresh_age_s": age,
             "last_refresh_ok": self.last_refresh_ok,
+            "rankings_sticky": self.rankings_sticky,
+            "rankings_frozen": self.ladder.frozen,
+            "rankings_computed_at": self.ladder.computed_at,
+            "best_coding": list(self.dynamic_chains.get("coding_agentic", [])[:10]),
+            "best_chat": list(self.dynamic_chains.get("chat_fast", [])[:8]),
             "dynamic_families": self.catalog.defaults.dynamic_families,
             "families": self.catalog.families.model_dump(),
             "ladders": self.ladder.snapshot(),

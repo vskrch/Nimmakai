@@ -47,6 +47,12 @@ CREATE TABLE IF NOT EXISTS meta (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS ranking_cache (
+    cache_key TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    updated_at REAL NOT NULL DEFAULT 0
+);
 """
 
 
@@ -273,6 +279,49 @@ class NimmakaiDB:
     def clear_preferences(self) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM preferences")
+
+    # ── ranking / best-models cache ─────────────────────────────────
+
+    def get_ranking_cache(self, cache_key: str = "default") -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT payload_json, updated_at FROM ranking_cache WHERE cache_key = ?",
+                (cache_key,),
+            ).fetchone()
+        if not row:
+            return None
+        try:
+            data = json.loads(row["payload_json"] or "{}")
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(data, dict):
+            return None
+        data["_updated_at"] = float(row["updated_at"] or 0)
+        return data
+
+    def set_ranking_cache(
+        self, payload: dict[str, Any], *, cache_key: str = "default"
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO ranking_cache (cache_key, payload_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(cache_key) DO UPDATE SET
+                    payload_json = excluded.payload_json,
+                    updated_at = excluded.updated_at
+                """,
+                (cache_key, json.dumps(payload), time.time()),
+            )
+
+    def clear_ranking_cache(self, cache_key: str | None = None) -> None:
+        with self._lock:
+            if cache_key:
+                self._conn.execute(
+                    "DELETE FROM ranking_cache WHERE cache_key = ?", (cache_key,)
+                )
+            else:
+                self._conn.execute("DELETE FROM ranking_cache")
 
 
 # Process-wide cache so ProviderStore + UserPreferences share one connection.

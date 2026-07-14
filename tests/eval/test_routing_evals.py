@@ -86,7 +86,8 @@ def test_eval_ladder_walks_after_primary_unavailable() -> None:
         status_code=404,
         unavailable=True,
     )
-    chain = reg.chain_for_intent("coding_agentic")
+    # Sticky rankings keep order; health demotion is applied at request time
+    chain = reg.health_reorder(reg.chain_for_intent("coding_agentic"))
     assert chain[0] != "qwen/qwen3.5-397b-a17b"
     assert len(chain) >= 2
 

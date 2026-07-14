@@ -232,6 +232,11 @@ async def ladder_view(request: Request) -> JSONResponse:
             "ladders": registry.ladder.snapshot(),
             "live_model_count": len(registry.live_ids),
             "policy": "strongest_available_first_then_ladder",
+            "sticky": registry.rankings_sticky,
+            "frozen": registry.ladder.frozen,
+            "computed_at": registry.ladder.computed_at,
+            "best_coding": registry.dynamic_chains.get("coding_agentic", [])[:12],
+            "refresh": "POST /admin/catalog/refresh or POST /admin/rankings/refresh",
         }
     )
 
@@ -256,6 +261,11 @@ async def catalog_view(request: Request) -> JSONResponse:
 
 @router.post("/admin/catalog/refresh")
 async def catalog_refresh(request: Request) -> JSONResponse:
+    """
+    Full service cache refresh: re-fetch provider /v1/models and **recompute**
+    sticky best-model rankings (this is the only path that rebuilds the cache
+    by default — periodic background sync only updates live ids).
+    """
     settings = getattr(request.app.state, "settings", None) or get_settings()
     require_proxy_auth(request, settings)
     registry = getattr(request.app.state, "registry", None)
@@ -272,12 +282,71 @@ async def catalog_refresh(request: Request) -> JSONResponse:
             status_code=503,
         )
     if hub is not None:
-        ok = await registry.refresh_from_hub(hub, fetch_docs=False, run_probes=False)
+        ok = await registry.refresh_from_hub(
+            hub, fetch_docs=False, run_probes=False, recompute_rankings=True
+        )
     elif upstream is not None:
         ok = await registry.refresh_from_upstream(upstream)
+        if ok:
+            registry.recompute_rankings(persist=True)
     else:
         ok = False
-    return JSONResponse({"ok": ok, "catalog": registry.snapshot()})
+    return JSONResponse(
+        {
+            "ok": ok,
+            "catalog": registry.snapshot(),
+            "rankings": {
+                "best_coding": registry.dynamic_chains.get("coding_agentic", [])[:12],
+                "best_chat": registry.dynamic_chains.get("chat_fast", [])[:8],
+                "frozen": registry.ladder.frozen,
+                "computed_at": registry.ladder.computed_at,
+            },
+            "message": "Catalog + best-model ranking cache refreshed",
+        }
+    )
+
+
+@router.post("/admin/rankings/refresh")
+async def rankings_refresh(request: Request) -> JSONResponse:
+    """Recompute best open models from current live_ids and persist cache."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    registry = getattr(request.app.state, "registry", None)
+    if registry is None:
+        return JSONResponse(
+            {"error": {"message": "Catalog not loaded", "code": "nimmakai_catalog_empty"}},
+            status_code=503,
+        )
+    best = registry.recompute_rankings(persist=True)
+    return JSONResponse({"ok": True, "rankings": best})
+
+
+@router.get("/admin/rankings")
+async def rankings_view(request: Request) -> JSONResponse:
+    """Inspect sticky precomputed best-model cache."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    registry = getattr(request.app.state, "registry", None)
+    if registry is None:
+        return JSONResponse(
+            {"error": {"message": "Catalog not loaded", "code": "nimmakai_catalog_empty"}},
+            status_code=503,
+        )
+    return JSONResponse(
+        {
+            "sticky": registry.rankings_sticky,
+            "frozen": registry.ladder.frozen,
+            "computed_at": registry.ladder.computed_at,
+            "best_coding": registry.dynamic_chains.get("coding_agentic", [])[:15],
+            "best_chat": registry.dynamic_chains.get("chat_fast", [])[:10],
+            "best_reasoning": registry.dynamic_chains.get("reasoning", [])[:10],
+            "ladders": registry.ladder.snapshot(),
+            "hint": (
+                "Rankings are precomputed at startup and frozen. "
+                "POST /admin/catalog/refresh or /admin/rankings/refresh to recompute."
+            ),
+        }
+    )
 
 
 @router.get("/admin/providers")
@@ -595,7 +664,10 @@ async def upsert_provider(request: Request) -> JSONResponse:
     live_added = 0
     if registry is not None:
         registry.ladder.provider_ids = set(hub.provider_ids)
-        ok = await registry.refresh_from_hub(hub, fetch_docs=False, run_probes=False)
+        # New provider models must re-enter sticky ranking cache
+        ok = await registry.refresh_from_hub(
+            hub, fetch_docs=False, run_probes=False, recompute_rankings=True
+        )
         live_added = len(registry.live_ids)
     else:
         ok = True
@@ -636,7 +708,9 @@ async def delete_provider(provider_id: str, request: Request) -> JSONResponse:
         )
     if registry is not None:
         registry.ladder.provider_ids = set(hub.provider_ids)
-        await registry.refresh_from_hub(hub, fetch_docs=False, run_probes=False)
+        await registry.refresh_from_hub(
+            hub, fetch_docs=False, run_probes=False, recompute_rankings=True
+        )
     return JSONResponse({"ok": True, "providers": hub.store.list_masked()})
 
 
@@ -656,7 +730,9 @@ async def refresh_provider(provider_id: str, request: Request) -> JSONResponse:
             {"error": {"message": "Provider not found or disabled", "code": "not_found"}},
             status_code=404,
         )
-    ok = await registry.refresh_from_hub(hub, fetch_docs=False, run_probes=False)
+    ok = await registry.refresh_from_hub(
+        hub, fetch_docs=False, run_probes=False, recompute_rankings=True
+    )
     return JSONResponse({"ok": ok, "catalog": registry.snapshot()})
 
 

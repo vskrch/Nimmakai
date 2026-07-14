@@ -1115,14 +1115,21 @@ function renderM(ms) {
 }
 function filterM() { applyMFilter(); }
 async function refreshCat(silent) {
-  if (!silent) toast('Refreshing catalog…');
+  if (!silent) toast('Refreshing catalog + ranking cache…');
   let r = await ap('/admin/catalog/refresh', {});
   if (!r || r.__ok === false) {
     toast(errMsg(r, 'Catalog refresh failed'), true);
     return;
   }
   await loadM();
-  if (!silent) toast(r.ok === false ? 'Refresh completed with warnings' : 'Catalog updated');
+  let head = (r.rankings && r.rankings.best_coding) || [];
+  if (!silent) {
+    toast(
+      r.ok === false
+        ? 'Refresh completed with warnings'
+        : ('Cache refreshed' + (head[0] ? ' · best: ' + head[0] : ''))
+    );
+  }
 }
 
 // Pinned models modal editor logic

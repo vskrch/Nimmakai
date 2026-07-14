@@ -116,6 +116,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         preferences.load()
 
+        # Bind sticky ranking cache (SQLite) as early as possible
+        try:
+            from nimmakai.catalog.db import get_db
+
+            _db = get_db(settings.sqlite_path)
+            if registry is not None:
+                registry.rankings_sticky = True
+                registry.bind_db(_db)
+        except Exception:
+            logger.exception("ranking cache bind failed — will recompute in-memory")
+
         if registry is not None:
             registry.ladder.provider_ids = set(hub.provider_ids)
             selector = ModelSelector(registry, settings, preferences=preferences)
@@ -126,22 +137,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             # Defer initial catalog refresh to background — don't block startup
             async def _initial_refresh() -> None:
                 try:
+                    had_cache = bool(registry.ladder.frozen and registry.ladder._ladders)
                     # Skip docs on initial refresh — too slow for startup
                     ok = await registry.refresh_from_hub(
                         hub,
                         fetch_docs=False,
                         run_probes=False,
+                        # Recompute rankings if no sticky cache; else keep frozen
+                        recompute_rankings=not had_cache,
                     )
+                    if not registry.ladder.frozen or not registry.dynamic_chains.get(
+                        "coding_agentic"
+                    ):
+                        best = registry.recompute_rankings(persist=True)
+                    else:
+                        best = {
+                            "coding_agentic": registry.dynamic_chains.get(
+                                "coding_agentic", []
+                            )[:8],
+                            "from_cache": True,
+                        }
                     if not ok:
                         logger.warning(
                             "initial catalog refresh returned no models — "
                             "check provider API keys and base URLs"
                         )
-                    else:
-                        logger.info(
-                            "initial catalog ready — %s live model(s)",
-                            len(registry.live_ids),
-                        )
+                    logger.info(
+                        "startup ready live=%s sticky_rankings=%s best_coding=%s",
+                        len(registry.live_ids),
+                        registry.ladder.frozen,
+                        best.get("coding_agentic")
+                        or best.get("best_coding")
+                        or registry.dynamic_chains.get("coding_agentic", [])[:5],
+                    )
                 except Exception:
                     logger.exception("initial catalog refresh failed")
 
@@ -186,10 +214,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             settings.catalog_run_probes and cycle % every == 0
                         )
                         try:
+                            # Background: update live model availability only —
+                            # do NOT recompute sticky best-model rankings.
                             await registry.refresh_from_hub(
                                 hub,
                                 fetch_docs=settings.catalog_fetch_docs,
                                 run_probes=run_probes,
+                                recompute_rankings=False,
                             )
                         except Exception:
                             logger.exception("periodic catalog refresh failed")

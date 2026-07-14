@@ -71,7 +71,8 @@ def test_ladder_skips_unhealthy_head() -> None:
         "zai/glm-5.2",
         "stepfun/step-3.7-flash",
     }
-    svc.rebuild(live)
+    # Unfrozen rebuild so health is reflected when re-scoring (production freezes)
+    svc.rebuild(live, freeze=False)
     health.record_outcome(
         "qwen/qwen3.5-397b-a17b",
         success=False,
