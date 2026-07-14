@@ -95,6 +95,19 @@ async def test_health_endpoint():
 
 
 @pytest.mark.asyncio
+async def test_admin_logs_endpoint():
+    app = _make_app()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        r = await c.get("/admin/logs", headers=AUTH)
+        assert r.status_code == 200
+        body = r.json()
+        assert "entries" in body
+        assert isinstance(body["entries"], list)
+
+
+@pytest.mark.asyncio
 async def test_root_endpoint():
     app = _make_app()
     async with AsyncClient(

@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     log_level: str = "info"
     upstream_timeout: float = 300.0
     default_model: str | None = None
+    # Streaming: TTFT = wait for first token; idle = max gap between chunks.
+    # 10s mid-stream was killing Cursor/agent sessions (H18 / TimeoutError).
+    stream_ttft_timeout_seconds: float = 90.0
+    stream_idle_timeout_seconds: float = 180.0
+    request_log_size: int = 200
 
     # Catalog / routing
     models_config_path: str = "config/models.yaml"

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from nimmakai.auth import require_proxy_auth
 from nimmakai.catalog import ModelRegistry
 from nimmakai.config import Settings, get_settings
+from nimmakai.logging_setup import RequestLog, log_request_line, request_logs
 from nimmakai.routing import (
     FallbackExecutor,
     IntentClassifier,
@@ -202,19 +204,128 @@ async def get_model(model_id: str, request: Request) -> JSONResponse:
     return JSONResponse(content=body, status_code=status, headers=headers)
 
 
+def _client_ip(request: Request) -> str | None:
+    xf = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
+    if xf:
+        return xf.split(",")[0].strip()
+    if request.client:
+        return request.client.host
+    return None
+
+
+def _finish_log(
+    entry: RequestLog,
+    *,
+    status: int,
+    t0: float,
+    model_routed: str | None = None,
+    provider: str | None = None,
+    intent: str | None = None,
+    route_mode: str | None = None,
+    fallback_index: int | None = None,
+    stream: bool | None = None,
+    error: str | None = None,
+    model_requested: str | None = None,
+) -> None:
+    entry.status = status
+    entry.duration_ms = (time.perf_counter() - t0) * 1000
+    if model_routed is not None:
+        entry.model_routed = model_routed
+    if provider is not None:
+        entry.provider = provider
+    if intent is not None:
+        entry.intent = intent
+    if route_mode is not None:
+        entry.route_mode = route_mode
+    if fallback_index is not None:
+        entry.fallback_index = fallback_index
+    if stream is not None:
+        entry.stream = stream
+    if error is not None:
+        entry.error = error
+    if model_requested is not None:
+        entry.model_requested = model_requested
+    request_logs.add(entry)
+    log_request_line(entry)
+
+
 async def _chat_like(
     request: Request,
     *,
     upstream_path: str,
 ) -> JSONResponse | StreamingResponse:
+    t0 = time.perf_counter()
+    req_id = getattr(request.state, "request_id", None) or "noreq"
+    entry = RequestLog(
+        id=req_id,
+        ts=time.time(),
+        method=request.method,
+        path=str(request.url.path),
+        client=_client_ip(request),
+        user_agent=(request.headers.get("user-agent") or "")[:160] or None,
+    )
     upstream = _upstream(request)
     guard: AccountGuard = request.app.state.guard
-    body = await request.json()
-    body, decision, ctx, _token = await _prepare_routed(
-        request, body, path=upstream_path
-    )
+    try:
+        body = await request.json()
+    except Exception as exc:
+        _finish_log(entry, status=400, t0=t0, error=f"invalid_json:{exc}")
+        return JSONResponse(
+            {
+                "error": {
+                    "message": "Invalid JSON body",
+                    "type": "invalid_request_error",
+                    "code": "invalid_json",
+                }
+            },
+            status_code=400,
+        )
+
+    entry.model_requested = str(body.get("model") or "") or None
+    entry.stream = bool(body.get("stream"))
+    # Cursor sometimes sends huge payloads — log size only
+    try:
+        msg_n = len(body.get("messages") or body.get("input") or [])
+        entry.notes.append(f"messages={msg_n}")
+        if body.get("tools"):
+            entry.notes.append(f"tools={len(body.get('tools') or [])}")
+    except Exception:
+        pass
+
+    try:
+        body, decision, ctx, _token = await _prepare_routed(
+            request, body, path=upstream_path
+        )
+    except Exception as exc:
+        # Auth HTTPException propagates via FastAPI — re-raise
+        from fastapi import HTTPException
+
+        if isinstance(exc, HTTPException):
+            _finish_log(
+                entry,
+                status=exc.status_code,
+                t0=t0,
+                error=str(getattr(exc, "detail", "auth")),
+            )
+            raise
+        _finish_log(entry, status=500, t0=t0, error=str(exc))
+        raise
+
     stream = bool(body.get("stream"))
     preferred = ctx.preferred_key_id
+    chain_head = ""
+    if decision is not None and decision.chain:
+        chain_head = decision.chain[0]
+        logger.info(
+            "route req=%s path=%s requested=%s intent=%s mode=%s chain_head=%s chain_len=%s",
+            req_id,
+            upstream_path,
+            decision.requested_model,
+            decision.intent.value,
+            decision.mode,
+            chain_head,
+            len(decision.chain),
+        )
 
     try:
         if decision is not None:
@@ -232,17 +343,46 @@ async def _chat_like(
                     key_id=result.key.key_id if result.key else None,
                     fallback_index=result.fallback_index,
                 )
+                route_h["X-Request-Id"] = req_id
                 media = result.headers.get("content-type", "text/event-stream")
                 upstream_iter = result.byte_iter
                 key_id = result.key.key_id if result.key else None
                 ok = 200 <= result.status_code < 300
+                provider = route_h.get("X-Nimmakai-Provider")
 
                 async def _gated_stream() -> Any:
+                    err: str | None = None
                     try:
                         async for chunk in upstream_iter:
                             yield chunk
+                    except Exception as stream_exc:
+                        err = str(stream_exc)
+                        logger.warning(
+                            "stream consumer error req=%s model=%s: %s",
+                            req_id,
+                            result.model,
+                            stream_exc,
+                        )
+                        try:
+                            yield b"data: [DONE]\n\n"
+                        except Exception:
+                            pass
                     finally:
-                        await guard.after_request(ctx, key_id=key_id, success=ok)
+                        await guard.after_request(ctx, key_id=key_id, success=ok and not err)
+                        _finish_log(
+                            entry,
+                            status=result.status_code if not err else 499,
+                            t0=t0,
+                            model_routed=result.model,
+                            provider=provider,
+                            intent=decision.intent.value,
+                            route_mode=decision.mode,
+                            fallback_index=result.fallback_index,
+                            stream=True,
+                            error=err,
+                            model_requested=str(decision.requested_model or body.get("model") or "")
+                            or None,
+                        )
 
                 return StreamingResponse(
                     _gated_stream(),
@@ -268,10 +408,27 @@ async def _chat_like(
                 key_id=result_j.key.key_id if result_j.key else None,
                 fallback_index=result_j.fallback_index,
             )
+            route_h["X-Request-Id"] = req_id
             await guard.after_request(
                 ctx,
                 key_id=result_j.key.key_id if result_j.key else None,
                 success=200 <= result_j.status_code < 300,
+            )
+            _finish_log(
+                entry,
+                status=result_j.status_code,
+                t0=t0,
+                model_routed=result_j.model,
+                provider=route_h.get("X-Nimmakai-Provider"),
+                intent=decision.intent.value,
+                route_mode=decision.mode,
+                fallback_index=result_j.fallback_index,
+                stream=False,
+                model_requested=str(decision.requested_model or body.get("model") or "")
+                or None,
+                error=None
+                if result_j.status_code < 400
+                else f"upstream_{result_j.status_code}",
             )
             return JSONResponse(
                 content=result_j.body,
@@ -292,11 +449,27 @@ async def _chat_like(
             ok = 200 <= status < 300
 
             async def _gated_passthrough() -> Any:
+                err: str | None = None
                 try:
                     async for chunk in byte_iter:
                         yield chunk
+                except Exception as stream_exc:
+                    err = str(stream_exc)
+                    try:
+                        yield b"data: [DONE]\n\n"
+                    except Exception:
+                        pass
                 finally:
-                    await guard.after_request(ctx, key_id=key_id, success=ok)
+                    await guard.after_request(ctx, key_id=key_id, success=ok and not err)
+                    _finish_log(
+                        entry,
+                        status=status if not err else 499,
+                        t0=t0,
+                        model_routed=str(body.get("model") or ""),
+                        stream=True,
+                        route_mode="disabled",
+                        error=err,
+                    )
 
             return StreamingResponse(
                 _gated_passthrough(),
@@ -307,6 +480,7 @@ async def _chat_like(
                     "Cache-Control": "no-cache",
                     "X-Accel-Buffering": "no",
                     "Connection": "keep-alive",
+                    "X-Request-Id": req_id,
                 },
             )
 
@@ -317,12 +491,24 @@ async def _chat_like(
             preferred_key_id=preferred,
         )
         await guard.after_request(ctx, key_id=key.key_id, success=200 <= status < 300)
+        _finish_log(
+            entry,
+            status=status,
+            t0=t0,
+            model_routed=str(body.get("model") or ""),
+            stream=False,
+            route_mode="disabled",
+        )
+        headers = {**headers, "X-Request-Id": req_id}
         return JSONResponse(content=resp_body, status_code=status, headers=headers)
-    except RuntimeError:
+    except RuntimeError as exc:
         await guard.after_request(ctx, success=False)
+        _finish_log(entry, status=503, t0=t0, error=str(exc), stream=stream)
         return JSONResponse(content=guard.pool_exhausted_error(), status_code=503)
-    except Exception:
+    except Exception as exc:
         await guard.after_request(ctx, success=False)
+        _finish_log(entry, status=500, t0=t0, error=str(exc), stream=stream)
+        logger.exception("chat path failed req=%s", req_id)
         raise
 
 

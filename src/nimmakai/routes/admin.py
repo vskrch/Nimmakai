@@ -41,6 +41,40 @@ async def storage_info(request: Request) -> JSONResponse:
     )
 
 
+@router.get("/admin/logs")
+async def admin_logs(request: Request) -> JSONResponse:
+    """
+    Recent request log ring (per dyno). Use for Cursor debugging.
+
+    Query: ?limit=50&errors=1&path=/v1/chat
+    """
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    from nimmakai.logging_setup import request_logs
+
+    limit = 50
+    try:
+        limit = min(200, max(1, int(request.query_params.get("limit") or 50)))
+    except ValueError:
+        pass
+    errors_only = request.query_params.get("errors") in {"1", "true", "yes"}
+    path_prefix = request.query_params.get("path") or None
+    return JSONResponse(
+        {
+            "count": limit,
+            "errors_only": errors_only,
+            "path_prefix": path_prefix,
+            "entries": request_logs.list(
+                limit=limit, path_prefix=path_prefix, errors_only=errors_only
+            ),
+            "hint": (
+                "Heroku full logs: heroku logs -a your-nimmakai -t. "
+                "Each chat line includes req=… routed=… intent=… stream=…"
+            ),
+        }
+    )
+
+
 @router.get("/health")
 async def health(request: Request) -> JSONResponse:
     pool = getattr(request.app.state, "pool", None)

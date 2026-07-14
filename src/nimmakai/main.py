@@ -21,6 +21,7 @@ from nimmakai.catalog.hub import ProviderHub
 from nimmakai.catalog.preferences import UserPreferences
 from nimmakai.catalog.providers import ProviderStore
 from nimmakai.config import Settings, get_settings
+from nimmakai.logging_setup import new_request_id, request_logs, setup_logging
 from nimmakai.routes import admin, openai
 from nimmakai.routing import FallbackExecutor, IntentClassifier, ModelSelector, RoutingStats
 from nimmakai.safety import AccountGuard
@@ -31,9 +32,12 @@ logger = logging.getLogger("nimmakai")
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    setup_logging(settings.log_level)
+    request_logs.max_entries = max(50, int(settings.request_log_size))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        setup_logging(settings.log_level)
         store = ProviderStore.load(
             settings.providers_config_path,
             settings.providers_overlay_path,
@@ -219,8 +223,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "X-Nimmakai-Context-Length",
             "X-Nimmakai-Requested-Model",
             "X-Nimmakai-Rule-Id",
+            "X-Request-Id",
         ],
     )
+
+    @app.middleware("http")
+    async def request_id_middleware(request: Request, call_next: Any) -> Any:
+        rid = (
+            request.headers.get("x-request-id")
+            or request.headers.get("X-Request-Id")
+            or new_request_id()
+        )
+        request.state.request_id = rid
+        response = await call_next(request)
+        response.headers.setdefault("X-Request-Id", rid)
+        return response
 
     app.include_router(admin.router)
     app.include_router(openai.router)

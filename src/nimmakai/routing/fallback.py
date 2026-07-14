@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -523,20 +524,48 @@ class FallbackExecutor:
 
             if 200 <= status < 300:
                 import asyncio
+
+                ttft = float(
+                    getattr(self.settings, "stream_ttft_timeout_seconds", 90.0) or 90.0
+                )
+                idle = float(
+                    getattr(self.settings, "stream_idle_timeout_seconds", 180.0) or 180.0
+                )
                 try:
-                    first_chunk = await asyncio.wait_for(anext(byte_iter), timeout=10.0)
+                    first_chunk = await asyncio.wait_for(anext(byte_iter), timeout=ttft)
                 except StopAsyncIteration:
                     first_chunk = b""
-                except (Exception, asyncio.TimeoutError) as exc:
-                    logger.warning("Stream TTFT stalled on %s: %s; falling back", model, exc)
+                except TimeoutError as exc:
+                    logger.warning(
+                        "Stream TTFT stalled on %s after %.0fs; falling back",
+                        model,
+                        ttft,
+                    )
                     if hasattr(byte_iter, "aclose"):
-                        await byte_iter.aclose()
+                        with suppress(Exception):
+                            await byte_iter.aclose()
                     self.stats.fallback_advances += 1
                     self.registry.record_outcome(
                         model,
                         key.key_id if key else None,
                         success=False,
                         status_code=504,
+                        intent=decision.intent.value,
+                    )
+                    continue
+                except Exception as exc:
+                    logger.warning(
+                        "Stream open failed on %s: %s; falling back", model, exc
+                    )
+                    if hasattr(byte_iter, "aclose"):
+                        with suppress(Exception):
+                            await byte_iter.aclose()
+                    self.stats.fallback_advances += 1
+                    self.registry.record_outcome(
+                        model,
+                        key.key_id if key else None,
+                        success=False,
+                        status_code=502,
                         intent=decision.intent.value,
                     )
                     continue
@@ -551,15 +580,28 @@ class FallbackExecutor:
                     had_tools=bool(body.get("tools") or body.get("functions")),
                 )
 
-                async def robust_iter(first: bytes, rest: AsyncIterator[bytes]) -> AsyncIterator[bytes]:
+                # Bind loop vars so the generator does not close over the last iteration
+                bound_model = model
+                bound_key_id = key.key_id if key else None
+                bound_idle = idle
+
+                async def robust_iter(
+                    first: bytes,
+                    rest: AsyncIterator[bytes],
+                    *,
+                    mid: str = bound_model,
+                    kid: str | None = bound_key_id,
+                    idle_s: float = bound_idle,
+                ) -> AsyncIterator[bytes]:
                     def _scan_for_tokens(c: bytes) -> None:
                         if b'"usage"' in c:
                             import re
+
                             p = re.search(rb'"prompt_tokens"\s*:\s*(\d+)', c)
                             ct = re.search(rb'"completion_tokens"\s*:\s*(\d+)', c)
                             if p and ct:
                                 self.stats.record_tokens(
-                                    model, key.key_id if key else None, int(p.group(1)), int(ct.group(1))
+                                    mid, kid, int(p.group(1)), int(ct.group(1))
                                 )
 
                     if first:
@@ -567,15 +609,35 @@ class FallbackExecutor:
                         yield first
                     try:
                         while True:
-                            # 10s watchdog for mid-stream chunks too.
-                            chunk = await asyncio.wait_for(anext(rest), timeout=10.0)
+                            try:
+                                chunk = await asyncio.wait_for(
+                                    anext(rest), timeout=idle_s
+                                )
+                            except TimeoutError:
+                                # Do NOT crash the ASGI app (Cursor H18). End SSE cleanly.
+                                logger.warning(
+                                    "Stream idle timeout on %s after %.0fs — closing SSE cleanly",
+                                    mid,
+                                    idle_s,
+                                )
+                                yield b"data: [DONE]\n\n"
+                                return
                             _scan_for_tokens(chunk)
                             yield chunk
                     except StopAsyncIteration:
                         return
-                    except Exception as e:
-                        logger.warning("Stream stalled mid-way: %s", e)
+                    except (asyncio.CancelledError, GeneratorExit):
                         raise
+                    except Exception as e:
+                        # Client disconnect / upstream drop — end cleanly for Cursor
+                        logger.warning(
+                            "Stream ended early on %s: %s — closing SSE", mid, e
+                        )
+                        try:
+                            yield b"data: [DONE]\n\n"
+                        except Exception:
+                            pass
+                        return
 
                 return StreamResult(
                     status_code=status,
