@@ -25,6 +25,12 @@ _STRIP_BODY_KEYS = {
     "store",
     "metadata",
     "n",  # some free APIs reject n>1; force 1 below
+    # OpenRouter / Kilo client-only (also stripped in strip_router_client_fields)
+    "session_id",
+    "sessionId",
+    "plugins",
+    "provider",
+    "route",
 }
 
 

@@ -1,11 +1,23 @@
-"""Resolve client model field → ordered NIM model chain."""
+"""Resolve client model field → ordered NIM model chain.
+
+OpenRouter / Kilo parity: ``openrouter/auto``, ``kilo/auto``, ``kilo-auto/*``
+trigger prompt-aware selection with optional session model pin + plugins.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 from nimmakai.catalog.aliases import looks_like_nim_id, normalize_model_name
+from nimmakai.routing.auto_router import (
+    AutoRouterOptions,
+    filter_chain,
+    is_auto_router_id,
+    pin_model_first,
+    resolve_auto_tier,
+    tier_to_variant,
+)
 from nimmakai.routing.intents import Intent, IntentResult
 
 if TYPE_CHECKING:
@@ -30,6 +42,11 @@ class RouteDecision:
     intent: Intent
     rule_id: str
     requested_model: str | None
+    # OpenRouter-style metadata
+    auto_tier: str | None = None
+    variant: str = "default"
+    sticky_model: str | None = None
+    allowed_models: list[str] = field(default_factory=list)
 
 
 class ModelSelector:
@@ -49,6 +66,8 @@ class ModelSelector:
         intent_result: IntentResult,
         *,
         routing_disabled: bool = False,
+        auto_opts: AutoRouterOptions | None = None,
+        preferred_model: str | None = None,
     ) -> RouteDecision:
         intent = intent_result.intent
         if intent == Intent.UNKNOWN:
@@ -58,25 +77,21 @@ class ModelSelector:
         if not raw and self.settings.default_model:
             raw = normalize_model_name(self.settings.default_model)
 
-        variant = "default"
-        if raw in ("auto-cheap", "nimmakai/auto-cheap"):
-            variant = "cheap"
-            raw = "auto"
-        elif raw in ("auto-fast", "nimmakai/auto-fast"):
-            variant = "fast"
-            raw = "auto"
-        elif raw in (
-            "auto-coding",
-            "nimmakai/auto-coding",
-            "nimmakai/best",
-            "nimmakai/coding",
-            "best",
-            "coding",
-        ):
-            # Force coding ladder with speed+intelligence scoring
-            intent = Intent.CODING_AGENTIC
-            intent_key = intent.value
-            raw = "auto"
+        opts = auto_opts or AutoRouterOptions()
+        tier = opts.tier or resolve_auto_tier(raw if raw else model_field)
+        variant = tier_to_variant(tier) if tier else "default"
+
+        # Force coding intent for coding / frontier tiers (agent + architecture)
+        if tier in ("coding", "frontier"):
+            if intent not in (Intent.EMBEDDINGS, Intent.VISION):
+                if tier == "coding" or intent == Intent.CHAT_FAST:
+                    # frontier keeps reasoning/long_horizon when classified
+                    if tier == "coding":
+                        intent = Intent.CODING_AGENTIC
+                    elif intent == Intent.CHAT_FAST:
+                        intent = Intent.CODING_AGENTIC
+
+        intent_key = intent.value
 
         if routing_disabled:
             chain = [raw] if raw else []
@@ -88,45 +103,72 @@ class ModelSelector:
                 intent=intent,
                 rule_id=intent_result.rule_id,
                 requested_model=model_field,
+                auto_tier=tier,
+                variant=variant,
             )
 
-        # Check user preferences first — if user pinned models for this intent, use them
-        intent_key = intent.value
+        # User preferences first
         if self.preferences is not None and self.preferences.has_preference(intent_key):
             pref = self.preferences.get(intent_key)
             if pref is not None and pref.chain:
-                mode: RouteMode = "passthrough" if pref.strict else "passthrough_with_fallback"
+                mode: RouteMode = (
+                    "passthrough" if pref.strict else "passthrough_with_fallback"
+                )
                 chain = list(pref.chain)
                 if not pref.strict:
-                    siblings = self.registry.chain_for_intent(intent_key, variant=variant)
+                    siblings = self.registry.chain_for_intent(
+                        intent_key, variant=variant
+                    )
                     chain = chain + [m for m in siblings if m not in chain]
+                chain = self._finalize_chain(
+                    chain,
+                    intent_key=intent_key,
+                    variant=variant,
+                    free_only=tier == "free",
+                    allowed=opts.allowed_models,
+                    preferred_model=preferred_model if tier else None,
+                    models_fallback=opts.models_fallback,
+                )
                 return RouteDecision(
-                    chain=self.registry.health_reorder(
-                        chain, intent=intent_key, variant=variant
-                    ),
+                    chain=chain,
                     mode=mode,
                     intent=intent,
                     rule_id=f"user_pref:{intent_key}",
                     requested_model=model_field,
+                    auto_tier=tier,
+                    variant=variant,
+                    sticky_model=preferred_model,
+                    allowed_models=list(opts.allowed_models),
                 )
 
         if intent == Intent.EMBEDDINGS:
             chain = self.registry.chain_for_intent("embeddings", variant=variant)
             if not chain and raw and looks_like_nim_id(raw):
                 chain = [raw]
+            chain = self.registry.health_reorder(
+                chain, intent=intent_key, variant=variant
+            )
             return RouteDecision(
-                chain=self.registry.health_reorder(
-                    chain, intent=intent_key, variant=variant
-                ),
-                mode="auto" if self.registry.is_auto(raw) or not raw else "passthrough",
+                chain=chain,
+                mode="auto"
+                if self.registry.is_auto(raw) or not raw
+                else "passthrough",
                 intent=intent,
                 rule_id=intent_result.rule_id,
                 requested_model=model_field,
+                auto_tier=tier,
+                variant=variant,
             )
 
-        if self.registry.is_auto(raw) or raw == "":
+        # Auto router (OpenRouter/Kilo/Nimmakai virtual models)
+        is_auto = (
+            raw == ""
+            or self.registry.is_auto(raw)
+            or is_auto_router_id(model_field)
+            or is_auto_router_id(raw)
+        )
+        if is_auto:
             chain = self.registry.chain_for_intent(intent_key, variant=variant)
-            # Cold-start / empty catalog: any live model is better than 503
             if not chain and self.registry.live_ids:
                 if intent_key == "coding_agentic":
                     from nimmakai.resilience import emergency_coding_chain
@@ -134,30 +176,49 @@ class ModelSelector:
                     chain = emergency_coding_chain(self.registry)
                 if not chain:
                     chain = sorted(self.registry.live_ids)
+            chain = self._finalize_chain(
+                chain,
+                intent_key=intent_key,
+                variant=variant,
+                free_only=tier == "free",
+                allowed=opts.allowed_models,
+                preferred_model=preferred_model,
+                models_fallback=opts.models_fallback,
+            )
             return RouteDecision(
-                chain=self.registry.health_reorder(
-                    chain, intent=intent_key, variant=variant
-                ),
+                chain=chain,
                 mode="auto",
                 intent=intent,
                 rule_id=intent_result.rule_id,
                 requested_model=model_field,
+                auto_tier=tier or "balanced",
+                variant=variant,
+                sticky_model=preferred_model,
+                allowed_models=list(opts.allowed_models),
             )
 
         if self.registry.is_alias(raw):
             target = self.registry.resolve_alias(raw)
             if target.kind == "chain":
                 chain = self.registry.chain_for_intent(target.value, variant=variant)
+                chain = self._finalize_chain(
+                    chain,
+                    intent_key=target.value,
+                    variant=variant,
+                    free_only=False,
+                    allowed=opts.allowed_models,
+                    preferred_model=None,
+                    models_fallback=opts.models_fallback,
+                )
                 return RouteDecision(
-                    chain=self.registry.health_reorder(
-                        chain, intent=target.value, variant=variant
-                    ),
+                    chain=chain,
                     mode="alias",
                     intent=Intent(target.value)
                     if target.value in {i.value for i in Intent}
                     else intent,
                     rule_id=intent_result.rule_id,
                     requested_model=model_field,
+                    variant=variant,
                 )
             # alias → concrete model
             chain = [target.value]
@@ -167,7 +228,6 @@ class ModelSelector:
             optimized = self.registry.health_reorder(
                 chain, intent=intent_key, variant=variant
             )
-            # Keep explicit head first; optimize fallbacks only
             head = target.value
             rest = [m for m in optimized if m != head]
             return RouteDecision(
@@ -176,6 +236,7 @@ class ModelSelector:
                 intent=intent,
                 rule_id=intent_result.rule_id,
                 requested_model=model_field,
+                variant=variant,
             )
 
         if self.registry.is_known(raw) or looks_like_nim_id(raw):
@@ -183,14 +244,12 @@ class ModelSelector:
             if self.settings.enable_fallback_on_explicit:
                 siblings = self.registry.chain_for_intent(intent_key, variant=variant)
                 bare = resolved.split("/")[-1] if "/" in resolved else resolved
-                # Same bare model on other providers first (horizontal failover)
                 horizontals = [
                     m
                     for m in siblings
                     if (m.split("/")[-1] if "/" in m else m) == bare and m != resolved
                 ]
                 rest = [m for m in siblings if m != resolved and m not in horizontals]
-                # Same-model providers next (horizontal), then intel×speed rest
                 rest_opt = self.registry.health_reorder(
                     rest, intent=intent_key, variant=variant
                 )
@@ -209,16 +268,65 @@ class ModelSelector:
                 intent=intent,
                 rule_id=intent_result.rule_id,
                 requested_model=model_field,
+                variant=variant,
             )
 
-        # Unknown non-NIM string → treat as auto
+        # Unknown non-NIM string → treat as auto (Cursor defaults, etc.)
         chain = self.registry.chain_for_intent(intent_key, variant=variant)
+        chain = self._finalize_chain(
+            chain,
+            intent_key=intent_key,
+            variant=variant,
+            free_only=tier == "free",
+            allowed=opts.allowed_models,
+            preferred_model=preferred_model if tier else None,
+            models_fallback=opts.models_fallback,
+        )
         return RouteDecision(
-            chain=self.registry.health_reorder(
-                chain, intent=intent_key, variant=variant
-            ),
+            chain=chain,
             mode="unknown_alias_as_auto",
             intent=intent,
             rule_id=intent_result.rule_id,
             requested_model=model_field,
+            auto_tier=tier,
+            variant=variant,
+            sticky_model=preferred_model,
+            allowed_models=list(opts.allowed_models),
         )
+
+    def _finalize_chain(
+        self,
+        chain: list[str],
+        *,
+        intent_key: str,
+        variant: str,
+        free_only: bool,
+        allowed: list[str],
+        preferred_model: str | None,
+        models_fallback: list[str],
+    ) -> list[str]:
+        # OpenRouter models[] as extra fallback candidates
+        if models_fallback:
+            for m in models_fallback:
+                resolved = self.registry.resolve_live_id(m) or m
+                if resolved not in chain:
+                    chain = chain + [resolved]
+
+        chain = self.registry.health_reorder(
+            chain, intent=intent_key, variant=variant
+        )
+        chain = filter_chain(
+            chain, allowed_models=allowed or None, free_only=free_only
+        )
+        # Session model pin (OpenRouter sticky routing)
+        if preferred_model:
+            chain = pin_model_first(chain, preferred_model)
+            chain = self.registry.health_reorder(
+                chain, intent=intent_key, variant=variant
+            )
+            # Re-pin after health reorder so sticky model stays head if healthy
+            if preferred_model and not self.registry.health.is_unhealthy(
+                preferred_model
+            ):
+                chain = pin_model_first(chain, preferred_model)
+        return chain

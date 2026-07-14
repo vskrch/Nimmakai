@@ -203,6 +203,8 @@ class ModelRegistry:
         )
 
     def auto_tokens(self) -> set[str]:
+        from nimmakai.routing.auto_router import all_auto_router_ids, is_auto_router_id
+
         base = {
             normalize_model_name(t) for t in self.catalog.defaults.auto_mode_model_tokens
         }
@@ -217,11 +219,30 @@ class ModelRegistry:
             "nimmakai/auto-cheap",
             "auto-fast",
             "auto-cheap",
+            # OpenRouter / Kilo drop-in aliases
+            "openrouter/auto",
+            "openrouter/auto-router",
+            "kilo/auto",
+            "kilo/auto-free",
+            "kilo-auto",
+            "kilo-auto/frontier",
+            "kilo-auto/balanced",
+            "kilo-auto/efficient",
+            "kilo-auto/free",
         }
+        for mid in all_auto_router_ids():
+            base.add(normalize_model_name(mid))
+        # keep is_auto_router_id in sync for any future aliases
+        _ = is_auto_router_id
         return base
 
     def is_auto(self, model: str | None) -> bool:
-        return normalize_model_name(model) in self.auto_tokens()
+        from nimmakai.routing.auto_router import is_auto_router_id
+
+        if model is None or str(model).strip() == "":
+            return True
+        n = normalize_model_name(model)
+        return n in self.auto_tokens() or is_auto_router_id(n)
 
     def is_alias(self, name: str | None) -> bool:
         n = normalize_model_name(name)
@@ -790,7 +811,13 @@ class ModelRegistry:
         }
 
     def synthetic_auto_models(self) -> list[dict[str, Any]]:
-        """All virtual models Cursor / OpenAI clients can pick from /v1/models."""
+        """All virtual models Cursor / OpenAI clients can pick from /v1/models.
+
+        Includes OpenRouter- and Kilo-compatible auto-router ids so clients that
+        hard-code ``openrouter/auto`` or ``kilo-auto/*`` work drop-in.
+        """
+        from nimmakai.routing.auto_router import all_auto_router_ids
+
         base = {
             "object": "model",
             "created": 0,
@@ -798,11 +825,22 @@ class ModelRegistry:
             "permission": [],
             "parent": None,
         }
-        return [
-            {**base, "id": "nimmakai/auto", "root": "nimmakai/auto"},
-            {**base, "id": "nimmakai/auto-coding", "root": "nimmakai/auto-coding"},
-            {**base, "id": "nimmakai/best", "root": "nimmakai/best"},
-            {**base, "id": "nimmakai/auto-fast", "root": "nimmakai/auto-fast"},
-            {**base, "id": "nimmakai/auto-cheap", "root": "nimmakai/auto-cheap"},
-            {**base, "id": "auto", "root": "auto"},
-        ]
+        owned = {
+            "openrouter/auto": "openrouter",
+            "kilo/auto": "kilo",
+            "kilo-auto/frontier": "kilo",
+            "kilo-auto/balanced": "kilo",
+            "kilo-auto/efficient": "kilo",
+            "kilo-auto/free": "kilo",
+        }
+        out: list[dict[str, Any]] = []
+        for mid in all_auto_router_ids():
+            out.append(
+                {
+                    **base,
+                    "id": mid,
+                    "root": mid,
+                    "owned_by": owned.get(mid, "nimmakai"),
+                }
+            )
+        return out

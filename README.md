@@ -292,9 +292,12 @@ The dashboard at **http://localhost:8080/dashboard** has three tabs:
 
 ### How It Works
 
-1. **Classify**: Analyze the request (tools → `coding_agentic`, short Q&A → `chat_fast`, long context → `long_horizon`, etc.)
+1. **Classify**: Analyze the request (tools → `coding_agentic`, short Q&A → `chat_fast`, long context → `long_horizon`, etc.) — same idea as OpenRouter Auto Router prompt analysis and Kilo Auto Model task classification.
 2. **Resolve**: Map the client's `model` field to a routing decision:
-   - `nimmakai/auto` → use intelligent ladder
+   - `nimmakai/auto` / `openrouter/auto` / `kilo/auto` → intelligent ladder (drop-in auto-router)
+   - `kilo-auto/frontier|balanced|efficient|free` → tiered auto (quality / default / cost / free-only)
+   - `nimmakai/auto-coding` / `nimmakai/best` → force coding ladder
+   - `nimmakai/auto-fast` / `nimmakai/auto-cheap` → speed or cost variant
    - `groq/llama-3.3-70b` → explicit model (with optional fallback)
    - `gpt-4o` → alias (maps to `chain:coding_agentic`)
 3. **Ladder**: Score every live model across all providers for the detected intent:
@@ -304,7 +307,44 @@ The dashboard at **http://localhost:8080/dashboard** has three tabs:
    - Doc description keywords
    - Online learning (past failures, tool support, empty replies)
    - Capability probes
+   - Continuous intelligence × speed × health ranking
 4. **Execute**: Try the strongest model first. On error/unavailable/empty, walk down. On 429/5xx, exponential backoff + key rotate.
+5. **Response `model` field**: rewritten to the **actual** upstream model used (OpenRouter Auto Router behavior). Requested id is in `X-Nimmakai-Requested-Model`.
+6. **Session stickiness**: pins model + key for multi-turn chats via `session_id`, `X-Session-Id` / `X-Nimmakai-Session`, Cursor chat id, or implicit first-system+first-user fingerprint (like OpenRouter).
+
+### OpenRouter / Kilo Auto Router Drop-in
+
+Point Cursor / Kilo / any OpenAI client at Nimmakai and use the same model strings:
+
+| Model id | Behavior |
+|----------|----------|
+| `openrouter/auto` | Prompt-aware best model (balanced) |
+| `kilo/auto` | Same as balanced auto |
+| `kilo-auto/frontier` | Max capability / coding-heavy |
+| `kilo-auto/balanced` | Strong default |
+| `kilo-auto/efficient` | Cost-aware (cheapest capable) |
+| `kilo-auto/free` | Free-tier pool only |
+| `nimmakai/auto` | Same as openrouter/auto |
+| `nimmakai/best` / `nimmakai/auto-coding` | Best coding models |
+
+OpenRouter-style request body options:
+
+```json
+{
+  "model": "openrouter/auto",
+  "session_id": "my-conversation-123",
+  "plugins": [{
+    "id": "auto-router",
+    "allowed_models": ["zen/*", "nim/*"],
+    "cost_quality_tradeoff": 3
+  }],
+  "messages": [{"role": "user", "content": "Explain quantum entanglement"}]
+}
+```
+
+- `cost_quality_tradeoff`: 0 = pure quality … 10 = maximize cost savings (default maps to balanced/efficient).
+- `allowed_models`: glob patterns (`anthropic/*`, `*/claude-*`).
+- Response JSON `model` is the concrete model that answered.
 
 ### Intent Types
 
@@ -372,11 +412,13 @@ Preferences are stored in `.nimmakai/user_preferences.json` and survive restarts
   "baseUrl": "http://localhost:8080/v1",
   "apiKey": "sk-nimmakai-local-dev",
   "models": {
-    "default": "nimmakai/auto",
-    "reasoning": "nimmakai/auto"
+    "default": "openrouter/auto",
+    "reasoning": "nimmakai/best"
   }
 }
 ```
+
+Any of `openrouter/auto`, `kilo/auto`, `kilo-auto/*`, or `nimmakai/auto` work — they all hit the same intelligent auto-router.
 
 ### OpenAI Python SDK
 
@@ -436,14 +478,18 @@ curl http://localhost:8080/v1/chat/completions \
 | `X-Nimmakai-Provider` | Which provider handled the request (nim, groq, etc.) |
 | `X-Nimmakai-Context-Length` | Discovered context window of the model used |
 | `X-Nimmakai-Requested-Model` | Original model field from the client |
+| `X-Nimmakai-Auto-Tier` | balanced / frontier / efficient / free / fast / coding |
+| `X-Nimmakai-Sticky-Model` | Session-pinned model (if any) |
 
 ### Custom Request Headers
 
 | Header | Effect |
 |--------|--------|
-| `X-Nimmakai-Session` | Enable sticky session affinity |
+| `X-Nimmakai-Session` / `X-Session-Id` | Sticky session affinity (model + key) |
 | `X-Nimmakai-Disable-Route: 1` | Force passthrough, no routing |
 | `X-Nimmakai-Intent: reasoning` | Override intent classification |
+
+Body field `session_id` is also accepted (OpenRouter-compatible).
 
 ---
 

@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 class GuardContext:
     session_id: str | None
     preferred_key_id: str | None
+    preferred_model: str | None = None
 
 
 class AccountGuard:
@@ -41,11 +42,13 @@ class AccountGuard:
     ) -> GuardContext:
         session_id = None
         preferred = None
+        preferred_model = None
         if self.settings.sticky_sessions_enabled:
             session_id = self.sticky.resolve_session_id(
                 headers, proxy_token=proxy_token, body=body
             )
             preferred = self.sticky.get(session_id)
+            preferred_model = self.sticky.get_model(session_id)
 
         await self.gate.acquire(max_wait=30.0)
         await apply_jitter(
@@ -53,22 +56,30 @@ class AccountGuard:
             min_ms=self.settings.safety_jitter_ms_min,
             max_ms=self.settings.safety_jitter_ms_max,
         )
-        return GuardContext(session_id=session_id, preferred_key_id=preferred)
+        return GuardContext(
+            session_id=session_id,
+            preferred_key_id=preferred,
+            preferred_model=preferred_model,
+        )
 
     async def after_request(
         self,
         ctx: GuardContext,
         *,
         key_id: str | None = None,
+        model_id: str | None = None,
         success: bool = True,
+        pin_model: bool = False,
     ) -> None:
         await self.gate.release()
-        if (
-            self.settings.sticky_sessions_enabled
-            and ctx.session_id
-            and key_id
-            and success
+        if not (
+            self.settings.sticky_sessions_enabled and ctx.session_id and success
         ):
+            return
+        # OpenRouter: only pin model on success; failed routes re-select next turn
+        if pin_model and model_id:
+            self.sticky.put_both(ctx.session_id, key_id=key_id, model_id=model_id)
+        elif key_id:
             self.sticky.put(ctx.session_id, key_id)
 
     def pool_exhausted_error(self) -> dict:

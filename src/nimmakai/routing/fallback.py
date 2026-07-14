@@ -235,14 +235,18 @@ class FallbackExecutor:
             available = raw
         # Continuous optimizer: intelligence × speed × health (every request)
         intent = decision.intent.value
-        variant = "default"
-        if "cheap" in (decision.mode or "") or (
-            decision.requested_model
-            and "cheap" in str(decision.requested_model)
-        ):
-            variant = "cheap"
-        elif decision.requested_model and "fast" in str(decision.requested_model):
-            variant = "fast"
+        variant = getattr(decision, "variant", None) or "default"
+        if variant == "default":
+            req = str(decision.requested_model or "").lower()
+            tier = str(getattr(decision, "auto_tier", "") or "").lower()
+            if (
+                "cheap" in req
+                or tier in ("efficient", "free")
+                or "efficient" in req
+            ):
+                variant = "cheap"
+            elif "fast" in req or tier == "fast":
+                variant = "fast"
         if available:
             from nimmakai.routing.optimizer import optimize_chain
 
@@ -280,6 +284,10 @@ class FallbackExecutor:
             h["X-Nimmakai-Key-Id"] = key_id
         if decision.requested_model:
             h["X-Nimmakai-Requested-Model"] = str(decision.requested_model)
+        if getattr(decision, "auto_tier", None):
+            h["X-Nimmakai-Auto-Tier"] = str(decision.auto_tier)
+        if getattr(decision, "sticky_model", None):
+            h["X-Nimmakai-Sticky-Model"] = str(decision.sticky_model)
         ctx_len = self.registry.context_length_for(model)
         if ctx_len is not None:
             h["X-Nimmakai-Context-Length"] = str(ctx_len)

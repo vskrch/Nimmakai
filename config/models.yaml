@@ -4,6 +4,12 @@ defaults:
   auto_mode_model_tokens:
     - auto
     - nimmakai/auto
+    - openrouter/auto
+    - kilo/auto
+    - kilo-auto/frontier
+    - kilo-auto/balanced
+    - kilo-auto/efficient
+    - kilo-auto/free
     - ""
   passthrough_if_known: true
   max_fallback_attempts: 6
@@ -38,6 +44,8 @@ aliases:
   o4-mini: chain:reasoning
   cursor-small: chain:chat_fast
   default: chain:coding_agentic
+  # OpenRouter / Kilo names are handled as auto-router virtual models
+  # (see routing/auto_router.py) — not as chain aliases.
 
 intents:
   coding_agentic:

@@ -24,6 +24,10 @@ from nimmakai.routing import (
     ModelSelector,
     RouteDecision,
 )
+from nimmakai.routing.auto_router import (
+    parse_auto_router_options,
+    strip_router_client_fields,
+)
 from nimmakai.safety import AccountGuard
 from nimmakai.upstream import UpstreamClient
 
@@ -88,6 +92,9 @@ async def _prepare_routed(
         )
         return body, None, ctx, proxy_token
 
+    # OpenRouter plugins / session_id / models[] — parse before strip
+    auto_opts = parse_auto_router_options(body)
+
     intent = classifier.classify(path=path, body=body, headers=request.headers)
     if settings.classify_mode == "rules_then_llm":
         upstream = _upstream(request)
@@ -104,10 +111,19 @@ async def _prepare_routed(
             pool_pressure_high=pressure,
         )
 
-    decision = selector.resolve(body.get("model"), intent)
     ctx = await guard.before_request(
         headers=request.headers, proxy_token=proxy_token, body=body
     )
+    # Auto-router session model pin (OpenRouter sticky model selection)
+    preferred_model = getattr(ctx, "preferred_model", None)
+    decision = selector.resolve(
+        body.get("model"),
+        intent,
+        auto_opts=auto_opts,
+        preferred_model=preferred_model,
+    )
+    # Drop client-only OpenRouter/Kilo fields before upstream
+    body = strip_router_client_fields(body)
     return body, decision, ctx, proxy_token
 
 
@@ -180,18 +196,29 @@ async def get_model(model_id: str, request: Request) -> JSONResponse:
     require_proxy_auth(request, settings)
     registry: ModelRegistry | None = getattr(request.app.state, "registry", None)
     hub = getattr(request.app.state, "hub", None)
-    if model_id in {
-        "auto",
-        "nimmakai/auto",
-        "nimmakai/auto-fast",
-        "nimmakai/auto-cheap",
-    } and registry is not None:
-        for m in registry.synthetic_auto_models():
-            if m["id"] == model_id or (
-                model_id == "auto" and m["id"] in {"auto", "nimmakai/auto"}
-            ):
-                return JSONResponse(content=m)
-        return JSONResponse(content=registry.synthetic_auto_model())
+    if registry is not None:
+        from nimmakai.routing.auto_router import is_auto_router_id
+
+        if is_auto_router_id(model_id) or model_id in {
+            "auto",
+            "nimmakai/auto",
+            "nimmakai/auto-fast",
+            "nimmakai/auto-cheap",
+            "nimmakai/auto-coding",
+            "nimmakai/best",
+            "openrouter/auto",
+            "kilo/auto",
+            "kilo-auto/frontier",
+            "kilo-auto/balanced",
+            "kilo-auto/efficient",
+            "kilo-auto/free",
+        }:
+            for m in registry.synthetic_auto_models():
+                if m["id"] == model_id or (
+                    model_id == "auto" and m["id"] in {"auto", "nimmakai/auto"}
+                ):
+                    return JSONResponse(content=m)
+            return JSONResponse(content=registry.synthetic_auto_model())
     if registry is not None:
         resolved = registry.resolve_live_id(model_id) or model_id
         if resolved in registry.live_ids:
@@ -371,6 +398,12 @@ async def _chat_like(
                 ok = 200 <= result.status_code < 300
                 provider = route_h.get("X-Nimmakai-Provider")
 
+                pin_model = decision.mode in {
+                    "auto",
+                    "unknown_alias_as_auto",
+                    "alias",
+                }
+
                 async def _gated_stream() -> Any:
                     err: str | None = None
                     try:
@@ -389,7 +422,13 @@ async def _chat_like(
                         except Exception:
                             pass
                     finally:
-                        await guard.after_request(ctx, key_id=key_id, success=ok and not err)
+                        await guard.after_request(
+                            ctx,
+                            key_id=key_id,
+                            model_id=result.model,
+                            success=ok and not err,
+                            pin_model=pin_model,
+                        )
                         _finish_log(
                             entry,
                             status=result.status_code if not err else 499,
@@ -430,10 +469,17 @@ async def _chat_like(
                 fallback_index=result_j.fallback_index,
             )
             route_h["X-Request-Id"] = req_id
+            pin_model = decision.mode in {
+                "auto",
+                "unknown_alias_as_auto",
+                "alias",
+            }
             await guard.after_request(
                 ctx,
                 key_id=result_j.key.key_id if result_j.key else None,
+                model_id=result_j.model,
                 success=200 <= result_j.status_code < 300,
+                pin_model=pin_model,
             )
             body_out = normalize_completion_json(
                 result_j.body, routed_model=result_j.model or None
