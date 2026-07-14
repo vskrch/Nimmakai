@@ -102,8 +102,24 @@ tr:hover td { background: rgba(255, 255, 255, 0.01); }
 .preset-card h4 { font-size: 14px; font-weight: 600; }
 .preset-card p { font-size: 12px; color: var(--dim); line-height: 1.45; flex: 1; }
 .preset-card .tags { display: flex; flex-wrap: wrap; gap: 6px; }
-.modal.wide { width: 560px; }
+.preset-card .signup { font-size: 11px; color: #c4b5fd; text-decoration: none; }
+.preset-card .signup:hover { text-decoration: underline; }
+.modal.wide { width: 560px; max-height: 90vh; overflow-y: auto; }
 select.input { appearance: auto; }
+.pool-bar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+.pool-chip { background: var(--card); border: 1px solid var(--border); border-radius: 20px; padding: 6px 12px; font-size: 12px; color: var(--dim); }
+.pool-chip strong { color: var(--text); margin-right: 4px; }
+.prov-filter { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.prov-filter button.active { border-color: var(--accent); color: #c4b5fd; background: rgba(139,92,246,0.1); }
+@media (max-width: 900px) {
+  body { flex-direction: column; overflow: auto; height: auto; min-height: 100vh; }
+  .sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); }
+  .sidebar nav { flex-direction: row; flex-wrap: wrap; }
+  .main-area { min-height: 70vh; }
+  .pg-layout { flex-direction: column; height: auto; }
+  .pg-sidebar { width: 100%; }
+  .scroll { padding: 16px; }
+}
 
 /* ── Playground ── */
 .pg-layout { display: flex; gap: 24px; height: calc(100vh - 140px); }
@@ -277,6 +293,7 @@ select.input { appearance: auto; }
           <div class="preset-grid" id="preset-grid"><div style="color:var(--dim);font-size:13px">Loading presets…</div></div>
         </div>
       </div>
+      <div id="pool-bar" class="pool-bar"></div>
       <div style="margin-bottom:12px">
         <h3 style="font-size:14px;font-weight:600">Configured providers</h3>
       </div>
@@ -285,10 +302,12 @@ select.input { appearance: auto; }
 
     <!-- MODELS -->
     <div class="page" id="pg-models">
-      <div style="display:flex;gap:12px;margin-bottom:24px">
+      <div style="display:flex;gap:12px;margin-bottom:16px;flex-wrap:wrap;align-items:center">
         <input class="input" id="msearch" placeholder="Search live models..." oninput="filterM()" style="max-width: 300px;">
         <button class="btn" onclick="refreshCat()">Refresh Catalog</button>
+        <span id="mcount" style="font-size:12px;color:var(--dim)"></span>
       </div>
+      <div class="prov-filter" id="mprov-filter"></div>
       <div class="card"><div class="bd" id="mtable" style="padding:0"></div></div>
     </div>
 
@@ -779,7 +798,11 @@ function openPreset(presetId) {
   if (p.custom) { openAddCustom(); return; }
   clearProviderForm();
   $('add-title').textContent = `Add ${p.name}`;
-  $('add-desc').textContent = (p.description || '') + (p.signup_url ? `  ·  Get a key: ${p.signup_url}` : '');
+  let desc = p.description || '';
+  if (p.signup_url) {
+    desc += ` · <a href="${esc(p.signup_url)}" target="_blank" rel="noopener" style="color:#c4b5fd">Get free API key ↗</a>`;
+  }
+  $('add-desc').innerHTML = desc;
   $('pf-preset').value = p.id;
   $('pf-id').value = p.id;
   $('pf-id').readOnly = true;
@@ -793,7 +816,7 @@ function openPreset(presetId) {
   let existing = PROV_BY_ID[p.id];
   if (existing) {
     $('add-title').textContent = `Update ${p.name}`;
-    $('add-desc').textContent = `Already configured (${existing.key_count || 0} keys). Paste new keys to replace, or leave empty to keep existing keys when only changing limits.`;
+    $('add-desc').innerHTML = `Already configured (<strong>${existing.key_count || 0}</strong> keys, <strong>${existing.model_count || 0}</strong> models in pool). Paste new keys to replace, or leave empty to keep existing keys.`;
   }
   modal('add');
   $('pf-keys').focus();
@@ -891,19 +914,29 @@ function renderPresets(configuredIds) {
   }
   $('preset-grid').innerHTML = list.map(p => {
     let conf = configuredIds.has(p.id) && !p.custom;
+    let mc = conf && PROV_BY_ID[p.id] ? (PROV_BY_ID[p.id].model_count || 0) : 0;
     let tags = [];
     if (p.free_tier) tags.push('<span class="badge free">Free</span>');
-    if (p.speed_tier === 'ultra' || p.speed_tier === 'fast') tags.push('<span class="badge fast">Fast</span>');
+    if (p.speed_tier === 'ultra') tags.push('<span class="badge fast">Ultra-fast</span>');
+    else if (p.speed_tier === 'fast') tags.push('<span class="badge fast">Fast</span>');
     if (p.custom) tags.push('<span class="badge accent">Custom</span>');
-    if (conf) tags.push('<span class="badge ok"><span class="dot"></span>Added</span>');
+    if (conf) tags.push(`<span class="badge ok"><span class="dot"></span>${mc} models</span>`);
+    let signup = p.signup_url
+      ? `<a class="signup" href="${esc(p.signup_url)}" target="_blank" rel="noopener" data-stop="1">Get key ↗</a>`
+      : '';
     return `<div class="preset-card ${conf ? 'configured' : ''}" data-preset="${esc(p.id)}">
-      <h4>${esc(p.name)}</h4>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+        <h4>${esc(p.name)}</h4>${signup}
+      </div>
       <p>${esc(p.description || '')}</p>
       <div class="tags">${tags.join('')}</div>
     </div>`;
   }).join('');
   $('preset-grid').querySelectorAll('[data-preset]').forEach(el => {
-    el.onclick = () => openPreset(el.getAttribute('data-preset'));
+    el.onclick = (ev) => {
+      if (ev.target && ev.target.closest && ev.target.closest('[data-stop]')) return;
+      openPreset(el.getAttribute('data-preset'));
+    };
   });
 }
 
@@ -924,6 +957,16 @@ async function loadP() {
   ps.forEach(p => { PROV_BY_ID[p.id] = p; });
   renderPresets(new Set(ps.map(p => p.id)));
 
+  let pool = r.pool || {};
+  let byProv = pool.models_by_provider || {};
+  $('pool-bar').innerHTML = `
+    <div class="pool-chip"><strong>${pool.live_models ?? 0}</strong> models in pool</div>
+    <div class="pool-chip"><strong>${pool.active_providers ?? 0}</strong> active providers</div>
+    ${Object.keys(byProv).sort().map(pid =>
+      `<div class="pool-chip"><strong>${esc(pid)}</strong> ${byProv[pid]} models</div>`
+    ).join('')}
+  `;
+
   if (!ps.length) {
     $('prov-list').innerHTML = '<div class="card"><div class="bd" style="text-align:center;color:var(--dim)">No providers yet. Click a free preset above or add a custom endpoint.</div></div>';
     return;
@@ -932,16 +975,20 @@ async function loadP() {
     <div class="card" style="padding:0">
       <table>
         <thead>
-          <tr><th>Provider</th><th>Base URL</th><th>Keys</th><th>Status</th><th>Actions</th></tr>
+          <tr><th>Provider</th><th>Base URL</th><th>Keys</th><th>Models</th><th>Status</th><th>Actions</th></tr>
         </thead>
         <tbody>
           ${ps.map(p => {
             let active = p.runtime || (p.enabled && (p.key_count || 0) > 0);
             let status = !p.enabled ? 'Disabled' : (active ? 'In pool' : 'No keys');
+            let freeB = p.free_tier ? ' <span class="badge free">Free</span>' : '';
+            let fastB = (p.speed_tier === 'ultra' || p.speed_tier === 'fast')
+              ? ` <span class="badge fast">${p.speed_tier === 'ultra' ? 'Ultra' : 'Fast'}</span>` : '';
             return `<tr>
-              <td><strong>${esc(p.name)}</strong><br/><span style="font-size:11px;color:var(--dim)">${esc(p.id)}/…</span></td>
-              <td style="color:var(--dim);max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.base_url)}">${esc(p.base_url)}</td>
-              <td style="color:var(--dim)">${p.key_count ?? 0}${p.available_keys != null ? ` <span style="color:var(--muted)">(${p.available_keys} free)</span>` : ''}</td>
+              <td><strong>${esc(p.name)}</strong>${freeB}${fastB}<br/><span style="font-size:11px;color:var(--dim)">${esc(p.id)}/…</span></td>
+              <td style="color:var(--dim);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(p.base_url)}">${esc(p.base_url)}</td>
+              <td style="color:var(--dim)">${p.key_count ?? 0}${p.available_keys != null ? ` <span style="color:var(--muted)">(${p.available_keys} ready)</span>` : ''}</td>
+              <td style="color:var(--accent);font-weight:600">${p.model_count ?? 0}</td>
               <td><span class="badge ${active ? 'ok' : 'err'}"><span class="dot"></span>${status}</span></td>
               <td style="display:flex;gap:6px;flex-wrap:wrap">
                 <button class="btn sm" data-edit="${esc(p.id)}">Keys / Edit</button>
@@ -964,8 +1011,10 @@ async function loadP() {
       let id = btn.getAttribute('data-test-id');
       toast('Testing ' + id + '…');
       let res = await ap('/admin/providers/test', { id });
-      if (res && res.ok) toast(res.message || 'OK');
-      else toast(errMsg(res, 'Test failed'), true);
+      if (res && res.ok) {
+        let sample = (res.sample_models || []).slice(0, 3).join(', ');
+        toast((res.message || 'OK') + (sample ? ' · ' + sample : ''));
+      } else toast(errMsg(res, 'Test failed'), true);
     };
   });
   $('prov-list').querySelectorAll('[data-toggle]').forEach(btn => {
@@ -1007,8 +1056,13 @@ async function addP() {
   await loadP();
   await loadM();
   loadD();
+  // Jump to models so user sees the merged pool
+  if ((r.live_model_count || 0) > 0) {
+    setTimeout(() => go('models'), 400);
+  }
 }
 
+let M_PROV_FILTER = 'all';
 async function loadM() {
   let r = await api('/v1/models');
   if (!r) {
@@ -1020,12 +1074,34 @@ async function loadM() {
     return;
   }
   ALL_M = (r.data || []).filter(m => m.id && !String(m.id).startsWith('nimmakai/'));
-  renderM(ALL_M);
+  renderMFilter();
+  applyMFilter();
   populatePlaygroundModels();
+}
+function renderMFilter() {
+  let provs = [...new Set(ALL_M.map(m => m.id.split('/')[0]))].sort();
+  let el = $('mprov-filter');
+  if (!el) return;
+  el.innerHTML = ['all', ...provs].map(p =>
+    `<button class="btn sm ${M_PROV_FILTER===p?'active':''}" data-pf="${esc(p)}">${p==='all'?'All providers':esc(p)}</button>`
+  ).join('');
+  el.querySelectorAll('[data-pf]').forEach(btn => {
+    btn.onclick = () => { M_PROV_FILTER = btn.getAttribute('data-pf'); renderMFilter(); applyMFilter(); };
+  });
+}
+function applyMFilter() {
+  let q = ($('msearch')?.value || '').toLowerCase();
+  let ms = ALL_M.filter(m => {
+    if (M_PROV_FILTER !== 'all' && !m.id.startsWith(M_PROV_FILTER + '/')) return false;
+    if (q && !m.id.toLowerCase().includes(q)) return false;
+    return true;
+  });
+  if ($('mcount')) $('mcount').textContent = `${ms.length} / ${ALL_M.length} models`;
+  renderM(ms);
 }
 function renderM(ms) {
   if (!ms.length) {
-    $('mtable').innerHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No models available. Add provider keys and click Refresh Catalog.</div>';
+    $('mtable').innerHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No models available. Add free provider keys (Providers tab) and click Refresh Catalog.</div>';
     return;
   }
   $('mtable').innerHTML = '<table><thead><tr><th>Model</th><th>Provider</th><th>Context</th></tr></thead><tbody>' +
@@ -1033,13 +1109,10 @@ function renderM(ms) {
       let parts = m.id.split('/'), prov = parts[0], mod = parts.slice(1).join('/') || m.id;
       let ctx = m.context_length || m.max_model_len || '—';
       let ctxStr = typeof ctx === 'number' ? ctx.toLocaleString() : esc(ctx);
-      return `<tr><td><strong>${esc(mod)}</strong></td><td><span class="badge accent">${esc(prov)}</span></td><td style="color:var(--dim)">${ctxStr}</td></tr>`;
+      return `<tr><td><strong>${esc(mod)}</strong><div style="font-size:11px;color:var(--muted)">${esc(m.id)}</div></td><td><span class="badge accent">${esc(prov)}</span></td><td style="color:var(--dim)">${ctxStr}</td></tr>`;
     }).join('') + '</tbody></table>';
 }
-function filterM() {
-  let q = $('msearch').value.toLowerCase();
-  renderM(ALL_M.filter(m => m.id.toLowerCase().includes(q)));
-}
+function filterM() { applyMFilter(); }
 async function refreshCat(silent) {
   if (!silent) toast('Refreshing catalog…');
   let r = await ap('/admin/catalog/refresh', {});

@@ -211,19 +211,37 @@ async def list_providers(request: Request) -> JSONResponse:
     require_proxy_auth(request, settings)
     hub = getattr(request.app.state, "hub", None)
     if hub is None:
-        return JSONResponse({"providers": [], "presets": []})
-    from nimmakai.catalog.presets import list_presets
+        return JSONResponse({"providers": [], "presets": [], "pool": {}})
+    from nimmakai.catalog.presets import get_preset, list_presets
+
+    registry = getattr(request.app.state, "registry", None)
+    live_ids = list(registry.live_ids) if registry is not None else []
+    counts: dict[str, int] = {}
+    for mid in live_ids:
+        pid = mid.split("/", 1)[0] if "/" in mid else "unknown"
+        counts[pid] = counts.get(pid, 0) + 1
 
     providers = hub.store.list_masked()
-    # Annotate with runtime status for the admin UI
+    # Annotate with runtime status + live model counts for the admin UI
     for p in providers:
         p["runtime"] = hub.has_runtime(p["id"])
         rt = hub.runtimes.get(p["id"])
         p["available_keys"] = rt.pool.available_count() if rt else 0
+        p["model_count"] = counts.get(p["id"], 0)
+        preset = get_preset(p["id"])
+        if preset:
+            p["free_tier"] = bool(preset.get("free_tier"))
+            p["speed_tier"] = preset.get("speed_tier")
+            p["signup_url"] = preset.get("signup_url") or ""
     return JSONResponse(
         {
             "providers": providers,
             "presets": list_presets(),
+            "pool": {
+                "live_models": len(live_ids),
+                "active_providers": sum(1 for p in providers if p.get("runtime")),
+                "models_by_provider": counts,
+            },
             "pool_note": (
                 "All enabled providers with keys are merged into one model pool. "
                 "Routing scores quality × affinity × health × free-provider speed."
@@ -264,34 +282,45 @@ async def test_provider(request: Request) -> JSONResponse:
         keys = [k.strip() for k in keys.split(",") if k.strip()]
     keys = [str(k).strip() for k in keys if str(k).strip()]
 
-    # Test existing provider by id
+    # Test existing provider by id (runtime or stored config)
     pid = str(body.get("id") or "").strip().lower()
-    if pid and hub is not None and pid in hub.runtimes:
-        rt = hub.runtimes[pid]
-        try:
-            status, resp, _h, _k = await rt.upstream.request_json("GET", "/models")
-            n = 0
-            if isinstance(resp, dict) and isinstance(resp.get("data"), list):
-                n = len(resp["data"])
-            ok = status < 400
-            return JSONResponse(
-                {
-                    "ok": ok,
-                    "status_code": status,
-                    "model_count": n,
-                    "message": (
-                        f"OK — {n} models from {pid}"
-                        if ok
-                        else f"HTTP {status} from {pid}"
-                    ),
-                },
-                status_code=200 if ok else 502,
-            )
-        except Exception as exc:
-            return JSONResponse(
-                {"ok": False, "message": f"Connection failed: {exc}"},
-                status_code=502,
-            )
+    if pid and hub is not None:
+        if pid in hub.runtimes:
+            rt = hub.runtimes[pid]
+            try:
+                status, resp, _h, _k = await rt.upstream.request_json("GET", "/models")
+                n = 0
+                sample: list[str] = []
+                if isinstance(resp, dict) and isinstance(resp.get("data"), list):
+                    n = len(resp["data"])
+                    for item in resp["data"][:8]:
+                        if isinstance(item, dict) and item.get("id"):
+                            sample.append(str(item["id"]))
+                ok = status < 400
+                return JSONResponse(
+                    {
+                        "ok": ok,
+                        "status_code": status,
+                        "model_count": n,
+                        "sample_models": sample,
+                        "message": (
+                            f"OK — {n} models from {pid}"
+                            if ok
+                            else f"HTTP {status} from {pid}"
+                        ),
+                    },
+                    status_code=200 if ok else 502,
+                )
+            except Exception as exc:
+                return JSONResponse(
+                    {"ok": False, "message": f"Connection failed: {exc}"},
+                    status_code=502,
+                )
+        cfg = hub.store.providers.get(pid)
+        if cfg is not None:
+            base_url = base_url or cfg.base_url
+            if not keys:
+                keys = cfg.resolved_keys()
 
     if not base_url:
         return JSONResponse(
