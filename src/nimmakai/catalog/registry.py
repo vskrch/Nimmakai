@@ -608,3 +608,19 @@ class ModelRegistry:
             "root": "nimmakai/auto",
             "parent": None,
         }
+
+    def synthetic_auto_models(self) -> list[dict[str, Any]]:
+        """All virtual models Cursor / OpenAI clients can pick from /v1/models."""
+        base = {
+            "object": "model",
+            "created": 0,
+            "owned_by": "nimmakai",
+            "permission": [],
+            "parent": None,
+        }
+        return [
+            {**base, "id": "nimmakai/auto", "root": "nimmakai/auto"},
+            {**base, "id": "nimmakai/auto-fast", "root": "nimmakai/auto-fast"},
+            {**base, "id": "nimmakai/auto-cheap", "root": "nimmakai/auto-cheap"},
+            {**base, "id": "auto", "root": "auto"},
+        ]

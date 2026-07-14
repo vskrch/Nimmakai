@@ -11,6 +11,11 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from nimmakai.auth import require_proxy_auth
 from nimmakai.catalog import ModelRegistry
+from nimmakai.compat import (
+    normalize_completion_json,
+    normalize_sse_stream,
+    sanitize_chat_body,
+)
 from nimmakai.config import Settings, get_settings
 from nimmakai.logging_setup import RequestLog, log_request_line, request_logs
 from nimmakai.routing import (
@@ -134,8 +139,8 @@ async def list_models(request: Request) -> JSONResponse:
             }
             data.append(registry.enrich_model_entry(item))
         if settings.inject_auto_model:
-            auto = registry.synthetic_auto_model()
-            data = [auto, *data]
+            autos = registry.synthetic_auto_models()
+            data = [*autos, *data]
         return JSONResponse(content={"object": "list", "data": data})
 
     # Fallback: single default upstream
@@ -175,7 +180,17 @@ async def get_model(model_id: str, request: Request) -> JSONResponse:
     require_proxy_auth(request, settings)
     registry: ModelRegistry | None = getattr(request.app.state, "registry", None)
     hub = getattr(request.app.state, "hub", None)
-    if model_id in {"auto", "nimmakai/auto"} and registry is not None:
+    if model_id in {
+        "auto",
+        "nimmakai/auto",
+        "nimmakai/auto-fast",
+        "nimmakai/auto-cheap",
+    } and registry is not None:
+        for m in registry.synthetic_auto_models():
+            if m["id"] == model_id or (
+                model_id == "auto" and m["id"] in {"auto", "nimmakai/auto"}
+            ):
+                return JSONResponse(content=m)
         return JSONResponse(content=registry.synthetic_auto_model())
     if registry is not None:
         resolved = registry.resolve_live_id(model_id) or model_id
@@ -292,6 +307,9 @@ async def _chat_like(
     except Exception:
         pass
 
+    # OpenAI/Cursor body quirks (max_completion_tokens, stream_options, etc.)
+    body = sanitize_chat_body(body)
+
     try:
         body, decision, ctx, _token = await _prepare_routed(
             request, body, path=upstream_path
@@ -345,7 +363,10 @@ async def _chat_like(
                 )
                 route_h["X-Request-Id"] = req_id
                 media = result.headers.get("content-type", "text/event-stream")
-                upstream_iter = result.byte_iter
+                # Cursor-compat: map reasoning_content → content, fix model field
+                upstream_iter = normalize_sse_stream(
+                    result.byte_iter, routed_model=result.model or None
+                )
                 key_id = result.key.key_id if result.key else None
                 ok = 200 <= result.status_code < 300
                 provider = route_h.get("X-Nimmakai-Provider")
@@ -414,6 +435,9 @@ async def _chat_like(
                 key_id=result_j.key.key_id if result_j.key else None,
                 success=200 <= result_j.status_code < 300,
             )
+            body_out = normalize_completion_json(
+                result_j.body, routed_model=result_j.model or None
+            )
             _finish_log(
                 entry,
                 status=result_j.status_code,
@@ -431,7 +455,7 @@ async def _chat_like(
                 else f"upstream_{result_j.status_code}",
             )
             return JSONResponse(
-                content=result_j.body,
+                content=body_out,
                 status_code=result_j.status_code,
                 headers=_merge_headers(result_j.headers, route_h),
             )
