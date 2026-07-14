@@ -333,18 +333,25 @@ async def rankings_view(request: Request) -> JSONResponse:
             status_code=503,
         )
     sticky = list(registry.dynamic_chains.get("coding_agentic", [])[:15])
-    adaptive = registry.health_reorder(sticky)
+    adaptive = registry.health_reorder(sticky, intent="coding_agentic")
+    from nimmakai.routing.optimizer import explain_top
+
     return JSONResponse(
         {
+            "algorithm": "score = I^0.50 × S^0.38 × H^0.08 × P^0.04 (every request)",
             "sticky": registry.rankings_sticky,
             "frozen": registry.ladder.frozen,
             "adaptive_routing": getattr(settings, "adaptive_routing", True),
             "computed_at": registry.ladder.computed_at,
             "best_coding_sticky": sticky,
-            "best_coding_adaptive": adaptive,
+            "best_coding_live": adaptive,
             "best_coding": adaptive,  # what requests actually try first
+            "score_breakdown": explain_top(
+                sticky, registry, intent="coding_agentic", n=8
+            ),
             "best_chat": registry.health_reorder(
-                list(registry.dynamic_chains.get("chat_fast", [])[:10])
+                list(registry.dynamic_chains.get("chat_fast", [])[:10]),
+                intent="chat_fast",
             ),
             "best_reasoning": registry.dynamic_chains.get("reasoning", [])[:10],
             "responsive": {
@@ -352,9 +359,9 @@ async def rankings_view(request: Request) -> JSONResponse:
             },
             "ladders": registry.ladder.snapshot(),
             "hint": (
-                "Sticky quality cache is precomputed at startup. "
-                "Each request auto-adapts: currently responding models jump to the front. "
-                "POST /admin/catalog/refresh to recompute the quality cache."
+                "Every request ranks intelligence × live speed × health. "
+                "Sticky cache is the intelligence prior; speed adapts continuously. "
+                "POST /admin/catalog/refresh to refresh the intelligence prior."
             ),
         }
     )

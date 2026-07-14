@@ -469,9 +469,20 @@ class ModelRegistry:
             raise RuntimeError("strict_catalog: no models available for chain")
         return filtered if filtered else list(chain)
 
-    def health_reorder(self, chain: list[str]) -> list[str]:
-        """Request-time adaptive reorder: best + currently responding first."""
-        return self.health.health_reorder(chain)
+    def health_reorder(
+        self, chain: list[str], *, intent: str = "coding_agentic", variant: str = "default"
+    ) -> list[str]:
+        """
+        Always algorithmically rank: intelligence × live speed × health.
+
+        Sticky ladder provides intelligence prior; every request re-scores
+        candidates so the fastest *responding* strong models lead.
+        """
+        from nimmakai.routing.optimizer import optimize_chain
+
+        return optimize_chain(
+            chain, self, intent=intent, variant=variant, max_n=None
+        )
 
     def record_outcome(
         self,

@@ -101,7 +101,9 @@ class ModelSelector:
                     siblings = self.registry.chain_for_intent(intent_key, variant=variant)
                     chain = chain + [m for m in siblings if m not in chain]
                 return RouteDecision(
-                    chain=self.registry.health_reorder(chain),
+                    chain=self.registry.health_reorder(
+                        chain, intent=intent_key, variant=variant
+                    ),
                     mode=mode,
                     intent=intent,
                     rule_id=f"user_pref:{intent_key}",
@@ -113,7 +115,9 @@ class ModelSelector:
             if not chain and raw and looks_like_nim_id(raw):
                 chain = [raw]
             return RouteDecision(
-                chain=self.registry.health_reorder(chain),
+                chain=self.registry.health_reorder(
+                    chain, intent=intent_key, variant=variant
+                ),
                 mode="auto" if self.registry.is_auto(raw) or not raw else "passthrough",
                 intent=intent,
                 rule_id=intent_result.rule_id,
@@ -129,11 +133,11 @@ class ModelSelector:
 
                     chain = emergency_coding_chain(self.registry)
                 if not chain:
-                    chain = self.registry.health_reorder(
-                        sorted(self.registry.live_ids)
-                    )
+                    chain = sorted(self.registry.live_ids)
             return RouteDecision(
-                chain=self.registry.health_reorder(chain),
+                chain=self.registry.health_reorder(
+                    chain, intent=intent_key, variant=variant
+                ),
                 mode="auto",
                 intent=intent,
                 rule_id=intent_result.rule_id,
@@ -145,7 +149,9 @@ class ModelSelector:
             if target.kind == "chain":
                 chain = self.registry.chain_for_intent(target.value, variant=variant)
                 return RouteDecision(
-                    chain=self.registry.health_reorder(chain),
+                    chain=self.registry.health_reorder(
+                        chain, intent=target.value, variant=variant
+                    ),
                     mode="alias",
                     intent=Intent(target.value)
                     if target.value in {i.value for i in Intent}
@@ -158,8 +164,14 @@ class ModelSelector:
             if self.settings.enable_fallback_on_explicit:
                 siblings = self.registry.chain_for_intent(intent_key, variant=variant)
                 chain = chain + [m for m in siblings if m != target.value]
+            optimized = self.registry.health_reorder(
+                chain, intent=intent_key, variant=variant
+            )
+            # Keep explicit head first; optimize fallbacks only
+            head = target.value
+            rest = [m for m in optimized if m != head]
             return RouteDecision(
-                chain=self.registry.health_reorder(chain),
+                chain=[head] + rest,
                 mode="alias_model",
                 intent=intent,
                 rule_id=intent_result.rule_id,
@@ -178,15 +190,21 @@ class ModelSelector:
                     if (m.split("/")[-1] if "/" in m else m) == bare and m != resolved
                 ]
                 rest = [m for m in siblings if m != resolved and m not in horizontals]
-                chain = [resolved] + horizontals + rest
+                # Same-model providers next (horizontal), then intel×speed rest
+                rest_opt = self.registry.health_reorder(
+                    rest, intent=intent_key, variant=variant
+                )
+                chain = (
+                    [resolved]
+                    + [m for m in horizontals if m != resolved]
+                    + [m for m in rest_opt if m != resolved and m not in horizontals]
+                )
                 mode: RouteMode = "passthrough_with_fallback"
             else:
                 chain = [resolved]
                 mode = "passthrough"
             return RouteDecision(
-                chain=self.registry.health_reorder(chain)
-                if mode == "passthrough_with_fallback"
-                else chain,
+                chain=chain,
                 mode=mode,
                 intent=intent,
                 rule_id=intent_result.rule_id,
@@ -196,7 +214,9 @@ class ModelSelector:
         # Unknown non-NIM string → treat as auto
         chain = self.registry.chain_for_intent(intent_key, variant=variant)
         return RouteDecision(
-            chain=self.registry.health_reorder(chain),
+            chain=self.registry.health_reorder(
+                chain, intent=intent_key, variant=variant
+            ),
             mode="unknown_alias_as_auto",
             intent=intent,
             rule_id=intent_result.rule_id,
