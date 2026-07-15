@@ -225,11 +225,25 @@ class ModelSelector:
             if self.settings.enable_fallback_on_explicit:
                 siblings = self.registry.chain_for_intent(intent_key, variant=variant)
                 chain = chain + [m for m in siblings if m != target.value]
-            optimized = self.registry.health_reorder(
-                chain, intent=intent_key, variant=variant
-            )
-            head = target.value
-            rest = [m for m in optimized if m != head]
+            # For coding, always rank all candidates — the best coder leads,
+            # the user-requested model stays as fallback.
+            if intent_key == "coding_agentic":
+                seen = set(chain)
+                for m in self.registry.coding_candidates():
+                    if m not in seen:
+                        chain.append(m)
+                        seen.add(m)
+                chain = self.registry.health_reorder(
+                    chain, intent=intent_key, variant=variant
+                )
+                head = chain[0]
+                rest = [m for m in chain if m != head]
+            else:
+                optimized = self.registry.health_reorder(
+                    chain, intent=intent_key, variant=variant
+                )
+                head = target.value
+                rest = [m for m in optimized if m != head]
             return RouteDecision(
                 chain=[head] + rest,
                 mode="alias_model",
@@ -262,6 +276,17 @@ class ModelSelector:
             else:
                 chain = [resolved]
                 mode = "passthrough"
+            # For coding, always rank all candidates — the best coder leads,
+            # the user-requested model stays as fallback.
+            if intent_key == "coding_agentic":
+                seen = set(chain)
+                for m in self.registry.coding_candidates():
+                    if m not in seen:
+                        chain.append(m)
+                        seen.add(m)
+                chain = self.registry.health_reorder(
+                    chain, intent=intent_key, variant=variant
+                )
             return RouteDecision(
                 chain=chain,
                 mode=mode,

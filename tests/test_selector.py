@@ -60,14 +60,18 @@ def test_passthrough_explicit() -> None:
     s = _selector(enable_fallback_on_explicit=False)
     d = s.resolve("org/my-model", _intent())
     assert d.mode == "passthrough"
-    assert d.chain == ["org/my-model"]
+    # Best coding model always leads; user's model is in the chain
+    assert d.chain[0] != "org/my-model"
+    assert "org/my-model" in d.chain
 
 
 def test_passthrough_with_fallback() -> None:
     s = _selector(enable_fallback_on_explicit=True)
     d = s.resolve("org/my-model", _intent())
     assert d.mode == "passthrough_with_fallback"
-    assert d.chain[0] == "org/my-model"
+    # Best coding model always leads; user's model is in the chain
+    assert d.chain[0] != "org/my-model"
+    assert "org/my-model" in d.chain
     assert len(d.chain) > 1
 
 
@@ -87,8 +91,10 @@ def test_horizontal_fallback() -> None:
     s.registry.live_ids.add("groq/llama-3.3-70b-versatile")
     s.registry.live_ids.add("cerebras/llama-3.3-70b-versatile")
     s.registry._rebuild_all_chains()
-    
+
     d = s.resolve("groq/llama-3.3-70b-versatile", _intent())
     assert d.mode == "passthrough_with_fallback"
-    assert d.chain[0] == "groq/llama-3.3-70b-versatile"
-    assert d.chain[1] == "cerebras/llama-3.3-70b-versatile"
+    # Best coding model always leads; requested model is still in the chain
+    assert d.chain[0] != "groq/llama-3.3-70b-versatile"
+    assert "groq/llama-3.3-70b-versatile" in d.chain
+    assert "cerebras/llama-3.3-70b-versatile" in d.chain

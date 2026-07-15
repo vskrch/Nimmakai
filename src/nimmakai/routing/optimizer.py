@@ -39,16 +39,21 @@ def _intelligence_prior(
     sticky_chain: list[str],
     ladder_scores: dict[str, float] | None,
 ) -> float:
-    """Map sticky quality into a positive prior (higher = smarter)."""
-    if ladder_scores and model_id in ladder_scores:
-        # Normalize typical ladder scores (~50–180) into ~0.4–1.2
-        raw = float(ladder_scores[model_id])
-        return max(0.35, min(1.35, raw / 120.0))
+    """Capability prior: narrow range so live speed+availability dominate.
+
+    ponytail: frozen rank position must never overpower a fast, available model
+    that isn't in the sticky chain yet. Range 0.65–1.0 keeps capability as a
+    quality gate while letting speed+availability decide the head.
+    """
+    if ladder_scores:
+        if model_id in ladder_scores:
+            raw = float(ladder_scores[model_id])
+            return max(0.65, min(1.0, raw / 160.0))
+        return 0.70  # not in frozen ladder — neutral, speed decides
     if model_id in sticky_chain:
-        # Inverse rank: #1 → 1.0, #10 → ~0.55
         rank = sticky_chain.index(model_id)
-        return max(0.35, 1.0 / (1.0 + 0.09 * rank))
-    return 0.45  # unknown mid prior
+        return max(0.65, 1.0 / (1.0 + 0.06 * rank))
+    return 0.70  # no ladder at all — neutral, speed decides
 
 
 def _speed_factor(health: Any, model_id: str) -> float:
