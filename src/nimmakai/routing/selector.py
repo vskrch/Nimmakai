@@ -312,6 +312,16 @@ class ModelSelector:
                 if resolved not in chain:
                     chain = chain + [resolved]
 
+        # Always rank over the full live coding pool, not just the frozen
+        # ladder subset — a newly-available coder can lead when it scores
+        # best on capability × availability × latency.
+        if intent_key == "coding_agentic":
+            seen = set(chain)
+            for m in self.registry.coding_candidates():
+                if m not in seen:
+                    chain = chain + [m]
+                    seen.add(m)
+
         chain = self.registry.health_reorder(
             chain, intent=intent_key, variant=variant
         )

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hmac
+
 from fastapi import HTTPException, Request, status
 
 from nimmakai.config import Settings
@@ -58,7 +60,7 @@ def require_proxy_auth(request: Request, settings: Settings) -> str:
             },
         )
 
-    if token not in settings.proxy_api_keys:
+    if not any(hmac.compare_digest(token, k) for k in settings.proxy_api_keys):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={

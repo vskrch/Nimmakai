@@ -485,6 +485,22 @@ class LadderService:
         )
         return True
 
+    def is_coding_capable(self, model_id: str) -> bool:
+        """True if a model can serve coding_agentic (capability + modality gate).
+
+        Reuses the same gates as scoring so the request-time candidate pool
+        matches what the ladder would rank — without a full score computation.
+        """
+        bare = scoring_model_id(model_id, self.provider_ids)
+        mid = bare.lower()
+        if CHAT_EXCLUDE.search(mid):
+            return False
+        if "qwen" in mid and QWEN_EXCLUDE.search(mid):
+            return False
+        if "nemotron" in mid and NEMOTRON_EXCLUDE.search(mid):
+            return False
+        return self._capability_score(model_id, mid, "coding_agentic") >= 0.01
+
     def ladder_for(
         self, intent: str, *, variant: str = "default", max_n: int | None = None
     ) -> list[str]:

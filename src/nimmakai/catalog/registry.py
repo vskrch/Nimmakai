@@ -353,6 +353,21 @@ class ModelRegistry:
                 self.dynamic_chains.get("coding_agentic", [])[:3],
             )
 
+    def coding_candidates(self) -> list[str]:
+        """Every live model that can serve coding_agentic, right now.
+
+        ponytail: the request-time optimizer only re-ranks whatever chain it is
+        handed (the frozen sticky ladder). Newly-live coders never get a chance
+        to lead. This exposes the full live coding pool so the per-request
+        scorer can always pick the most efficient available coder.
+        """
+        if not self.live_ids:
+            return []
+        ladder = getattr(self, "ladder", None)
+        if ladder is None:
+            return list(self.live_ids)
+        return [m for m in self.live_ids if ladder.is_coding_capable(m)]
+
     def load_rankings_cache(self) -> bool:
         if self._db is None:
             return False

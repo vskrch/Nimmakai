@@ -229,7 +229,9 @@ async def test_streaming_watchdog_ttft_stall(monkeypatch: pytest.MonkeyPatch) ->
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            raise asyncio.TimeoutError()
+            # Simulate real wait_for: start the coroutine, then time out and
+            # cancel it (closing the generator cleanly) instead of abandoning it.
+            return await original_wait_for(fut, 0.0)
         return await original_wait_for(fut, timeout)
         
     monkeypatch.setattr(asyncio, "wait_for", mock_wait_for)

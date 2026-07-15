@@ -25,10 +25,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Weights: intelligence + speed dominate (continuous adaptive ranking)
-_ALPHA_INTEL = 0.48
-_BETA_SPEED = 0.40
-_GAMMA_HEALTH = 0.08
+# Weights: capability (quality gate) + availability + low-latency dominate.
+# ponytail: efficiency = best coder that is up *right now* and answers fastest.
+_ALPHA_INTEL = 0.42
+_BETA_SPEED = 0.46
+_GAMMA_AVAIL = 0.12
 _DELTA_PROVIDER = 0.04
 
 
@@ -91,6 +92,29 @@ def _provider_factor(model_id: str, provider_ids: set[str]) -> float:
     return max(0.85, min(1.2, 0.75 + 0.25 * prior))
 
 
+def _availability_factor(health: Any, model_id: str) -> float:
+    """Higher = a live upstream path exists right now (keys free + responding).
+
+    Combines cooldown state, recent responsiveness, and key-pool exhaustion
+    signal carried by the health store. 1.0 when healthy/unknown, near 0 when
+    a model has no usable path this instant.
+    """
+    if health is None:
+        return 1.0
+    h = health._by_model.get(model_id)
+    if h is None:
+        return 1.0  # optimistic: unexplored model may serve
+    if h.in_cooldown():
+        return 0.02  # no available path until cooldown clears
+    # Recent + consecutive failures mean limited availability right now
+    if h.consecutive_fails >= 2:
+        return max(0.1, 0.6 - 0.15 * h.consecutive_fails)
+    total = h.success_count + h.error_count
+    if total < getattr(health, "min_samples", 3):
+        return 1.0
+    return max(0.08, 1.0 - h.error_rate)
+
+
 def score_model_live(
     model_id: str,
     *,
@@ -110,16 +134,14 @@ def score_model_live(
         model_id, sticky_chain=sticky_chain, ladder_scores=ladder_scores
     )
     speed = _speed_factor(health, model_id)
-    health_s = health.health_score(model_id) if health is not None else 1.0
-    # Floor health so mild errors don't zero out a great model
-    health_s = max(0.08, health_s)
+    avail = _availability_factor(health, model_id)
     prov = _provider_factor(model_id, provider_ids)
 
     # Geometric combination — no zeros unless unhealthy handled above
     score = (
         (intel**_ALPHA_INTEL)
         * (speed**_BETA_SPEED)
-        * (health_s**_GAMMA_HEALTH)
+        * (avail**_GAMMA_AVAIL)
         * (prov**_DELTA_PROVIDER)
     )
     # Tiny sticky tie-break so equal scores keep quality order
