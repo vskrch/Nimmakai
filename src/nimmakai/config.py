@@ -115,10 +115,21 @@ class Settings(BaseSettings):
 
     # Multi-tenant accounts
     admin_emails: Annotated[list[str], NoDecode] = Field(default_factory=list)
-    email_backend: str = "stub"  # stub | resend (resend later)
+    email_backend: str = "stub"  # stub | smtp (smtp implemented; not wired in routes yet)
     public_base_url: str | None = None  # e.g. https://app.example.com for verify links
     session_cookie_name: str = "nk_session"
     session_secure_cookie: bool = False  # True behind HTTPS in production
+
+    # SMTP (used when EMAIL_BACKEND=smtp AND routes pass settings to get_email_sender)
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None  # e.g. noreply@yourdomain.com
+    smtp_from_name: str = "Nimmakai"
+    smtp_use_tls: bool = True  # STARTTLS (port 587)
+    smtp_use_ssl: bool = False  # Implicit SSL (port 465)
+    smtp_timeout: float = 30.0
 
     # Optional egress proxies (corporate networking — not for ban evasion)
     nim_egress_proxies: Annotated[list[str], NoDecode] = Field(default_factory=list)

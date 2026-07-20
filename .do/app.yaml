@@ -95,7 +95,10 @@ services:
         value: ""
       - key: EMAIL_BACKEND
         scope: RUN_TIME
+        # Keep stub until SMTP is wired in routes (docs/email-smtp.md)
         value: "stub"
+      # SMTP_* secrets — set in DO UI when enabling EMAIL_BACKEND=smtp
+      # - key: SMTP_HOST / SMTP_USERNAME / SMTP_PASSWORD / SMTP_FROM
       - key: SESSION_SECURE_COOKIE
         scope: RUN_TIME
         value: "true"

@@ -1,6 +1,14 @@
 """Multi-tenant accounts: signup, verify, approve, API keys, sessions."""
 
-from nimmakai.accounts.email import StubEmailSender, get_email_sender
+from nimmakai.accounts.email import (
+    OutboundEmail,
+    SmtpConfig,
+    SmtpEmailSender,
+    StubEmailSender,
+    build_otp_email,
+    build_verify_email,
+    get_email_sender,
+)
 from nimmakai.accounts.schema import migrate_accounts
 from nimmakai.accounts.store import (
     STATUS_ACTIVE,
@@ -13,7 +21,12 @@ from nimmakai.accounts.store import (
 
 __all__ = [
     "AccountStore",
+    "OutboundEmail",
+    "SmtpConfig",
+    "SmtpEmailSender",
     "StubEmailSender",
+    "build_otp_email",
+    "build_verify_email",
     "get_email_sender",
     "migrate_accounts",
     "STATUS_ACTIVE",

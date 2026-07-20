@@ -1,22 +1,19 @@
 # Scratchpad
 
 ## Current task
-Multi-tenant accounts — COMPLETE
+SMTP email sender — COMPLETE (implemented + documented, not wired)
 
 ## Plan
-- [X] Schema + AccountStore + email stub + auth rewrite
-- [X] Accounts routes (signup/verify/login/admin approve)
-- [X] Trace user_id + analytics store filters + scoping
-- [X] Wire AccountStore + router in main.py; CORS credentials
-- [X] Frontend: signup/login/pending + Users + Account pages
-- [X] Tests (6 accounts) + full suite 179+ + frontend dist rebuild
+- [X] SmtpEmailSender (stdlib smtplib) + verify/OTP message builders
+- [X] SMTP_* settings in config (default EMAIL_BACKEND remains stub)
+- [X] get_email_sender ready for smtp; accounts routes still call without settings=
+- [X] Docs (docs/email-smtp.md, .env.example, README) + unit tests
 
 ## Design decisions
-- Key issued only after admin approve (admins auto-active on verify)
-- EMAIL_BACKEND=stub returns verify_url in signup response
-- Session cookie nk_session for dashboard; Bearer sk-nk-* for /v1
-- Legacy PROXY_API_KEYS = break-glass admin
-- Non-admin analytics forced to user_id=me
+- Stdlib only (no new deps)
+- Factory supports smtp when settings passed; routes not updated yet
+- OTP helper ready; OTP flow not implemented
+- EMAIL_BACKEND=smtp without settings= falls back to stub with warning
 
 ## Lessons
 - .cursorrules can be overwritten by concurrent agent sessions — re-read before editing, merge don't clobber
@@ -26,6 +23,7 @@ Multi-tenant accounts — COMPLETE
 - Spokenly MCP may be unavailable; supercoder says NEVER ASK — proceed autonomously
 - FastAPI union StreamingResponse|JSONResponse needs response_model=None
 - Project venv is `.venv` (uv), not `venv`
-- Helpers existing ≠ wired — always verify call sites (analytics instrumentation lesson)
+- Helpers existing ≠ wired — always verify call sites
 - EventSource cannot send Authorization — use ?token= or session cookie for SSE
 - CORS allow_credentials cannot pair with allow_origins=*
+- Global agent skills live in 4 dirs: ~/.claude/skills, ~/.agents/skills, ~/.config/opencode/skills, ~/.cursor/skills — keep copies in sync (verify with shasum). supercoder rewritten to v5 (98 lines, evidence-based verification, anti-rationalization table)

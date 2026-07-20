@@ -526,10 +526,18 @@ Body field `session_id` is also accepted (OpenRouter-compatible).
 | `PROXY_API_KEYS` | `[]` | Legacy admin break-glass keys (comma-separated) |
 | `ALLOW_INSECURE_AUTH` | `false` | Accept any Bearer when PROXY empty |
 | `ADMIN_EMAILS` | `[]` | Emails that become admin after verify |
-| `EMAIL_BACKEND` | `stub` | `stub` (logs links) — Resend later |
+| `EMAIL_BACKEND` | `stub` | `stub` (active) or `smtp` (implemented, not wired yet) |
 | `PUBLIC_BASE_URL` | — | Base URL for verify links |
 | `SESSION_COOKIE_NAME` | `nk_session` | Dashboard session cookie |
 | `SESSION_SECURE_COOKIE` | `false` | Set `true` behind HTTPS |
+| `SMTP_HOST` | — | SMTP server (see [docs/email-smtp.md](docs/email-smtp.md)) |
+| `SMTP_PORT` | `587` | SMTP port (`465` + `SMTP_USE_SSL=true` for SSL) |
+| `SMTP_USERNAME` | — | SMTP auth user |
+| `SMTP_PASSWORD` | — | SMTP auth password |
+| `SMTP_FROM` | — | From address (verified sender) |
+| `SMTP_FROM_NAME` | `Nimmakai` | From display name |
+| `SMTP_USE_TLS` | `true` | STARTTLS |
+| `SMTP_USE_SSL` | `false` | Implicit SSL |
 | `NIM_API_KEYS` | `[]` | NVIDIA NIM API keys |
 | `NIM_BASE_URL` | `https://integrate.api.nvidia.com/v1` | NIM API base URL |
 | `NIM_RPM_LIMIT` | `40` | Per-key requests per minute |
@@ -627,6 +635,8 @@ Online learning is stored in `.nimmakai/learning.json` and is lost if the file i
 
 ### 6. Accounts + Admin Auth
 End users: signup → email verify → **admin approve** → `sk-nk-…` API key. Dashboard uses an HTTP-only session cookie; `/v1/*` uses Bearer keys. Set `ADMIN_EMAILS` for auto-admin after verify. Legacy `PROXY_API_KEYS` remain break-glass admins. Analytics for non-admins are scoped to their `user_id`.
+
+Email delivery defaults to **stub** (logs + returns `verify_url`). An **SMTP** sender and verify/OTP message builders are implemented but not wired into routes yet — see [docs/email-smtp.md](docs/email-smtp.md).
 
 ### 7. Phase 1 Only Supports OpenAI-Compatible APIs
 Providers using native APIs (Anthropic Messages, Google Vertex, etc.) are not supported. They must be accessed through an OpenAI-compatible adapter.
