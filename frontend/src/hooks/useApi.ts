@@ -1,34 +1,72 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { api, ap, ad, errMsg } from '../lib/api'
+import { api, ap, clearAuthKey } from '../lib/api'
+import type { AuthSession } from '../components/AuthModal'
 import type {
   HealthResponse, StatsResponse, ProvidersResponse, CatalogResponse,
   RankingsResponse, ProviderHealthData, Preference, SSEHealthEvent
 } from '../types'
 
 export function useAuth() {
-  const [authed, setAuthed] = useState(() => !!localStorage.getItem('nk'))
-  const [showAuth, setShowAuth] = useState(() => !localStorage.getItem('nk'))
+  const [session, setSession] = useState<AuthSession | null>(null)
+  const [authed, setAuthed] = useState(false)
+  const [showAuth, setShowAuth] = useState(true)
+  const [ready, setReady] = useState(false)
 
-  const doAuth = useCallback(async (key: string) => {
-    localStorage.setItem('nk', key)
-    const r = await api('/stats')
-    if (r && (r as Record<string, unknown>).__ok === false) {
-      localStorage.removeItem('nk')
-      setAuthed(false)
-      return false
-    }
+  const applySession = useCallback((me: AuthSession) => {
+    setSession(me)
     setAuthed(true)
     setShowAuth(false)
-    return true
   }, [])
 
-  const logout = useCallback(() => {
-    localStorage.removeItem('nk')
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const me = await api<AuthSession>('/auth/me')
+      if (cancelled) return
+      if (me?.authenticated) {
+        applySession(me)
+      } else if (localStorage.getItem('nk')) {
+        const stats = await api('/stats')
+        if (cancelled) return
+        if (stats && (stats as { __ok?: boolean }).__ok !== false) {
+          applySession({
+            authenticated: true,
+            is_admin: true,
+            via: 'legacy_proxy',
+            user: { id: null, email: null, role: 'admin', status: 'active' },
+          })
+        } else {
+          clearAuthKey()
+          setShowAuth(true)
+        }
+      } else {
+        setShowAuth(true)
+      }
+      setReady(true)
+    })()
+    return () => { cancelled = true }
+  }, [applySession])
+
+  const logout = useCallback(async () => {
+    await ap('/auth/logout', {})
+    clearAuthKey()
+    setSession(null)
     setAuthed(false)
     setShowAuth(true)
   }, [])
 
-  return { authed, showAuth, setShowAuth, doAuth, logout }
+  return {
+    ready,
+    authed,
+    showAuth,
+    setShowAuth,
+    session,
+    applySession,
+    logout,
+    isAdmin: !!session?.is_admin,
+    status: session?.user?.status || null,
+    email: session?.user?.email || null,
+  }
 }
 
 export function useHealth() {
@@ -106,14 +144,18 @@ export function useSSE() {
   const [event, setEvent] = useState<SSEHealthEvent | null>(null)
 
   useEffect(() => {
-    const es = new EventSource('/admin/events')
+    const key = localStorage.getItem('nk') || ''
+    const url = key ? `/admin/events?token=${encodeURIComponent(key)}` : '/admin/events'
+    const es = new EventSource(url)
     es.addEventListener('health', (e) => {
       try { setEvent(JSON.parse(e.data)) } catch { /* ignore */ }
     })
     es.onerror = () => {
       setTimeout(() => {
         if (ref.current === es) {
-          ref.current = new EventSource('/admin/events')
+          const k = localStorage.getItem('nk') || ''
+          const u = k ? `/admin/events?token=${encodeURIComponent(k)}` : '/admin/events'
+          ref.current = new EventSource(u)
         }
       }, 5000)
     }

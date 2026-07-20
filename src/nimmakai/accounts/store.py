@@ -1,0 +1,308 @@
+"""Account store: users, API keys, sessions, email tokens."""
+
+from __future__ import annotations
+
+import time
+from typing import TYPE_CHECKING, Any
+
+from nimmakai.accounts.crypto import (
+    hash_password,
+    hash_token,
+    new_api_key,
+    new_email_token,
+    new_id,
+    new_session_token,
+    verify_password,
+)
+
+if TYPE_CHECKING:
+    from nimmakai.catalog.db import NimmakaiDB
+
+STATUS_UNVERIFIED = "unverified"
+STATUS_PENDING = "pending_approval"
+STATUS_ACTIVE = "active"
+STATUS_REJECTED = "rejected"
+STATUS_SUSPENDED = "suspended"
+
+VERIFY_TTL_SECONDS = 48 * 3600
+SESSION_TTL_SECONDS = 30 * 24 * 3600
+
+
+class AccountStore:
+    def __init__(self, db: NimmakaiDB) -> None:
+        self._db = db
+
+    def create_user(
+        self,
+        email: str,
+        password: str,
+        *,
+        role: str = "user",
+        status: str = STATUS_UNVERIFIED,
+    ) -> dict[str, Any]:
+        uid = new_id("usr")
+        now = time.time()
+        email_n = email.strip().lower()
+        with self._db._lock:
+            self._db._conn.execute(
+                """
+                INSERT INTO users (id, email, password_hash, role, status, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (uid, email_n, hash_password(password), role, status, now),
+            )
+        return self.get_user(uid)  # type: ignore[return-value]
+
+    def get_user(self, user_id: str) -> dict[str, Any] | None:
+        with self._db._lock:
+            row = self._db._conn.execute(
+                "SELECT * FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def get_user_by_email(self, email: str) -> dict[str, Any] | None:
+        with self._db._lock:
+            row = self._db._conn.execute(
+                "SELECT * FROM users WHERE email = ?", (email.strip().lower(),)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def authenticate(self, email: str, password: str) -> dict[str, Any] | None:
+        user = self.get_user_by_email(email)
+        if not user:
+            return None
+        if not verify_password(password, user["password_hash"]):
+            return None
+        return user
+
+    def set_status(
+        self,
+        user_id: str,
+        status: str,
+        *,
+        approved_by: str | None = None,
+    ) -> dict[str, Any] | None:
+        now = time.time()
+        with self._db._lock:
+            if status == STATUS_ACTIVE:
+                self._db._conn.execute(
+                    """
+                    UPDATE users SET status = ?, approved_at = ?, approved_by = ?
+                    WHERE id = ?
+                    """,
+                    (status, now, approved_by, user_id),
+                )
+            else:
+                self._db._conn.execute(
+                    "UPDATE users SET status = ? WHERE id = ?",
+                    (status, user_id),
+                )
+        return self.get_user(user_id)
+
+    def mark_verified(self, user_id: str) -> dict[str, Any] | None:
+        now = time.time()
+        with self._db._lock:
+            self._db._conn.execute(
+                """
+                UPDATE users SET status = ?, verified_at = ?
+                WHERE id = ? AND status = ?
+                """,
+                (STATUS_PENDING, now, user_id, STATUS_UNVERIFIED),
+            )
+        return self.get_user(user_id)
+
+    def list_users(
+        self, *, status: str | None = None, limit: int = 100, offset: int = 0
+    ) -> list[dict[str, Any]]:
+        limit = max(1, min(500, limit))
+        offset = max(0, offset)
+        with self._db._lock:
+            if status:
+                rows = self._db._conn.execute(
+                    """
+                    SELECT id, email, role, status, created_at, verified_at,
+                           approved_at, approved_by
+                    FROM users WHERE status = ?
+                    ORDER BY created_at DESC LIMIT ? OFFSET ?
+                    """,
+                    (status, limit, offset),
+                ).fetchall()
+            else:
+                rows = self._db._conn.execute(
+                    """
+                    SELECT id, email, role, status, created_at, verified_at,
+                           approved_at, approved_by
+                    FROM users ORDER BY created_at DESC LIMIT ? OFFSET ?
+                    """,
+                    (limit, offset),
+                ).fetchall()
+        return [dict(r) for r in rows]
+
+    def public_user(self, user: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": user["id"],
+            "email": user["email"],
+            "role": user["role"],
+            "status": user["status"],
+            "created_at": user["created_at"],
+            "verified_at": user.get("verified_at"),
+            "approved_at": user.get("approved_at"),
+        }
+
+    def create_verify_token(self, user_id: str) -> str:
+        raw, th = new_email_token()
+        now = time.time()
+        with self._db._lock:
+            self._db._conn.execute(
+                """
+                INSERT INTO email_tokens
+                    (id, user_id, purpose, token_hash, created_at, expires_at)
+                VALUES (?, ?, 'verify_email', ?, ?, ?)
+                """,
+                (new_id("tok"), user_id, th, now, now + VERIFY_TTL_SECONDS),
+            )
+        return raw
+
+    def consume_verify_token(self, raw: str) -> str | None:
+        th = hash_token(raw)
+        now = time.time()
+        with self._db._lock:
+            row = self._db._conn.execute(
+                """
+                SELECT * FROM email_tokens
+                WHERE token_hash = ? AND purpose = 'verify_email' AND used_at IS NULL
+                """,
+                (th,),
+            ).fetchone()
+            if not row:
+                return None
+            if float(row["expires_at"]) < now:
+                return None
+            self._db._conn.execute(
+                "UPDATE email_tokens SET used_at = ? WHERE id = ?",
+                (now, row["id"]),
+            )
+            return str(row["user_id"])
+
+    def create_session(
+        self,
+        user_id: str,
+        *,
+        user_agent: str | None = None,
+        ip: str | None = None,
+    ) -> str:
+        raw, th = new_session_token()
+        now = time.time()
+        with self._db._lock:
+            self._db._conn.execute(
+                """
+                INSERT INTO sessions
+                    (id, user_id, token_hash, created_at, expires_at, user_agent, ip)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id("ses"),
+                    user_id,
+                    th,
+                    now,
+                    now + SESSION_TTL_SECONDS,
+                    (user_agent or "")[:200] or None,
+                    ip,
+                ),
+            )
+        return raw
+
+    def resolve_session(self, raw: str | None) -> dict[str, Any] | None:
+        if not raw:
+            return None
+        th = hash_token(raw)
+        now = time.time()
+        with self._db._lock:
+            row = self._db._conn.execute(
+                """
+                SELECT s.id AS session_id, s.expires_at, u.*
+                FROM sessions s JOIN users u ON u.id = s.user_id
+                WHERE s.token_hash = ?
+                """,
+                (th,),
+            ).fetchone()
+            if not row:
+                return None
+            if float(row["expires_at"]) < now:
+                return None
+            return dict(row)
+
+    def delete_session(self, raw: str | None) -> None:
+        if not raw:
+            return
+        th = hash_token(raw)
+        with self._db._lock:
+            self._db._conn.execute(
+                "DELETE FROM sessions WHERE token_hash = ?", (th,)
+            )
+
+    def issue_api_key(self, user_id: str, *, name: str = "default") -> dict[str, Any]:
+        raw, prefix, kh = new_api_key()
+        kid = new_id("key")
+        now = time.time()
+        with self._db._lock:
+            self._db._conn.execute(
+                """
+                UPDATE api_keys SET revoked_at = ?
+                WHERE user_id = ? AND revoked_at IS NULL
+                """,
+                (now, user_id),
+            )
+            self._db._conn.execute(
+                """
+                INSERT INTO api_keys
+                    (id, user_id, key_prefix, key_hash, name, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (kid, user_id, prefix, kh, name, now),
+            )
+        return {
+            "id": kid,
+            "user_id": user_id,
+            "key_prefix": prefix,
+            "api_key": raw,
+            "name": name,
+            "created_at": now,
+        }
+
+    def resolve_api_key(self, raw: str | None) -> dict[str, Any] | None:
+        if not raw or not raw.startswith("sk-nk-"):
+            return None
+        kh = hash_token(raw)
+        now = time.time()
+        with self._db._lock:
+            row = self._db._conn.execute(
+                """
+                SELECT k.id AS key_id, k.key_prefix, k.revoked_at, u.*
+                FROM api_keys k JOIN users u ON u.id = k.user_id
+                WHERE k.key_hash = ?
+                """,
+                (kh,),
+            ).fetchone()
+            if not row:
+                return None
+            if row["revoked_at"] is not None:
+                return None
+            if row["status"] != STATUS_ACTIVE:
+                return None
+            self._db._conn.execute(
+                "UPDATE api_keys SET last_used_at = ? WHERE id = ?",
+                (now, row["key_id"]),
+            )
+            return dict(row)
+
+    def list_keys_for_user(self, user_id: str) -> list[dict[str, Any]]:
+        with self._db._lock:
+            rows = self._db._conn.execute(
+                """
+                SELECT id, key_prefix, name, created_at, revoked_at, last_used_at
+                FROM api_keys WHERE user_id = ? ORDER BY created_at DESC
+                """,
+                (user_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]

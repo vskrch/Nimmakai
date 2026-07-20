@@ -80,6 +80,12 @@ class NimmakaiDB:
                 migrate_analytics(self._conn)
             except Exception:
                 logger.exception("analytics schema migration failed")
+            try:
+                from nimmakai.accounts.schema import migrate_accounts
+
+                migrate_accounts(self._conn)
+            except Exception:
+                logger.exception("accounts schema migration failed")
         logger.info("sqlite ready at %s", self.path)
 
     def close(self) -> None:

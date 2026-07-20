@@ -187,7 +187,7 @@ curl http://localhost:8080/v1/chat/completions \
 
 ### 5. Open the Dashboard
 
-Navigate to **http://localhost:8080/dashboard** and enter your `PROXY_API_KEYS` when prompted.
+Navigate to **http://localhost:8080/dashboard**. Sign up with email, verify (stub backend returns the link), wait for admin approval, then use your `sk-nk-…` API key. Legacy `PROXY_API_KEYS` still work as admin break-glass.
 
 ---
 
@@ -523,8 +523,13 @@ Body field `session_id` is also accepted (OpenRouter-compatible).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PROXY_API_KEYS` | `[]` | Client auth keys (comma-separated) |
+| `PROXY_API_KEYS` | `[]` | Legacy admin break-glass keys (comma-separated) |
 | `ALLOW_INSECURE_AUTH` | `false` | Accept any Bearer when PROXY empty |
+| `ADMIN_EMAILS` | `[]` | Emails that become admin after verify |
+| `EMAIL_BACKEND` | `stub` | `stub` (logs links) — Resend later |
+| `PUBLIC_BASE_URL` | — | Base URL for verify links |
+| `SESSION_COOKIE_NAME` | `nk_session` | Dashboard session cookie |
+| `SESSION_SECURE_COOKIE` | `false` | Set `true` behind HTTPS |
 | `NIM_API_KEYS` | `[]` | NVIDIA NIM API keys |
 | `NIM_BASE_URL` | `https://integrate.api.nvidia.com/v1` | NIM API base URL |
 | `NIM_RPM_LIMIT` | `40` | Per-key requests per minute |
@@ -620,8 +625,8 @@ Each provider's `/models` endpoint is fetched independently. If a provider is do
 ### 5. Learning State Is Local
 Online learning is stored in `.nimmakai/learning.json` and is lost if the file is deleted. No multi-instance sharing (no Redis/DB backend).
 
-### 6. Admin API Uses Client Auth
-The same `PROXY_API_KEYS` used for OpenAI requests protects admin endpoints. There is no separate admin login or role system.
+### 6. Accounts + Admin Auth
+End users: signup → email verify → **admin approve** → `sk-nk-…` API key. Dashboard uses an HTTP-only session cookie; `/v1/*` uses Bearer keys. Set `ADMIN_EMAILS` for auto-admin after verify. Legacy `PROXY_API_KEYS` remain break-glass admins. Analytics for non-admins are scoped to their `user_id`.
 
 ### 7. Phase 1 Only Supports OpenAI-Compatible APIs
 Providers using native APIs (Anthropic Messages, Google Vertex, etc.) are not supported. They must be accessed through an OpenAI-compatible adapter.

@@ -23,12 +23,26 @@ from nimmakai.catalog.preferences import UserPreferences
 from nimmakai.catalog.providers import ProviderStore
 from nimmakai.config import Settings, get_settings
 from nimmakai.logging_setup import new_request_id, request_logs, setup_logging
-from nimmakai.routes import admin, analytics, openai
+from nimmakai.routes import accounts, admin, analytics, openai
 from nimmakai.routing import FallbackExecutor, IntentClassifier, ModelSelector, RoutingStats
 from nimmakai.safety import AccountGuard
 from nimmakai.upstream import UpstreamClient
 
 logger = logging.getLogger("nimmakai")
+
+
+def _init_accounts(app: FastAPI, settings: Settings) -> None:
+    """Attach AccountStore for signup / sessions / API keys."""
+    app.state.accounts = None
+    try:
+        from nimmakai.accounts.store import AccountStore
+        from nimmakai.catalog.db import get_db
+
+        db = get_db(settings.sqlite_path)
+        app.state.accounts = AccountStore(db)
+        logger.info("accounts store ready")
+    except Exception:
+        logger.exception("accounts store init failed")
 
 
 def _init_analytics(app: FastAPI, settings: Settings) -> None:
@@ -346,15 +360,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.routing_stats = routing_stats
         app.state.preferences = preferences
 
+        _init_accounts(app, settings)
         _init_analytics(app, settings)
         await _start_analytics(app)
 
         logger.info(
-            "Nimmakai v%s ready — providers=%s, routing=%s, analytics=%s",
+            "Nimmakai v%s ready — providers=%s, routing=%s, analytics=%s, accounts=%s",
             __version__,
             [p.id for p in store.enabled_providers()],
             settings.routing_enabled,
             bool(getattr(app.state, "trace_writer", None)),
+            bool(getattr(app.state, "accounts", None)),
         )
         try:
             yield
@@ -381,10 +397,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for o in settings.cors_allow_origins.split(",")
         if o.strip()
     ]
+    # Credentials require explicit origins (never "*")
+    cors_credentials = bool(cors_origins) and cors_origins != ["*"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
-        allow_credentials=False,
+        allow_credentials=cors_credentials,
         allow_methods=["*"],
         allow_headers=["*"],
         expose_headers=[
@@ -420,6 +438,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if dist_path.is_dir():
         app.mount("/assets", StaticFiles(directory=str(dist_path / "assets")), name="vite-assets")
 
+    app.include_router(accounts.router)
     app.include_router(admin.router)
     app.include_router(openai.router)
     app.include_router(analytics.router)

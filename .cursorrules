@@ -1,21 +1,31 @@
 # Scratchpad
 
 ## Current task
-Prepare Nimmakai for DigitalOcean App Platform deploy + GitHub CI/CD (~$12/mo) — COMPLETE
+Multi-tenant accounts — COMPLETE
 
 ## Plan
-- [X] Dockerfile (multi-stage: frontend + Python) — smoke tested healthy
-- [X] .do/app.yaml (App Platform, auto-deploy from GitHub)
-- [X] docs/digitalocean.md + README Deploy section
-- [X] GitHub Actions deploy-digitalocean.yml
-- [X] docker-compose.do.yml for persistent Droplet path
-- [X] scripts/do-smoke.sh
+- [X] Schema + AccountStore + email stub + auth rewrite
+- [X] Accounts routes (signup/verify/login/admin approve)
+- [X] Trace user_id + analytics store filters + scoping
+- [X] Wire AccountStore + router in main.py; CORS credentials
+- [X] Frontend: signup/login/pending + Users + Account pages
+- [X] Tests (6 accounts) + full suite 179+ + frontend dist rebuild
 
-## Budget
-- Recommended: apps-s-1vcpu-1gb-fixed (~$10/mo)
-- No managed DB; App Platform = ephemeral SQLite (keys via env)
+## Design decisions
+- Key issued only after admin approve (admins auto-active on verify)
+- EMAIL_BACKEND=stub returns verify_url in signup response
+- Session cookie nk_session for dashboard; Bearer sk-nk-* for /v1
+- Legacy PROXY_API_KEYS = break-glass admin
+- Non-admin analytics forced to user_id=me
 
 ## Lessons
+- .cursorrules can be overwritten by concurrent agent sessions — re-read before editing, merge don't clobber
 - App Platform does NOT support volumes — document ephemeral SQLite clearly
 - Hatch force-include of missing static/dist breaks local installs — copy dist post-pip in Docker instead
 - Colima must be started before docker build on this machine
+- Spokenly MCP may be unavailable; supercoder says NEVER ASK — proceed autonomously
+- FastAPI union StreamingResponse|JSONResponse needs response_model=None
+- Project venv is `.venv` (uv), not `venv`
+- Helpers existing ≠ wired — always verify call sites (analytics instrumentation lesson)
+- EventSource cannot send Authorization — use ?token= or session cookie for SSE
+- CORS allow_credentials cannot pair with allow_origins=*

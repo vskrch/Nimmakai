@@ -11,7 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from nimmakai.analytics.cost import list_default_rates
-from nimmakai.auth import extract_bearer, require_proxy_auth, validate_proxy_token
+from nimmakai.auth import auth_from_request, extract_bearer, require_proxy_auth, validate_proxy_token
 from nimmakai.config import get_settings
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -26,6 +26,16 @@ def _store(request: Request):
     if store is None:
         return None
     return store
+
+
+def _scope_user_id(request: Request) -> str | None:
+    """Non-admins only see their own traces."""
+    ctx = auth_from_request(request)
+    if ctx is None:
+        return None
+    if ctx.is_admin:
+        return None
+    return ctx.user_id
 
 
 def _require_analytics(request: Request):
@@ -86,6 +96,7 @@ async def list_traces(request: Request) -> JSONResponse:
         model=request.query_params.get("model") or None,
         provider=request.query_params.get("provider") or None,
         api_key=request.query_params.get("api_key") or None,
+        user_id=_scope_user_id(request),
         status=request.query_params.get("status") or None,
         since=_float_q(request, "since"),
         until=_float_q(request, "until"),
@@ -108,6 +119,12 @@ async def get_trace(trace_id: str, request: Request) -> JSONResponse:
             {"error": {"message": "Trace not found", "code": "not_found"}},
             status_code=404,
         )
+    scoped = _scope_user_id(request)
+    if scoped and trace.get("user_id") != scoped:
+        return JSONResponse(
+            {"error": {"message": "Trace not found", "code": "not_found"}},
+            status_code=404,
+        )
     return JSONResponse(trace)
 
 
@@ -117,6 +134,13 @@ async def get_trace_spans(trace_id: str, request: Request) -> JSONResponse:
     if err:
         return err
     assert store is not None
+    trace = store.get_trace(trace_id)
+    scoped = _scope_user_id(request)
+    if scoped and (not trace or trace.get("user_id") != scoped):
+        return JSONResponse(
+            {"error": {"message": "Trace not found", "code": "not_found"}},
+            status_code=404,
+        )
     return JSONResponse({"trace_id": trace_id, "spans": store.get_spans(trace_id)})
 
 
@@ -161,6 +185,7 @@ async def _ts(request: Request, metric: str) -> JSONResponse:
         intent=request.query_params.get("intent") or None,
         model=request.query_params.get("model") or None,
         provider=request.query_params.get("provider") or None,
+        user_id=_scope_user_id(request),
     )
     return JSONResponse({"metric": metric, "points": points})
 
@@ -208,6 +233,7 @@ async def _bd(request: Request, dimension: str) -> JSONResponse:
         since=_float_q(request, "since"),
         until=_float_q(request, "until"),
         limit=_int_q(request, "limit", 50),
+        user_id=_scope_user_id(request),
     )
     return JSONResponse({"dimension": dimension, "items": items})
 
@@ -222,7 +248,11 @@ async def analytics_summary(request: Request) -> JSONResponse:
         return err
     assert store is not None
     return JSONResponse(
-        store.summary(since=_float_q(request, "since"), until=_float_q(request, "until"))
+        store.summary(
+            since=_float_q(request, "since"),
+            until=_float_q(request, "until"),
+            user_id=_scope_user_id(request),
+        )
     )
 
 
@@ -266,9 +296,12 @@ async def cost_rates(request: Request) -> JSONResponse:
 
 @router.put("/cost/rates/{model_id:path}")
 async def put_cost_rate(model_id: str, request: Request) -> JSONResponse:
+    from nimmakai.auth import require_admin
+
     store, err = _require_analytics(request)
     if err:
         return err
+    require_admin(request, _settings(request))
     assert store is not None
     try:
         body = await request.json()
@@ -296,9 +329,12 @@ async def put_cost_rate(model_id: str, request: Request) -> JSONResponse:
 
 @router.delete("/cost/rates/{model_id:path}")
 async def delete_cost_rate(model_id: str, request: Request) -> JSONResponse:
+    from nimmakai.auth import require_admin
+
     store, err = _require_analytics(request)
     if err:
         return err
+    require_admin(request, _settings(request))
     assert store is not None
     ok = store.delete_cost_override(model_id)
     return JSONResponse({"ok": ok, "model_id": model_id})
@@ -317,7 +353,14 @@ async def export_traces(request: Request) -> StreamingResponse | JSONResponse:
     since = _float_q(request, "since")
     until = _float_q(request, "until")
     limit = _int_q(request, "limit", 10000)
-    rows = list(store.iter_export(since=since, until=until, limit=limit))
+    rows = list(
+        store.iter_export(
+            since=since,
+            until=until,
+            limit=limit,
+            user_id=_scope_user_id(request),
+        )
+    )
     cols = [
         "trace_id",
         "created_at",
@@ -375,9 +418,15 @@ async def export_traces(request: Request) -> StreamingResponse | JSONResponse:
 @router.get("/events", response_model=None)
 async def analytics_events(request: Request) -> StreamingResponse | JSONResponse:
     settings = _settings(request)
-    # EventSource cannot set Authorization headers — allow ?token=
-    token = request.query_params.get("token") or extract_bearer(request)
-    validate_proxy_token(token, settings)
+    # EventSource cannot set Authorization headers — allow ?token= or session cookie
+    cookie = getattr(settings, "session_cookie_name", "nk_session") or "nk_session"
+    if request.cookies.get(cookie):
+        require_proxy_auth(request, settings)
+    else:
+        token = request.query_params.get("token") or extract_bearer(request)
+        validate_proxy_token(
+            token, settings, accounts=getattr(request.app.state, "accounts", None)
+        )
 
     if not getattr(settings, "analytics_enabled", True):
         return JSONResponse(

@@ -113,12 +113,25 @@ class Settings(BaseSettings):
     analytics_webhook_url: str | None = None
     analytics_otlp_endpoint: str | None = None
 
+    # Multi-tenant accounts
+    admin_emails: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    email_backend: str = "stub"  # stub | resend (resend later)
+    public_base_url: str | None = None  # e.g. https://app.example.com for verify links
+    session_cookie_name: str = "nk_session"
+    session_secure_cookie: bool = False  # True behind HTTPS in production
+
     # Optional egress proxies (corporate networking — not for ban evasion)
     nim_egress_proxies: Annotated[list[str], NoDecode] = Field(default_factory=list)
     http_proxy: str | None = None
     https_proxy: str | None = None
 
-    @field_validator("proxy_api_keys", "nim_api_keys", "nim_egress_proxies", mode="before")
+    @field_validator(
+        "proxy_api_keys",
+        "nim_api_keys",
+        "nim_egress_proxies",
+        "admin_emails",
+        mode="before",
+    )
     @classmethod
     def parse_csv(cls, v: object) -> list[str]:
         return _split_csv(v)  # type: ignore[arg-type]

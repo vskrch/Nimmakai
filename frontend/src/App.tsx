@@ -1,9 +1,9 @@
 import { useState, useCallback } from 'react'
 import Sidebar from './components/Sidebar'
-import AuthModal from './components/AuthModal'
+import AuthModal, { type AuthSession } from './components/AuthModal'
 import { Toast } from './components/ui'
 import { useAuth, useSSE } from './hooks/useApi'
-import { ap } from './lib/api'
+import { api, ap } from './lib/api'
 
 import DashboardPage from './pages/DashboardPage'
 import AnalyticsOverviewPage from './pages/AnalyticsOverviewPage'
@@ -16,6 +16,8 @@ import HealthPage from './pages/HealthPage'
 import ModelsPage from './pages/ModelsPage'
 import RoutingPage from './pages/RoutingPage'
 import PlaygroundPage from './pages/PlaygroundPage'
+import UsersPage from './pages/UsersPage'
+import AccountPage from './pages/AccountPage'
 
 const PAGE_TITLES: Record<string, string> = {
   dashboard: 'Overview',
@@ -25,6 +27,8 @@ const PAGE_TITLES: Record<string, string> = {
   intents: 'Intent Analytics',
   cost: 'Cost Center',
   playground: 'Playground',
+  account: 'Account',
+  users: 'Users',
   providers: 'Providers',
   health: 'Provider Health',
   models: 'Models',
@@ -32,7 +36,9 @@ const PAGE_TITLES: Record<string, string> = {
 }
 
 export default function App() {
-  const { authed, showAuth, setShowAuth, doAuth } = useAuth()
+  const {
+    ready, authed, showAuth, session, applySession, logout, isAdmin, status, email,
+  } = useAuth()
   const [page, setPage] = useState('dashboard')
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null)
   const sse = useSSE()
@@ -42,6 +48,7 @@ export default function App() {
   }
 
   async function handleRefreshAll() {
+    if (!isAdmin) return
     showToast('Refreshing catalog + rankings...')
     const r = await ap('/admin/catalog/refresh', {})
     if (r && (r as Record<string, unknown>).ok !== false) {
@@ -53,9 +60,30 @@ export default function App() {
 
   const handlePageChange = useCallback((p: string) => setPage(p), [])
 
+  const refreshSession = useCallback(async () => {
+    const me = await api<AuthSession>('/auth/me')
+    if (me?.authenticated) applySession(me)
+  }, [applySession])
+
+  const pending = status === 'pending_approval' || status === 'unverified'
+
+  if (!ready) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-[#09090b] text-zinc-500 text-sm">
+        Loading…
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-screen overflow-hidden">
-      <Sidebar page={page} onNavigate={handlePageChange} />
+      <Sidebar
+        page={page}
+        onNavigate={handlePageChange}
+        isAdmin={isAdmin}
+        email={email}
+        onLogout={logout}
+      />
 
       <div className="flex-1 flex flex-col bg-[#09090b] relative min-w-0">
         <div className="h-16 border-b border-white/[0.08] flex items-center px-8 justify-between backdrop-blur-xl bg-[#09090b]/70 z-10 shrink-0">
@@ -71,6 +99,14 @@ export default function App() {
           </div>
         </div>
 
+        {pending && (
+          <div className="mx-8 mt-4 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            {status === 'unverified'
+              ? 'Verify your email to continue. After that an admin must approve your account.'
+              : 'Your account is pending admin approval. An API key will be issued when approved.'}
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto p-8">
           {page === 'dashboard' && <DashboardPage onRefresh={handleRefreshAll} />}
           {page === 'analytics' && <AnalyticsOverviewPage />}
@@ -78,16 +114,18 @@ export default function App() {
           {page === 'live' && <LiveFeedPage />}
           {page === 'intents' && <IntentsPage />}
           {page === 'cost' && <CostPage />}
-          {page === 'providers' && <ProvidersPage />}
-          {page === 'health' && <HealthPage />}
-          {page === 'models' && <ModelsPage />}
-          {page === 'routing' && <RoutingPage />}
+          {page === 'account' && <AccountPage session={session} onRefresh={refreshSession} />}
+          {page === 'users' && isAdmin && <UsersPage />}
+          {page === 'providers' && isAdmin && <ProvidersPage />}
+          {page === 'health' && isAdmin && <HealthPage />}
+          {page === 'models' && isAdmin && <ModelsPage />}
+          {page === 'routing' && isAdmin && <RoutingPage />}
           {page === 'playground' && <PlaygroundPage />}
         </div>
       </div>
 
       {showAuth && !authed && (
-        <AuthModal onAuth={doAuth} />
+        <AuthModal onSession={applySession} />
       )}
 
       {toast && (

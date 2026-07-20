@@ -88,6 +88,7 @@ class AnalyticsStore:
         model: str | None = None,
         provider: str | None = None,
         api_key: str | None = None,
+        user_id: str | None = None,
         status: str | None = None,
         since: float | None = None,
         until: float | None = None,
@@ -115,6 +116,9 @@ class AnalyticsStore:
         if api_key:
             where.append("api_key LIKE ?")
             params.append(f"%{api_key}%")
+        if user_id:
+            where.append("user_id = ?")
+            params.append(user_id)
         if since is not None:
             where.append("created_at >= ?")
             params.append(float(since))
@@ -191,6 +195,7 @@ class AnalyticsStore:
         intent: str | None = None,
         model: str | None = None,
         provider: str | None = None,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         now = time.time()
         until = float(until if until is not None else now)
@@ -208,6 +213,9 @@ class AnalyticsStore:
         if provider:
             where.append("provider_id = ?")
             params.append(provider)
+        if user_id:
+            where.append("user_id = ?")
+            params.append(user_id)
         clause = " AND ".join(where)
 
         if metric == "requests":
@@ -305,11 +313,14 @@ class AnalyticsStore:
         since: float | None = None,
         until: float | None = None,
         limit: int = 50,
+        user_id: str | None = None,
     ) -> list[dict[str, Any]]:
         now = time.time()
         until = float(until if until is not None else now)
         since = float(since if since is not None else until - 86400)
         limit = max(1, min(200, limit))
+        user_clause = " AND user_id = ?" if user_id else ""
+        user_params: list[Any] = [user_id] if user_id else []
 
         col_map = {
             "models": "model_routed",
@@ -334,13 +345,15 @@ class AnalyticsStore:
                     AVG(intent_confidence) AS avg_confidence,
                     SUM(CASE WHEN fallback_index > 0 THEN 1 ELSE 0 END) AS fallback_count
                 FROM traces
-                WHERE created_at >= ? AND created_at <= ?
+                WHERE created_at >= ? AND created_at <= ?{user_clause}
                 GROUP BY 1
                 ORDER BY request_count DESC
                 LIMIT ?
             """
             with self._db._lock:
-                rows = self._db._conn.execute(sql, (since, until, limit)).fetchall()
+                rows = self._db._conn.execute(
+                    sql, (since, until, *user_params, limit)
+                ).fetchall()
             out = []
             for r in rows:
                 d = dict(r)
@@ -350,7 +363,7 @@ class AnalyticsStore:
             return out
 
         if dimension == "errors":
-            sql = """
+            sql = f"""
                 SELECT
                     COALESCE(error_message, 'status_' || CAST(status_code AS TEXT)) AS key,
                     status_code,
@@ -358,29 +371,33 @@ class AnalyticsStore:
                     AVG(duration_ms) AS avg_latency_ms
                 FROM traces
                 WHERE created_at >= ? AND created_at <= ?
-                  AND (success = 0 OR status_code >= 400)
+                  AND (success = 0 OR status_code >= 400){user_clause}
                 GROUP BY 1, 2
                 ORDER BY request_count DESC
                 LIMIT ?
             """
             with self._db._lock:
-                rows = self._db._conn.execute(sql, (since, until, limit)).fetchall()
+                rows = self._db._conn.execute(
+                    sql, (since, until, *user_params, limit)
+                ).fetchall()
             return [dict(r) for r in rows]
 
         if dimension == "fallbacks":
-            sql = """
+            sql = f"""
                 SELECT
                     fallback_index AS key,
                     COUNT(*) AS request_count,
                     AVG(duration_ms) AS avg_latency_ms,
                     SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS success_count
                 FROM traces
-                WHERE created_at >= ? AND created_at <= ?
+                WHERE created_at >= ? AND created_at <= ?{user_clause}
                 GROUP BY 1
                 ORDER BY 1
             """
             with self._db._lock:
-                rows = self._db._conn.execute(sql, (since, until)).fetchall()
+                rows = self._db._conn.execute(
+                    sql, (since, until, *user_params)
+                ).fetchall()
             return [dict(r) for r in rows]
 
         return []
@@ -388,7 +405,11 @@ class AnalyticsStore:
     # ── summary KPIs ────────────────────────────────────────────────
 
     def summary(
-        self, *, since: float | None = None, until: float | None = None
+        self,
+        *,
+        since: float | None = None,
+        until: float | None = None,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         now = time.time()
         until = float(until if until is not None else now)
@@ -398,13 +419,17 @@ class AnalyticsStore:
             self._summary_cache
             and since == self._summary_cache[1].get("_since")
             and until == self._summary_cache[1].get("_until")
+            and user_id == self._summary_cache[1].get("_user_id")
             and (cache_key_age - self._summary_cache[0]) < self._summary_ttl
         ):
             return {k: v for k, v in self._summary_cache[1].items() if not k.startswith("_")}
 
+        user_clause = " AND user_id = ?" if user_id else ""
+        user_params: list[Any] = [user_id] if user_id else []
+
         with self._db._lock:
             row = self._db._conn.execute(
-                """
+                f"""
                 SELECT
                     COUNT(*) AS total_requests,
                     SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS success_count,
@@ -418,39 +443,38 @@ class AnalyticsStore:
                     COUNT(DISTINCT provider_id) AS active_providers,
                     SUM(CASE WHEN fallback_index > 0 THEN 1 ELSE 0 END) AS fallback_count
                 FROM traces
-                WHERE created_at >= ? AND created_at <= ?
+                WHERE created_at >= ? AND created_at <= ?{user_clause}
                 """,
-                (since, until),
+                (since, until, *user_params),
             ).fetchone()
 
             top_model = self._db._conn.execute(
-                """
+                f"""
                 SELECT model_routed AS key, COUNT(*) AS n FROM traces
-                WHERE created_at >= ? AND created_at <= ? AND model_routed IS NOT NULL
+                WHERE created_at >= ? AND created_at <= ? AND model_routed IS NOT NULL{user_clause}
                 GROUP BY 1 ORDER BY n DESC LIMIT 1
                 """,
-                (since, until),
+                (since, until, *user_params),
             ).fetchone()
             top_intent = self._db._conn.execute(
-                """
+                f"""
                 SELECT intent AS key, COUNT(*) AS n FROM traces
-                WHERE created_at >= ? AND created_at <= ? AND intent IS NOT NULL
+                WHERE created_at >= ? AND created_at <= ? AND intent IS NOT NULL{user_clause}
                 GROUP BY 1 ORDER BY n DESC LIMIT 1
                 """,
-                (since, until),
+                (since, until, *user_params),
             ).fetchone()
 
-            # p95 via sampling (cap 50k)
             durs = [
                 float(r["duration_ms"])
                 for r in self._db._conn.execute(
-                    """
+                    f"""
                     SELECT duration_ms FROM traces
                     WHERE created_at >= ? AND created_at <= ?
-                      AND duration_ms IS NOT NULL
+                      AND duration_ms IS NOT NULL{user_clause}
                     ORDER BY created_at DESC LIMIT 50000
                     """,
-                    (since, until),
+                    (since, until, *user_params),
                 ).fetchall()
             ]
 
@@ -478,6 +502,7 @@ class AnalyticsStore:
             "time_range": {"since": since, "until": until},
             "_since": since,
             "_until": until,
+            "_user_id": user_id,
         }
         self._summary_cache = (now, result)
         return {k: v for k, v in result.items() if not k.startswith("_")}
@@ -529,24 +554,30 @@ class AnalyticsStore:
         since: float | None = None,
         until: float | None = None,
         limit: int = 10000,
+        user_id: str | None = None,
     ):
         now = time.time()
         until = float(until if until is not None else now)
         since = float(since if since is not None else until - 86400)
         limit = max(1, min(100_000, int(limit)))
+        user_clause = " AND user_id = ?" if user_id else ""
+        params: list[Any] = [since, until]
+        if user_id:
+            params.append(user_id)
+        params.append(limit)
         with self._db._lock:
             rows = self._db._conn.execute(
-                """
+                f"""
                 SELECT trace_id, created_at, model_requested, model_routed, intent,
                        intent_confidence, provider_id, status_code, duration_ms,
                        upstream_ttft_ms, prompt_tokens, completion_tokens,
                        estimated_cost_usd, fallback_index, error_message
                 FROM traces
-                WHERE created_at >= ? AND created_at <= ?
+                WHERE created_at >= ? AND created_at <= ?{user_clause}
                 ORDER BY created_at DESC
                 LIMIT ?
                 """,
-                (since, until, limit),
+                params,
             ).fetchall()
         for r in rows:
             yield dict(r)

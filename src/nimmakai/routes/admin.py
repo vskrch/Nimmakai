@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from nimmakai import __version__
-from nimmakai.auth import require_proxy_auth
+from nimmakai.auth import require_admin, require_proxy_auth
 from nimmakai.catalog.providers import provider_from_request_body
 from nimmakai.config import get_settings
 
@@ -20,7 +20,7 @@ router = APIRouter(tags=["admin"])
 async def storage_info(request: Request) -> JSONResponse:
     """Where providers / prefs are persisted (sqlite path, counts)."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     hub = getattr(request.app.state, "hub", None)
     prefs = getattr(request.app.state, "preferences", None)
     db_path = Path(settings.sqlite_path)
@@ -45,7 +45,7 @@ async def storage_info(request: Request) -> JSONResponse:
 async def admin_heal(request: Request) -> JSONResponse:
     """Force self-heal: restore provider runtimes + refresh catalog if empty."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     from nimmakai.resilience import heal_and_refresh
 
     hub = getattr(request.app.state, "hub", None)
@@ -64,7 +64,7 @@ async def admin_logs(request: Request) -> JSONResponse:
     Query: ?limit=50&errors=1&path=/v1/chat
     """
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     from nimmakai.logging_setup import request_logs
 
     limit = 50
@@ -215,7 +215,7 @@ async def stats(request: Request) -> JSONResponse:
 async def ladder_view(request: Request) -> JSONResponse:
     """Current intelligent strength ladders per intent (no secrets)."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     registry = getattr(request.app.state, "registry", None)
     if registry is None:
         return JSONResponse(
@@ -244,7 +244,7 @@ async def ladder_view(request: Request) -> JSONResponse:
 @router.get("/catalog")
 async def catalog_view(request: Request) -> JSONResponse:
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     registry = getattr(request.app.state, "registry", None)
     if registry is None:
         return JSONResponse(
@@ -267,7 +267,7 @@ async def catalog_refresh(request: Request) -> JSONResponse:
     by default — periodic background sync only updates live ids).
     """
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     registry = getattr(request.app.state, "registry", None)
     hub = getattr(request.app.state, "hub", None)
     upstream = getattr(request.app.state, "upstream", None)
@@ -310,7 +310,7 @@ async def catalog_refresh(request: Request) -> JSONResponse:
 async def rankings_refresh(request: Request) -> JSONResponse:
     """Recompute best open models from current live_ids and persist cache."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     registry = getattr(request.app.state, "registry", None)
     if registry is None:
         return JSONResponse(
@@ -325,7 +325,7 @@ async def rankings_refresh(request: Request) -> JSONResponse:
 async def rankings_view(request: Request) -> JSONResponse:
     """Inspect sticky precomputed best-model cache + live adaptive order."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     registry = getattr(request.app.state, "registry", None)
     if registry is None:
         return JSONResponse(
@@ -370,7 +370,7 @@ async def rankings_view(request: Request) -> JSONResponse:
 @router.get("/admin/providers")
 async def list_providers(request: Request) -> JSONResponse:
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     hub = getattr(request.app.state, "hub", None)
     if hub is None:
         return JSONResponse({"providers": [], "presets": [], "pool": {}})
@@ -416,7 +416,7 @@ async def list_providers(request: Request) -> JSONResponse:
 async def provider_presets(request: Request) -> JSONResponse:
     """Free / popular OpenAI-compatible endpoint templates for the admin UI."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     from nimmakai.catalog.presets import list_presets
 
     hub = getattr(request.app.state, "hub", None)
@@ -434,7 +434,7 @@ async def test_provider(request: Request) -> JSONResponse:
     Body: {base_url, api_keys: [str], ...} or {id} to test an existing provider.
     """
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     body: dict[str, Any] = await request.json()
     hub = getattr(request.app.state, "hub", None)
 
@@ -559,7 +559,7 @@ async def upsert_provider(request: Request) -> JSONResponse:
     and merged into the global routing pool.
     """
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     hub = getattr(request.app.state, "hub", None)
     registry = getattr(request.app.state, "registry", None)
     if hub is None:
@@ -706,7 +706,7 @@ async def register_models(request: Request) -> JSONResponse:
     Body: {provider_id, models[], quality_override?, supports_tools?, supports_vision?}
     """
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     registry = getattr(request.app.state, "registry", None)
     hub = getattr(request.app.state, "hub", None)
     if registry is None:
@@ -757,7 +757,7 @@ async def register_models(request: Request) -> JSONResponse:
 @router.delete("/admin/providers/{provider_id}")
 async def delete_provider(provider_id: str, request: Request) -> JSONResponse:
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     hub = getattr(request.app.state, "hub", None)
     registry = getattr(request.app.state, "registry", None)
     if hub is None:
@@ -786,7 +786,7 @@ async def delete_provider(provider_id: str, request: Request) -> JSONResponse:
 @router.post("/admin/providers/{provider_id}/refresh")
 async def refresh_provider(provider_id: str, request: Request) -> JSONResponse:
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     hub = getattr(request.app.state, "hub", None)
     registry = getattr(request.app.state, "registry", None)
     if hub is None or registry is None:
@@ -889,7 +889,7 @@ async def delete_preference(intent: str, request: Request) -> JSONResponse:
 async def clear_all_preferences(request: Request) -> JSONResponse:
     """Remove all user intent preferences (reverts everything to intelligent routing)."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     prefs = getattr(request.app.state, "preferences", None)
     if prefs is None:
         return JSONResponse(
@@ -907,10 +907,43 @@ async def clear_all_preferences(request: Request) -> JSONResponse:
 async def sse_events(request: Request):
     """Server-Sent Events stream for live health/status updates (NMK-505)."""
     import asyncio
+    import hmac
+
+    from fastapi import HTTPException, status
     from fastapi.responses import StreamingResponse
 
+    from nimmakai.auth import extract_bearer, require_admin, validate_proxy_token
+
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    cookie = getattr(settings, "session_cookie_name", "nk_session") or "nk_session"
+    if request.cookies.get(cookie):
+        require_admin(request, settings)
+    else:
+        token = request.query_params.get("token") or extract_bearer(request)
+        validate_proxy_token(
+            token, settings, accounts=getattr(request.app.state, "accounts", None)
+        )
+        accounts = getattr(request.app.state, "accounts", None)
+        is_admin = False
+        if settings.accept_any_proxy_key:
+            is_admin = True
+        elif token and any(
+            hmac.compare_digest(token, k) for k in (settings.proxy_api_keys or [])
+        ):
+            is_admin = True
+        elif token and token.startswith("sk-nk-") and accounts is not None:
+            user = accounts.resolve_api_key(token)
+            is_admin = bool(user and user.get("role") == "admin")
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": {
+                        "message": "Admin access required.",
+                        "code": "admin_required",
+                    }
+                },
+            )
 
     async def event_generator():
         import json
@@ -962,7 +995,7 @@ async def sse_events(request: Request):
 async def provider_health_view(request: Request) -> JSONResponse:
     """Per-provider aggregated health data (NMK-403/504)."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     hub = getattr(request.app.state, "hub", None)
     registry = getattr(request.app.state, "registry", None)
     if not hub or not registry:
@@ -1002,7 +1035,7 @@ async def provider_health_view(request: Request) -> JSONResponse:
 async def request_trace(request_id: str, request: Request) -> JSONResponse:
     """Request trace view — full routing decision breakdown (NMK-506)."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     from nimmakai.logging_setup import request_logs
     entries = request_logs.list(limit=200)
     matching = [e for e in entries if e.get("req") == request_id]

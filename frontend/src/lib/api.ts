@@ -19,7 +19,11 @@ function headers(extra?: Record<string, string>): Record<string, string> {
 
 export async function api<T = unknown>(path: string, opts?: RequestInit): Promise<T | null> {
   try {
-    const res = await fetch(path, { headers: headers(), ...opts })
+    const res = await fetch(path, {
+      credentials: 'include',
+      ...opts,
+      headers: { ...headers(), ...(opts?.headers as Record<string, string> | undefined) },
+    })
     const ct = res.headers.get('content-type') || ''
     let body: unknown = null
     if (ct.includes('application/json')) {

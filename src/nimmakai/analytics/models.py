@@ -64,6 +64,7 @@ class TraceRecord:
     path: str = ""
     client_ip: str | None = None
     api_key: str | None = None
+    user_id: str | None = None
     user_agent: str | None = None
 
     model_requested: str | None = None
@@ -116,6 +117,7 @@ class TraceRecord:
             self.path,
             self.client_ip,
             self._mask_key(self.api_key),
+            self.user_id,
             self.user_agent,
             self.model_requested,
             self.intent,
@@ -184,7 +186,7 @@ class TraceRecord:
 
 TRACE_INSERT_SQL = """
 INSERT INTO traces (
-    trace_id, created_at, method, path, client_ip, api_key, user_agent,
+    trace_id, created_at, method, path, client_ip, api_key, user_id, user_agent,
     model_requested, intent, intent_confidence, intent_rule_id, route_mode,
     model_routed, provider_id, chain_json, fallback_index, chain_length,
     status_code, success, error_message, is_stream,
@@ -192,7 +194,7 @@ INSERT INTO traces (
     prompt_tokens, completion_tokens, cached_tokens, total_tokens,
     estimated_cost_usd, message_count, has_tools, has_images, tool_count, char_length
 ) VALUES (
-    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
+    ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
 )
 """
 

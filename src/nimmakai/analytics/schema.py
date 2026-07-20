@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS traces (
     path        TEXT NOT NULL,
     client_ip   TEXT,
     api_key     TEXT,
+    user_id     TEXT,
     user_agent  TEXT,
 
     model_requested TEXT,
@@ -62,6 +63,7 @@ CREATE INDEX IF NOT EXISTS idx_traces_model ON traces(model_routed);
 CREATE INDEX IF NOT EXISTS idx_traces_provider ON traces(provider_id);
 CREATE INDEX IF NOT EXISTS idx_traces_intent ON traces(intent);
 CREATE INDEX IF NOT EXISTS idx_traces_api_key ON traces(api_key);
+CREATE INDEX IF NOT EXISTS idx_traces_user_id ON traces(user_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_traces_status ON traces(status_code);
 CREATE INDEX IF NOT EXISTS idx_traces_success ON traces(success, created_at);
 CREATE INDEX IF NOT EXISTS idx_traces_recent ON traces(created_at DESC, success);

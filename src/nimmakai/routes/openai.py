@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from nimmakai.auth import require_proxy_auth
+from nimmakai.auth import require_active_user, require_proxy_auth
 from nimmakai.catalog import ModelRegistry
 from nimmakai.compat import (
     normalize_completion_json,
@@ -65,6 +65,7 @@ def _build_trace_base(
         path=entry.path,
         client_ip=entry.client,
         api_key=proxy_token,
+        user_id=getattr(getattr(request.state, "auth", None), "user_id", None),
         user_agent=entry.user_agent,
         model_requested=str(body.get("model") or "") or None,
         is_stream=bool(body.get("stream")),
@@ -212,7 +213,7 @@ async def _prepare_routed(
         "intent_rule_id": None,
     }
     settings = _settings(request)
-    proxy_token = require_proxy_auth(request, settings)
+    proxy_token = require_active_user(request, settings).token or ""
     guard: AccountGuard = request.app.state.guard
 
     if _routing_disabled(request, settings):
@@ -320,7 +321,7 @@ def _merge_headers(
 @router.get("/models")
 async def list_models(request: Request) -> JSONResponse:
     settings = _settings(request)
-    require_proxy_auth(request, settings)
+    require_active_user(request, settings)
     hub = getattr(request.app.state, "hub", None)
     registry: ModelRegistry | None = getattr(request.app.state, "registry", None)
 
@@ -374,7 +375,7 @@ async def list_models(request: Request) -> JSONResponse:
 @router.get("/models/{model_id:path}")
 async def get_model(model_id: str, request: Request) -> JSONResponse:
     settings = _settings(request)
-    require_proxy_auth(request, settings)
+    require_active_user(request, settings)
     registry: ModelRegistry | None = getattr(request.app.state, "registry", None)
     hub = getattr(request.app.state, "hub", None)
     if registry is not None:

@@ -90,6 +90,15 @@ services:
       - key: ANALYTICS_ENABLED
         scope: RUN_TIME
         value: "true"
+      - key: ADMIN_EMAILS
+        scope: RUN_TIME
+        value: ""
+      - key: EMAIL_BACKEND
+        scope: RUN_TIME
+        value: "stub"
+      - key: SESSION_SECURE_COOKIE
+        scope: RUN_TIME
+        value: "true"
       - key: SQLITE_PATH
         scope: RUN_TIME
         value: "/data/nimmakai.db"
