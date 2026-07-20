@@ -7,8 +7,12 @@ interface SidebarProps {
 
 const NAV_ITEMS = [
   { id: 'dashboard', label: 'Dashboard', icon: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z' },
+  { id: 'analytics', label: 'Analytics', icon: 'M3 3v18h18M7 14l4-4 4 4 5-6' },
+  { id: 'requests', label: 'Requests', icon: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01' },
+  { id: 'live', label: 'Live Feed', icon: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z' },
+  { id: 'intents', label: 'Intents', icon: 'M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4zM4 14a8 8 0 0 1 16 0v2H4z' },
+  { id: 'cost', label: 'Cost', icon: 'M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' },
   { id: 'playground', label: 'Playground', icon: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' },
-  { id: 'tracing', label: 'Tracing', icon: 'M18 20V10M12 20V4M6 20v-6' },
   { id: 'providers', label: 'Providers', icon: 'M2 12h4l2-9 4 18 2-9h4' },
   { id: 'health', label: 'Health', icon: 'M22 12h-4l-3 9L9 3l-3 9H2' },
   { id: 'models', label: 'Models', icon: 'M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5' },
@@ -25,7 +29,7 @@ export default function Sidebar({ page, onNavigate }: SidebarProps) {
           <p className="text-[11px] text-zinc-400 uppercase tracking-[1px] mt-0.5">Gateway</p>
         </div>
       </div>
-      <nav className="flex-1 px-3 flex flex-col gap-1">
+      <nav className="flex-1 px-3 flex flex-col gap-1 overflow-y-auto pb-4">
         {NAV_ITEMS.map(item => (
           <button
             key={item.id}

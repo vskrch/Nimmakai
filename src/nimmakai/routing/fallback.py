@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
@@ -15,12 +15,15 @@ from nimmakai.safety.backoff import sleep_backoff
 from nimmakai.upstream import parse_retry_after
 
 if TYPE_CHECKING:
+    from nimmakai.analytics.models import TraceSpan
     from nimmakai.balancer import KeyStats
     from nimmakai.catalog.registry import ModelRegistry
     from nimmakai.config import Settings
     from nimmakai.upstream import UpstreamClient
 
 logger = logging.getLogger(__name__)
+
+SpanCallback = Callable[["TraceSpan"], None]
 
 
 @dataclass
@@ -32,6 +35,10 @@ class UpstreamResult:
     model: str
     fallback_index: int
     decision: RouteDecision
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_tokens: int = 0
+    upstream_ms: float | None = None
 
 
 @dataclass
@@ -43,6 +50,18 @@ class StreamResult:
     model: str
     fallback_index: int
     decision: RouteDecision
+    upstream_ttft_ms: float | None = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    cached_tokens: int = 0
+    # Mutable usage bag updated as SSE chunks are scanned (stream may finish after return)
+    usage: dict[str, int] = field(
+        default_factory=lambda: {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "cached_tokens": 0,
+        }
+    )
 
 
 @dataclass
@@ -186,12 +205,70 @@ class FallbackExecutor:
         settings: Settings,
         stats: RoutingStats | None = None,
         hub: Any | None = None,
+        span_callback: SpanCallback | None = None,
     ) -> None:
         self.upstream = upstream
         self.registry = registry
         self.settings = settings
         self.stats = stats or RoutingStats()
         self.hub = hub
+        self._span_cb = span_callback or None
+        # Prefer contextvar collector so concurrent requests don't share state
+        from nimmakai.analytics.context import collect_span
+
+        if self._span_cb is None:
+            self._span_cb = collect_span
+
+    def set_span_callback(self, cb: SpanCallback | None) -> None:
+        self._span_cb = cb
+        if self._span_cb is None:
+            from nimmakai.analytics.context import collect_span
+
+            self._span_cb = collect_span
+
+    def _emit_span(self, span: Any) -> None:
+        if self._span_cb is None:
+            return
+        try:
+            self._span_cb(span)
+        except Exception:
+            logger.debug("span callback failed", exc_info=True)
+
+    def _provider_id_for(self, model: str) -> str | None:
+        if self.hub is None:
+            return None
+        try:
+            _c, pid, _u = self.hub.client_for_model(model)
+            return pid
+        except Exception:
+            return None
+
+    def _make_upstream_span(
+        self,
+        *,
+        model: str,
+        t0: float,
+        status: int | None = None,
+        success: bool = True,
+        error_message: str | None = None,
+        metadata: dict[str, Any] | None = None,
+        span_type: str = "upstream",
+    ) -> Any:
+        from nimmakai.analytics.models import TraceSpan
+
+        ended = time.perf_counter()
+        return TraceSpan(
+            span_type=span_type,
+            model_id=model,
+            provider_id=self._provider_id_for(model),
+            started_at=t0,
+            ended_at=ended,
+            duration_ms=(ended - t0) * 1000,
+            status_code=status,
+            success=success,
+            error_message=error_message,
+            metadata=metadata or {},
+        )
 
     def _client_for(self, model: str) -> tuple[Any, str]:
         """Return (upstream_client, upstream_model_id) for this namespaced model."""
@@ -346,6 +423,7 @@ class FallbackExecutor:
         for idx, model in enumerate(chain):
             client, upstream_mid = self._client_for(model)
             attempt_body = {**body, "model": upstream_mid}
+            t_attempt = time.perf_counter()
             try:
                 status, resp_body, headers, key = await client.request_json(
                     "POST",
@@ -365,6 +443,18 @@ class FallbackExecutor:
                     or "provider" in msg
                 )
                 if retryable_pool:
+                    self._emit_span(
+                        self._make_upstream_span(
+                            model=model,
+                            t0=t_attempt,
+                            status=503,
+                            success=False,
+                            error_message=str(exc),
+                            span_type="fallback_advance"
+                            if advance_on_pool and idx < len(chain) - 1
+                            else "upstream",
+                        )
+                    )
                     if advance_on_pool and idx < len(chain) - 1:
                         self.stats.fallback_advances += 1
                         logger.info(
@@ -387,6 +477,7 @@ class FallbackExecutor:
                         model=model,
                         fallback_index=idx,
                         decision=decision,
+                        upstream_ms=(time.perf_counter() - t_attempt) * 1000,
                     )
                 raise
 
@@ -404,19 +495,48 @@ class FallbackExecutor:
                     resp_body, had_tools=had_tools
                 )
             # Adaptive speed signal: JSON path latency (if measured upstream)
-            latency = None
+            latency = (time.perf_counter() - t_attempt) * 1000
             tokens = None
+            pt = ct = cached = 0
             if success and isinstance(resp_body, dict):
                 usage = resp_body.get("usage")
                 if isinstance(usage, dict):
                     pt = int(usage.get("prompt_tokens") or 0)
                     ct = int(usage.get("completion_tokens") or 0)
+                    cached = int(
+                        usage.get("cached_tokens")
+                        or (usage.get("prompt_tokens_details") or {}).get(
+                            "cached_tokens", 0
+                        )
+                        or 0
+                    )
                     tokens = pt + ct if (pt or ct) else None
+            self._emit_span(
+                self._make_upstream_span(
+                    model=model,
+                    t0=t_attempt,
+                    status=status,
+                    success=success and not (
+                        (had_tools and tool_ok is False) or empty_reply
+                    ),
+                    error_message=None
+                    if success
+                    else f"upstream_{status}",
+                    metadata={
+                        "prompt_tokens": pt,
+                        "completion_tokens": ct,
+                        "cached_tokens": cached,
+                        "empty_reply": empty_reply,
+                        "tool_ok": tool_ok,
+                    },
+                    span_type="upstream",
+                )
+            )
             self.registry.record_outcome(
                 model,
                 key_id,
                 success=success,
-                latency=latency,
+                latency=latency / 1000.0 if latency else None,
                 tokens=tokens,
                 status_code=status,
                 unavailable=unavailable,
@@ -454,8 +574,15 @@ class FallbackExecutor:
                         resp_body = {**resp_body, "model": model}
                     usage = resp_body.get("usage")
                     if isinstance(usage, dict):
-                        pt = usage.get("prompt_tokens", 0)
-                        ct = usage.get("completion_tokens", 0)
+                        pt = int(usage.get("prompt_tokens") or 0)
+                        ct = int(usage.get("completion_tokens") or 0)
+                        cached = int(
+                            usage.get("cached_tokens")
+                            or (usage.get("prompt_tokens_details") or {}).get(
+                                "cached_tokens", 0
+                            )
+                            or 0
+                        )
                         self.stats.record_tokens(model, key_id, pt, ct)
                 self.stats.record(decision.intent.value, model, advanced=idx > 0)
                 return UpstreamResult(
@@ -466,6 +593,10 @@ class FallbackExecutor:
                     model=model,
                     fallback_index=idx,
                     decision=decision,
+                    prompt_tokens=pt,
+                    completion_tokens=ct,
+                    cached_tokens=cached,
+                    upstream_ms=latency,
                 )
 
             last = UpstreamResult(
@@ -476,6 +607,7 @@ class FallbackExecutor:
                 model=model,
                 fallback_index=idx,
                 decision=decision,
+                upstream_ms=latency,
             )
 
             if _is_non_retryable_client_error(status, resp_body):
@@ -583,6 +715,7 @@ class FallbackExecutor:
         for idx, model in enumerate(chain):
             client, upstream_mid = self._client_for(model)
             attempt_body = {**body, "model": upstream_mid}
+            t_attempt = time.perf_counter()
             try:
                 status, byte_iter, headers, key = await client.stream(
                     "POST",
@@ -592,6 +725,18 @@ class FallbackExecutor:
                     preferred_key_id=preferred_key_id,
                 )
             except RuntimeError as exc:
+                self._emit_span(
+                    self._make_upstream_span(
+                        model=model,
+                        t0=t_attempt,
+                        status=503,
+                        success=False,
+                        error_message=str(exc),
+                        span_type="fallback_advance"
+                        if idx < len(chain) - 1
+                        else "upstream",
+                    )
+                )
                 if idx < len(chain) - 1:
                     self.stats.fallback_advances += 1
                     logger.info("stream pool/error on %s: %s; advancing", model, exc)
@@ -625,6 +770,17 @@ class FallbackExecutor:
                         model,
                         ttft,
                     )
+                    self._emit_span(
+                        self._make_upstream_span(
+                            model=model,
+                            t0=t_attempt,
+                            status=504,
+                            success=False,
+                            error_message=f"ttft_timeout_{ttft:.0f}s",
+                            span_type="fallback_advance",
+                            metadata={"ttft_timeout_s": ttft},
+                        )
+                    )
                     if hasattr(byte_iter, "aclose"):
                         with suppress(Exception):
                             await byte_iter.aclose()
@@ -642,6 +798,16 @@ class FallbackExecutor:
                     logger.warning(
                         "Stream open failed on %s: %s; falling back", model, exc
                     )
+                    self._emit_span(
+                        self._make_upstream_span(
+                            model=model,
+                            t0=t_attempt,
+                            status=502,
+                            success=False,
+                            error_message=str(exc),
+                            span_type="fallback_advance",
+                        )
+                    )
                     if hasattr(byte_iter, "aclose"):
                         with suppress(Exception):
                             await byte_iter.aclose()
@@ -656,6 +822,15 @@ class FallbackExecutor:
                     continue
 
                 ttft_latency = max(0.01, time.monotonic() - t_stream0)
+                self._emit_span(
+                    self._make_upstream_span(
+                        model=model,
+                        t0=t_attempt,
+                        status=status,
+                        success=True,
+                        metadata={"ttft_ms": ttft_latency * 1000, "stream": True},
+                    )
+                )
                 self.stats.record(decision.intent.value, model, advanced=idx > 0)
                 # Adaptive: first-token latency feeds speed score immediately
                 self.registry.record_outcome(
@@ -673,6 +848,12 @@ class FallbackExecutor:
                 bound_key_id = key.key_id if key else None
                 bound_idle = idle
                 bound_t0 = t_stream0
+                bound_ttft_ms = ttft_latency * 1000
+                usage_bag: dict[str, int] = {
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "cached_tokens": 0,
+                }
 
                 async def robust_iter(
                     first: bytes,
@@ -682,6 +863,7 @@ class FallbackExecutor:
                     kid: str | None = bound_key_id,
                     idle_s: float = bound_idle,
                     t0: float = bound_t0,
+                    usage: dict[str, int] = usage_bag,
                 ) -> AsyncIterator[bytes]:
                     total_tokens = 0
 
@@ -695,6 +877,8 @@ class FallbackExecutor:
                             if p and ct:
                                 pt_i, ct_i = int(p.group(1)), int(ct.group(1))
                                 total_tokens = pt_i + ct_i
+                                usage["prompt_tokens"] = pt_i
+                                usage["completion_tokens"] = ct_i
                                 self.stats.record_tokens(mid, kid, pt_i, ct_i)
 
                     if first:
@@ -759,6 +943,11 @@ class FallbackExecutor:
                     model=model,
                     fallback_index=idx,
                     decision=decision,
+                    upstream_ttft_ms=bound_ttft_ms,
+                    usage=usage_bag,
+                    prompt_tokens=usage_bag["prompt_tokens"],
+                    completion_tokens=usage_bag["completion_tokens"],
+                    cached_tokens=usage_bag["cached_tokens"],
                 )
 
             # Failed stream open — advance on same retryable set as JSON path

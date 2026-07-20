@@ -266,25 +266,48 @@ Then set `GROQ_API_KEYS=gsk-...` in `.env`.
 
 ## Web Dashboard
 
-The dashboard at **http://localhost:8080/dashboard** has three tabs:
+The React dashboard (served from `/` or `/dashboard`) includes:
 
-### 1. Providers Tab
-- Overview stats (total providers, enabled, API keys)
-- Add new providers form
-- List of all providers with enable/disable/remove controls
-- Key masking for security
+### Overview / Analytics
+- KPI cards: requests, latency (avg/p95), tokens, estimated cost, success rate
+- Request volume chart, intent distribution, top models / providers
+- Time range presets: 1h / 6h / 24h / 7d
 
-### 2. Models Tab
-- Live model catalog across all providers
-- Filter by model ID
-- Context window size display
-- Refresh catalog button
+### Request Explorer
+- Filterable, paginated trace table (intent, status, search)
+- Langfuse-style span waterfall (classify → route → upstream / fallback)
+- CSV / JSONL export via `/analytics/export/traces`
 
-### 3. Routing Tab
-- **Ladder Editor**: pin specific models for each intent (coding, chat, reasoning, etc.)
-- **Strict mode**: only use pinned models (no fallback)
-- **Loose mode**: pinned models first, then fall back to intelligent ladder
-- **Active Ladders**: view the current auto-generated ladders with scores
+### Live Feed
+- Real-time SSE stream from `/analytics/events?token=…`
+- Pause/resume buffering, fallback badges, error highlighting
+
+### Intents / Cost
+- Intent confidence aggregates, fallback index distribution, top errors
+- Cost by model / API key, editable per-model $/M rate overrides
+
+### Providers / Models / Routing / Playground
+- Provider CRUD, health, live catalog, ladder editor, chat playground
+
+---
+
+## Analytics API
+
+Persistent request traces (SQLite WAL) with async batch writes — zero request-path blocking.
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/analytics/summary` | Yes | KPI snapshot (cached ~10s) |
+| GET | `/analytics/traces` | Yes | Paginated / filterable traces |
+| GET | `/analytics/traces/{id}` | Yes | Trace + spans waterfall |
+| GET | `/analytics/timeseries/{metric}` | Yes | `requests`, `latency`, `tokens`, `cost`, `ttft` |
+| GET | `/analytics/breakdown/{dim}` | Yes | `models`, `providers`, `intents`, `api_keys`, `errors`, `fallbacks` |
+| GET | `/analytics/events` | Yes (`?token=`) | SSE live feed |
+| GET | `/analytics/export/traces` | Yes | CSV or JSONL export |
+| GET/PUT/DELETE | `/analytics/cost/rates` | Yes | Cost rate defaults + overrides |
+| POST | `/analytics/retention/run` | Yes | Trigger retention/rollup cycle |
+
+Config (env): `ANALYTICS_ENABLED`, `ANALYTICS_RETENTION_DAYS` (7), `ANALYTICS_ROLLUP_RETENTION_DAYS` (90), `ANALYTICS_BATCH_SIZE`, `ANALYTICS_FLUSH_INTERVAL`, `ANALYTICS_WEBHOOK_URL`, `ANALYTICS_OTLP_ENDPOINT` (optional `pip install nimmakai[otel]`).
 
 ---
 
@@ -564,6 +587,18 @@ Body field `session_id` is also accepted (OpenRouter-compatible).
 | DELETE | `/preferences/{intent}` | Yes | Clear inten preference |
 | DELETE | `/preferences` | Yes | Clear all preferences |
 | GET | `/dashboard` | No | Web dashboard |
+
+### Analytics
+
+| Method | Path | Auth Required | Description |
+|--------|------|---------------|-------------|
+| GET | `/analytics/summary` | Yes | Dashboard KPIs |
+| GET | `/analytics/traces` | Yes | Request explorer list |
+| GET | `/analytics/traces/{id}` | Yes | Trace detail + spans |
+| GET | `/analytics/timeseries/*` | Yes | Time-bucketed metrics |
+| GET | `/analytics/breakdown/*` | Yes | Dimension aggregates |
+| GET | `/analytics/events` | Yes (`?token=`) | SSE live feed |
+| GET | `/analytics/export/traces` | Yes | CSV / JSONL export |
 
 ---
 

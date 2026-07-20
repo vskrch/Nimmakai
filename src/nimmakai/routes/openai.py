@@ -36,6 +36,138 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["openai"])
 
 
+def _enqueue_trace(request: Request, trace: Any) -> None:
+    writer = getattr(request.app.state, "trace_writer", None)
+    if writer is None:
+        return
+    try:
+        writer.enqueue(trace)
+    except Exception:
+        logger.debug("trace enqueue failed", exc_info=True)
+
+
+def _build_trace_base(
+    request: Request,
+    *,
+    req_id: str,
+    entry: RequestLog,
+    body: dict[str, Any],
+    proxy_token: str | None,
+) -> Any:
+    from nimmakai.analytics.context import extract_request_context
+    from nimmakai.analytics.models import TraceRecord
+
+    ctx_stats = extract_request_context(body)
+    return TraceRecord(
+        trace_id=req_id,
+        created_at=entry.ts,
+        method=entry.method,
+        path=entry.path,
+        client_ip=entry.client,
+        api_key=proxy_token,
+        user_agent=entry.user_agent,
+        model_requested=str(body.get("model") or "") or None,
+        is_stream=bool(body.get("stream")),
+        **ctx_stats,
+    )
+
+
+def _apply_timing(trace: Any, timing: dict[str, Any] | None) -> None:
+    if not timing:
+        return
+    if timing.get("classify_ms") is not None:
+        trace.classify_ms = timing["classify_ms"]
+    if timing.get("route_ms") is not None:
+        trace.route_ms = timing["route_ms"]
+    if timing.get("intent_confidence") is not None:
+        trace.intent_confidence = float(timing["intent_confidence"] or 0)
+    if timing.get("intent_rule_id"):
+        trace.intent_rule_id = timing["intent_rule_id"]
+
+
+def _finalize_trace(
+    request: Request,
+    trace: Any,
+    *,
+    t0: float,
+    status: int,
+    decision: RouteDecision | None = None,
+    model_routed: str | None = None,
+    provider: str | None = None,
+    fallback_index: int = 0,
+    error: str | None = None,
+    prompt_tokens: int = 0,
+    completion_tokens: int = 0,
+    cached_tokens: int = 0,
+    upstream_ttft_ms: float | None = None,
+    upstream_total_ms: float | None = None,
+    spans: list[Any] | None = None,
+    timing: dict[str, Any] | None = None,
+) -> None:
+    from nimmakai.analytics.cost import estimate_cost
+    from nimmakai.analytics.context import end_span_collection
+
+    settings = _settings(request)
+    if not getattr(settings, "analytics_enabled", True):
+        end_span_collection()
+        return
+    if trace is None:
+        end_span_collection()
+        return
+
+    store = getattr(request.app.state, "analytics_store", None)
+    overrides = store.cost_overrides_map() if store else None
+
+    if spans is None:
+        spans = end_span_collection()
+    else:
+        end_span_collection()
+
+    _apply_timing(trace, timing)
+    trace.duration_ms = (time.perf_counter() - t0) * 1000
+    trace.status_code = status
+    trace.success = 200 <= status < 400 and not error
+    trace.error_message = error
+    if decision is not None:
+        trace.intent = decision.intent.value
+        if not trace.intent_rule_id:
+            trace.intent_rule_id = decision.rule_id
+        trace.route_mode = decision.mode
+        trace.model_requested = str(decision.requested_model or trace.model_requested or "") or None
+        trace.chain = list(decision.chain or [])
+        trace.chain_length = len(trace.chain) or 1
+    if model_routed is not None:
+        trace.model_routed = model_routed
+    if provider is not None:
+        trace.provider_id = provider
+    trace.fallback_index = fallback_index
+    trace.prompt_tokens = int(prompt_tokens or 0)
+    trace.completion_tokens = int(completion_tokens or 0)
+    trace.cached_tokens = int(cached_tokens or 0)
+    if not trace.prompt_tokens and not trace.completion_tokens and trace.char_length:
+        # Rough estimate when upstream omits usage
+        trace.prompt_tokens = max(1, trace.char_length // 4)
+    trace.total_tokens = trace.prompt_tokens + trace.completion_tokens
+    trace.upstream_ttft_ms = upstream_ttft_ms
+    trace.upstream_total_ms = upstream_total_ms
+    if model_routed:
+        trace.estimated_cost_usd = estimate_cost(
+            model_routed,
+            trace.prompt_tokens,
+            trace.completion_tokens,
+            overrides=overrides,
+        )
+    if spans:
+        trace.spans = list(spans)
+    # Backfill classify/route ms from spans if not set
+    for sp in trace.spans:
+        if sp.span_type == "classify" and trace.classify_ms is None:
+            trace.classify_ms = sp.duration_ms
+        elif sp.span_type == "route" and trace.route_ms is None:
+            trace.route_ms = sp.duration_ms
+    _enqueue_trace(request, trace)
+
+
 def _settings(request: Request) -> Settings:
     return getattr(request.app.state, "settings", None) or get_settings()
 
@@ -63,11 +195,22 @@ async def _prepare_routed(
     RouteDecision | None,
     Any,
     str | None,
+    dict[str, Any],
 ]:
     """
-    Classify + select model chain. Returns (body, decision, guard_ctx, proxy_token).
+    Classify + select model chain. Returns (body, decision, guard_ctx, proxy_token, timing).
     When routing is off, decision is None and body may only get default_model.
     """
+    from nimmakai.analytics.context import begin_span_collection
+    from nimmakai.analytics.models import TraceSpan
+
+    begin_span_collection()
+    timing: dict[str, Any] = {
+        "classify_ms": None,
+        "route_ms": None,
+        "intent_confidence": 0.0,
+        "intent_rule_id": None,
+    }
     settings = _settings(request)
     proxy_token = require_proxy_auth(request, settings)
     guard: AccountGuard = request.app.state.guard
@@ -78,7 +221,7 @@ async def _prepare_routed(
         ctx = await guard.before_request(
             headers=request.headers, proxy_token=proxy_token, body=body
         )
-        return body, None, ctx, proxy_token
+        return body, None, ctx, proxy_token, timing
 
     classifier: IntentClassifier = request.app.state.classifier
     selector: ModelSelector | None = request.app.state.selector
@@ -90,11 +233,12 @@ async def _prepare_routed(
         ctx = await guard.before_request(
             headers=request.headers, proxy_token=proxy_token, body=body
         )
-        return body, None, ctx, proxy_token
+        return body, None, ctx, proxy_token, timing
 
     # OpenRouter plugins / session_id / models[] — parse before strip
     auto_opts = parse_auto_router_options(body)
 
+    t_classify = time.perf_counter()
     intent = classifier.classify(path=path, body=body, headers=request.headers)
     if settings.classify_mode == "rules_then_llm":
         upstream = _upstream(request)
@@ -110,21 +254,58 @@ async def _prepare_routed(
             fast_model=fast,
             pool_pressure_high=pressure,
         )
+    classify_ms = (time.perf_counter() - t_classify) * 1000
+    timing["classify_ms"] = classify_ms
+    timing["intent_confidence"] = float(intent.confidence)
+    timing["intent_rule_id"] = intent.rule_id
+    from nimmakai.analytics.context import collect_span
+
+    collect_span(
+        TraceSpan(
+            span_type="classify",
+            started_at=t_classify,
+            ended_at=t_classify + classify_ms / 1000.0,
+            duration_ms=classify_ms,
+            success=True,
+            metadata={
+                "intent": intent.intent.value,
+                "confidence": intent.confidence,
+                "rule_id": intent.rule_id,
+            },
+        )
+    )
 
     ctx = await guard.before_request(
         headers=request.headers, proxy_token=proxy_token, body=body
     )
     # Auto-router session model pin (OpenRouter sticky model selection)
     preferred_model = getattr(ctx, "preferred_model", None)
+    t_route = time.perf_counter()
     decision = selector.resolve(
         body.get("model"),
         intent,
         auto_opts=auto_opts,
         preferred_model=preferred_model,
     )
+    route_ms = (time.perf_counter() - t_route) * 1000
+    timing["route_ms"] = route_ms
+    collect_span(
+        TraceSpan(
+            span_type="route",
+            started_at=t_route,
+            ended_at=t_route + route_ms / 1000.0,
+            duration_ms=route_ms,
+            success=True,
+            metadata={
+                "mode": decision.mode,
+                "chain_len": len(decision.chain),
+                "chain_head": decision.chain[0] if decision.chain else None,
+            },
+        )
+    )
     # Drop client-only OpenRouter/Kilo fields before upstream
     body = strip_router_client_fields(body)
-    return body, decision, ctx, proxy_token
+    return body, decision, ctx, proxy_token, timing
 
 
 def _merge_headers(
@@ -337,8 +518,10 @@ async def _chat_like(
     # OpenAI/Cursor body quirks (max_completion_tokens, stream_options, etc.)
     body = sanitize_chat_body(body)
 
+    timing: dict[str, Any] = {}
+    proxy_token: str | None = None
     try:
-        body, decision, ctx, _token = await _prepare_routed(
+        body, decision, ctx, proxy_token, timing = await _prepare_routed(
             request, body, path=upstream_path
         )
     except Exception as exc:
@@ -355,6 +538,21 @@ async def _chat_like(
             raise
         _finish_log(entry, status=500, t0=t0, error=str(exc))
         raise
+
+    trace = None
+    if getattr(_settings(request), "analytics_enabled", True):
+        try:
+            trace = _build_trace_base(
+                request,
+                req_id=req_id,
+                entry=entry,
+                body=body,
+                proxy_token=proxy_token,
+            )
+            _apply_timing(trace, timing)
+        except Exception:
+            logger.debug("trace base build failed", exc_info=True)
+            trace = None
 
     stream = bool(body.get("stream"))
     preferred = ctx.preferred_key_id
@@ -429,9 +627,10 @@ async def _chat_like(
                             success=ok and not err,
                             pin_model=pin_model,
                         )
+                        status_final = result.status_code if not err else 499
                         _finish_log(
                             entry,
-                            status=result.status_code if not err else 499,
+                            status=status_final,
                             t0=t0,
                             model_routed=result.model,
                             provider=provider,
@@ -442,6 +641,27 @@ async def _chat_like(
                             error=err,
                             model_requested=str(decision.requested_model or body.get("model") or "")
                             or None,
+                        )
+                        usage = getattr(result, "usage", None) or {}
+                        _finalize_trace(
+                            request,
+                            trace,
+                            t0=t0,
+                            status=status_final,
+                            decision=decision,
+                            model_routed=result.model,
+                            provider=provider,
+                            fallback_index=result.fallback_index,
+                            error=err,
+                            prompt_tokens=int(usage.get("prompt_tokens") or result.prompt_tokens or 0),
+                            completion_tokens=int(
+                                usage.get("completion_tokens") or result.completion_tokens or 0
+                            ),
+                            cached_tokens=int(
+                                usage.get("cached_tokens") or result.cached_tokens or 0
+                            ),
+                            upstream_ttft_ms=result.upstream_ttft_ms,
+                            timing=timing,
                         )
 
                 return StreamingResponse(
@@ -484,6 +704,11 @@ async def _chat_like(
             body_out = normalize_completion_json(
                 result_j.body, routed_model=result_j.model or None
             )
+            err_msg = (
+                None
+                if result_j.status_code < 400
+                else f"upstream_{result_j.status_code}"
+            )
             _finish_log(
                 entry,
                 status=result_j.status_code,
@@ -496,9 +721,23 @@ async def _chat_like(
                 stream=False,
                 model_requested=str(decision.requested_model or body.get("model") or "")
                 or None,
-                error=None
-                if result_j.status_code < 400
-                else f"upstream_{result_j.status_code}",
+                error=err_msg,
+            )
+            _finalize_trace(
+                request,
+                trace,
+                t0=t0,
+                status=result_j.status_code,
+                decision=decision,
+                model_routed=result_j.model,
+                provider=route_h.get("X-Nimmakai-Provider"),
+                fallback_index=result_j.fallback_index,
+                error=err_msg,
+                prompt_tokens=result_j.prompt_tokens,
+                completion_tokens=result_j.completion_tokens,
+                cached_tokens=result_j.cached_tokens,
+                upstream_total_ms=result_j.upstream_ms,
+                timing=timing,
             )
             return JSONResponse(
                 content=body_out,
@@ -531,14 +770,24 @@ async def _chat_like(
                         pass
                 finally:
                     await guard.after_request(ctx, key_id=key_id, success=ok and not err)
+                    status_final = status if not err else 499
                     _finish_log(
                         entry,
-                        status=status if not err else 499,
+                        status=status_final,
                         t0=t0,
                         model_routed=str(body.get("model") or ""),
                         stream=True,
                         route_mode="disabled",
                         error=err,
+                    )
+                    _finalize_trace(
+                        request,
+                        trace,
+                        t0=t0,
+                        status=status_final,
+                        model_routed=str(body.get("model") or "") or None,
+                        error=err,
+                        timing=timing,
                     )
 
             return StreamingResponse(
@@ -561,6 +810,17 @@ async def _chat_like(
             preferred_key_id=preferred,
         )
         await guard.after_request(ctx, key_id=key.key_id, success=200 <= status < 300)
+        pt = ct = cached = 0
+        if isinstance(resp_body, dict):
+            usage = resp_body.get("usage")
+            if isinstance(usage, dict):
+                pt = int(usage.get("prompt_tokens") or 0)
+                ct = int(usage.get("completion_tokens") or 0)
+                cached = int(
+                    usage.get("cached_tokens")
+                    or (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+                    or 0
+                )
         _finish_log(
             entry,
             status=status,
@@ -569,15 +829,44 @@ async def _chat_like(
             stream=False,
             route_mode="disabled",
         )
+        _finalize_trace(
+            request,
+            trace,
+            t0=t0,
+            status=status,
+            model_routed=str(body.get("model") or "") or None,
+            prompt_tokens=pt,
+            completion_tokens=ct,
+            cached_tokens=cached,
+            timing=timing,
+        )
         headers = {**headers, "X-Request-Id": req_id}
         return JSONResponse(content=resp_body, status_code=status, headers=headers)
     except RuntimeError as exc:
         await guard.after_request(ctx, success=False)
         _finish_log(entry, status=503, t0=t0, error=str(exc), stream=stream)
+        _finalize_trace(
+            request,
+            trace,
+            t0=t0,
+            status=503,
+            decision=decision,
+            error=str(exc),
+            timing=timing,
+        )
         return JSONResponse(content=guard.pool_exhausted_error(), status_code=503)
     except Exception as exc:
         await guard.after_request(ctx, success=False)
         _finish_log(entry, status=500, t0=t0, error=str(exc), stream=stream)
+        _finalize_trace(
+            request,
+            trace,
+            t0=t0,
+            status=500,
+            decision=decision,
+            error=str(exc),
+            timing=timing,
+        )
         logger.exception("chat path failed req=%s", req_id)
         raise
 
@@ -594,13 +883,38 @@ async def completions(request: Request) -> JSONResponse | StreamingResponse:
 
 @router.post("/embeddings")
 async def embeddings(request: Request) -> JSONResponse:
+    t0 = time.perf_counter()
+    req_id = getattr(request.state, "request_id", None) or "noreq"
     upstream = _upstream(request)
     guard: AccountGuard = request.app.state.guard
     body = await request.json()
-    body, decision, ctx, _token = await _prepare_routed(
+    body, decision, ctx, proxy_token, timing = await _prepare_routed(
         request, body, path="/embeddings"
     )
     preferred = ctx.preferred_key_id
+    trace = None
+    if getattr(_settings(request), "analytics_enabled", True):
+        try:
+            entry = RequestLog(
+                id=req_id,
+                ts=time.time(),
+                method=request.method,
+                path=str(request.url.path),
+                client=_client_ip(request),
+                user_agent=(request.headers.get("user-agent") or "")[:160] or None,
+                model_requested=str(body.get("model") or "") or None,
+            )
+            trace = _build_trace_base(
+                request,
+                req_id=req_id,
+                entry=entry,
+                body=body,
+                proxy_token=proxy_token,
+            )
+            _apply_timing(trace, timing)
+        except Exception:
+            logger.debug("embeddings trace build failed", exc_info=True)
+            trace = None
     try:
         if decision is not None and request.app.state.fallback is not None:
             fallback: FallbackExecutor = request.app.state.fallback
@@ -614,6 +928,15 @@ async def embeddings(request: Request) -> JSONResponse:
                 )
                 await guard.after_request(
                     ctx, key_id=key.key_id, success=200 <= status < 300
+                )
+                _finalize_trace(
+                    request,
+                    trace,
+                    t0=t0,
+                    status=status,
+                    decision=decision,
+                    model_routed=str(body.get("model") or "") or None,
+                    timing=timing,
                 )
                 return JSONResponse(
                     content=resp_body, status_code=status, headers=headers
@@ -636,6 +959,21 @@ async def embeddings(request: Request) -> JSONResponse:
                 key_id=result.key.key_id if result.key else None,
                 success=200 <= result.status_code < 300,
             )
+            _finalize_trace(
+                request,
+                trace,
+                t0=t0,
+                status=result.status_code,
+                decision=decision,
+                model_routed=result.model,
+                provider=route_h.get("X-Nimmakai-Provider"),
+                fallback_index=result.fallback_index,
+                prompt_tokens=result.prompt_tokens,
+                completion_tokens=result.completion_tokens,
+                cached_tokens=result.cached_tokens,
+                upstream_total_ms=result.upstream_ms,
+                timing=timing,
+            )
             return JSONResponse(
                 content=result.body,
                 status_code=result.status_code,
@@ -649,12 +987,26 @@ async def embeddings(request: Request) -> JSONResponse:
             preferred_key_id=preferred,
         )
         await guard.after_request(ctx, key_id=key.key_id, success=200 <= status < 300)
+        _finalize_trace(
+            request,
+            trace,
+            t0=t0,
+            status=status,
+            model_routed=str(body.get("model") or "") or None,
+            timing=timing,
+        )
         return JSONResponse(content=resp_body, status_code=status, headers=headers)
-    except RuntimeError:
+    except RuntimeError as exc:
         await guard.after_request(ctx, success=False)
+        _finalize_trace(
+            request, trace, t0=t0, status=503, decision=decision, error=str(exc), timing=timing
+        )
         return JSONResponse(content=guard.pool_exhausted_error(), status_code=503)
-    except Exception:
+    except Exception as exc:
         await guard.after_request(ctx, success=False)
+        _finalize_trace(
+            request, trace, t0=t0, status=500, decision=decision, error=str(exc), timing=timing
+        )
         raise
 
 

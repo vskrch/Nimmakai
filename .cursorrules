@@ -1,42 +1,33 @@
 # Scratchpad
 
 ## Current task
-AUDIT — "why isn't this working". 107 tests pass; runtime repro done.
+SUPERCODER — Implement analytics dashboard ADR (Deep track) — COMPLETE
 
-## Findings (audit 2026-07-13)
-- [X] Catalog is 100% live-dependent: models.yaml has `models:{}` + empty `chain:[]`
-      per intent. Everything is `dynamic_families`. No static fallback if /models
-      refresh fails -> every chain resolves EMPTY -> 503 `nimmakai_catalog_empty`.
-- [X] NO real upstream configured: only `nim` in providers.yaml (no NIM_API_KEYS),
-      groq overlay has fake `gsk-test-key`. With no live refresh the app serves
-      only stale snapshot; with bad proxy key NIM returns 401.
-- [X] Config drift: models.yaml families reference mimo/opencode/grok — NONE exist on
-      nim/groq live catalog (0 models). Only nemotron/deepseek/qwen/glm/step/minimax/kimi
-      exist. So "coding_primary: mimo" resolves to nothing meaningful.
-- [X] Stale snapshot hazard: .nimmakai/catalog_snapshot.json persists cross-run; if a
-      refresh fails the server keeps serving old/foreign-provider IDs. Snapshot had
-      `nvidia/`,`qwen/`,`zai/` prefixes while only `nim`/`groq` are configured.
-- [X] 500 on unreachable upstream: _chat_like lets httpx errors bubble as 500 instead of
-      a clean 503 (no try/except around execute_json in _chat_like for transport errors).
+## Plan
+- [X] Phase 1: Read ADR + map codebase
+- [X] Epic 1: analytics schema/models/writer/retention/cost
+- [X] Epic 2: Instrument openai + fallback span callbacks (wired into _chat_like)
+- [X] Epic 3: Analytics API routes
+- [X] Epic 4: SSE EventBus
+- [X] Epic 5: Dashboard UI (Analytics, Requests, Live, Intents, Cost)
+- [X] Epic 6: Export CSV/JSON + webhook + OTLP stub
+- [X] Epic 7: Tests + harden + verify suite (173 passed)
+
+## Design decisions
+- Reuse existing NimmakaiDB (WAL + lock) — migrate analytics DDL into same DB
+- Zero-overhead enqueue via put_nowait; batch writes in to_thread
+- Auth: require_proxy_auth on /analytics/* (SSE allows ?token=)
+- UI: React Vite frontend pages + rebuilt static/dist
+- Track: Deep (1-10 phases, 3-pass hardening)
 
 ## Branches
-- `main` @ 162ddf3 — stable published (default), Heroku-deployable
-- `development` @ 162ddf3 — active (same tip as main)
+- `main` — uncommitted analytics work
 
-## Final state (v0.4.0)
-- [X] Multi-provider OpenRouter-style gateway (NIM + any OpenAI-compatible)
-- [X] Provider CRUD API + web dashboard
-- [X] Per-intent user preferences + intelligent ladder fallback
-- [X] Context window discovery, exponential backoff, online learning
-- [X] 97 tests, ruff clean
-- [X] Heroku Procfile + runtime.txt
-- [X] Dead code cleanup (circuit.py removed)
-- [X] CORS through Settings model
-- [X] Comprehensive README with architecture, setup, troubleshooting, Heroku guide
-
-## How to deploy
-```bash
-heroku create my-nimmakai
-heroku config:set PROXY_API_KEYS=sk-key NIM_API_KEYS=nvapi-key
-git push heroku main
-```
+## Lessons
+- Spokenly MCP may be unavailable; supercoder says NEVER ASK — proceed autonomously
+- Backend analytics package was scaffolded but NOT wired into _chat_like (helpers unused + 5-tuple unpack bug) — always verify call sites
+- FastAPI union StreamingResponse|JSONResponse needs response_model=None
+- httpx ASGIClient streaming SSE hangs on teardown — avoid draining infinite streams in tests
+- RangePicker JSX must live in .tsx not .ts
+- Project venv is `.venv` (uv), not `venv`
+- Duplicate `[tool.pytest.ini_options]` in pyproject breaks pytest collection

@@ -2,7 +2,7 @@
 
 > **Goal**: Commercial-grade, real-time analytics dashboard with end-to-end request tracing
 > **Inspiration**: OpenRouter Activity, Langfuse Trace Waterfall, Helicone Proxy Logging, Portkey Control Plane
-> **Stack**: SQLite (WAL mode) + FastAPI SSE + Vanilla JS SPA
+> **Stack**: SQLite (WAL mode) + FastAPI SSE + Vanilla JS SPA use react + any lite weight stuff if needed 
 > **Date**: 2026-07-19
 
 ---

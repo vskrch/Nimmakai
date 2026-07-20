@@ -71,8 +71,15 @@ class NimmakaiDB:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA foreign_keys=ON")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            try:
+                from nimmakai.analytics.schema import migrate_analytics
+
+                migrate_analytics(self._conn)
+            except Exception:
+                logger.exception("analytics schema migration failed")
         logger.info("sqlite ready at %s", self.path)
 
     def close(self) -> None:

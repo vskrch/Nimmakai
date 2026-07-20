@@ -11,6 +11,7 @@ export default defineConfig({
     proxy: {
       '/v1': 'http://localhost:8000',
       '/admin': 'http://localhost:8000',
+      '/analytics': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
       '/stats': 'http://localhost:8000',
       '/ladder': 'http://localhost:8000',

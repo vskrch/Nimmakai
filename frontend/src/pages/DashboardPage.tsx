@@ -1,16 +1,27 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Card, CardBody, StatBox, Badge, StatusDot, Button, Spinner } from '../components/ui'
 import { useHealth, useStats, useSSE } from '../hooks/useApi'
+import { api, okBody } from '../lib/api'
+import { fmtMs, fmtTokens, fmtUsd, fmtPct, rangeSince, qs } from '../lib/format'
+import type { AnalyticsSummary } from '../types/analytics'
 
 export default function DashboardPage({ onRefresh }: { onRefresh: () => void }) {
   const { data: health, reload: reloadHealth } = useHealth()
   const { data: stats } = useStats()
   const sse = useSSE()
+  const [summary, setSummary] = useState<AnalyticsSummary | null>(null)
 
   useEffect(() => {
     const id = setInterval(reloadHealth, 30000)
     return () => clearInterval(id)
   }, [reloadHealth])
+
+  useEffect(() => {
+    ;(async () => {
+      const r = await api<AnalyticsSummary>(`/analytics/summary${qs({ since: rangeSince('1h') })}`)
+      if (okBody(r)) setSummary(r as AnalyticsSummary)
+    })()
+  }, [])
 
   if (!health) return <Spinner />
 
@@ -33,6 +44,15 @@ export default function DashboardPage({ onRefresh }: { onRefresh: () => void }) 
         <StatBox label="Upstream Keys" value={keys} sub={`${sse?.active_providers ?? health.keys_available ?? 0} available`} />
         <StatBox label="Fallback Advances" value={sse?.fallback_advances ?? stats?.routing?.fallback_advances ?? 0} sub="route quality signal" />
       </div>
+
+      {summary && (
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4 mb-8">
+          <StatBox label="Requests (1h)" value={summary.total_requests.toLocaleString()} sub={`${summary.requests_per_minute.toFixed(1)} rpm`} />
+          <StatBox label="Latency" value={fmtMs(summary.avg_latency_ms)} sub={`p95 ${fmtMs(summary.p95_latency_ms)}`} />
+          <StatBox label="Tokens (1h)" value={fmtTokens(summary.total_tokens)} sub={`success ${fmtPct(summary.success_rate)}`} />
+          <StatBox label="Est. cost (1h)" value={fmtUsd(summary.estimated_cost_usd)} sub={`err ${fmtPct(summary.error_rate)}`} />
+        </div>
+      )}
 
       {health.status !== 'ok' && (
         <Card>

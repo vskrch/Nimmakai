@@ -23,12 +23,97 @@ from nimmakai.catalog.preferences import UserPreferences
 from nimmakai.catalog.providers import ProviderStore
 from nimmakai.config import Settings, get_settings
 from nimmakai.logging_setup import new_request_id, request_logs, setup_logging
-from nimmakai.routes import admin, openai
+from nimmakai.routes import admin, analytics, openai
 from nimmakai.routing import FallbackExecutor, IntentClassifier, ModelSelector, RoutingStats
 from nimmakai.safety import AccountGuard
 from nimmakai.upstream import UpstreamClient
 
 logger = logging.getLogger("nimmakai")
+
+
+def _init_analytics(app: FastAPI, settings: Settings) -> None:
+    """Start analytics writer / retention / event bus when enabled."""
+    app.state.event_bus = None
+    app.state.trace_writer = None
+    app.state.analytics_store = None
+    app.state.retention_manager = None
+    if not getattr(settings, "analytics_enabled", True):
+        logger.info("analytics disabled")
+        return
+    try:
+        from nimmakai.analytics.events import EventBus
+        from nimmakai.analytics.retention import RetentionManager
+        from nimmakai.analytics.store import AnalyticsStore
+        from nimmakai.analytics.writer import TraceWriter
+        from nimmakai.catalog.db import get_db
+
+        db = get_db(settings.sqlite_path)
+        bus = EventBus()
+        store = AnalyticsStore(db)
+
+        on_flush = None
+        hooks: list[Any] = []
+        webhook_url = getattr(settings, "analytics_webhook_url", None)
+        if webhook_url:
+            from nimmakai.analytics.webhook import WebhookBroadcaster
+
+            hooks.append(WebhookBroadcaster(webhook_url).on_flush)
+        otlp = getattr(settings, "analytics_otlp_endpoint", None)
+        if otlp:
+            from nimmakai.analytics.otel import OTLPExporter
+
+            hooks.append(OTLPExporter(otlp).on_flush)
+
+        def _combined_flush(batch: Any) -> None:
+            for h in hooks:
+                try:
+                    h(batch)
+                except Exception:
+                    logger.exception("analytics flush hook failed")
+
+        if hooks:
+            on_flush = _combined_flush
+
+        writer = TraceWriter(
+            db,
+            batch_size=int(getattr(settings, "analytics_batch_size", 50) or 50),
+            flush_interval=float(
+                getattr(settings, "analytics_flush_interval", 1.0) or 1.0
+            ),
+            event_bus=bus,
+            on_flush=on_flush,
+        )
+        retention = RetentionManager(
+            db,
+            retention_days=int(getattr(settings, "analytics_retention_days", 7) or 7),
+            rollup_retention_days=int(
+                getattr(settings, "analytics_rollup_retention_days", 90) or 90
+            ),
+        )
+        app.state.event_bus = bus
+        app.state.trace_writer = writer
+        app.state.analytics_store = store
+        app.state.retention_manager = retention
+    except Exception:
+        logger.exception("analytics init failed — continuing without analytics")
+
+
+async def _start_analytics(app: FastAPI) -> None:
+    writer = getattr(app.state, "trace_writer", None)
+    retention = getattr(app.state, "retention_manager", None)
+    if writer is not None:
+        await writer.start()
+    if retention is not None:
+        await retention.start()
+
+
+async def _stop_analytics(app: FastAPI) -> None:
+    retention = getattr(app.state, "retention_manager", None)
+    writer = getattr(app.state, "trace_writer", None)
+    if retention is not None:
+        await retention.stop()
+    if writer is not None:
+        await writer.stop()
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -261,15 +346,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.routing_stats = routing_stats
         app.state.preferences = preferences
 
+        _init_analytics(app, settings)
+        await _start_analytics(app)
+
         logger.info(
-            "Nimmakai v%s ready — providers=%s, routing=%s",
+            "Nimmakai v%s ready — providers=%s, routing=%s, analytics=%s",
             __version__,
             [p.id for p in store.enabled_providers()],
             settings.routing_enabled,
+            bool(getattr(app.state, "trace_writer", None)),
         )
         try:
             yield
         finally:
+            await _stop_analytics(app)
             if refresh_task is not None:
                 refresh_task.cancel()
                 with suppress(asyncio.CancelledError):
@@ -332,6 +422,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app.include_router(admin.router)
     app.include_router(openai.router)
+    app.include_router(analytics.router)
 
     def _dashboard_html() -> HTMLResponse:
         # Serve Vite build if available, fall back to legacy single-file dashboard

@@ -104,6 +104,15 @@ class Settings(BaseSettings):
         f"nimmakai/{__version__} (OpenAI-compatible NIM proxy)"
     )
 
+    # Analytics (persistent traces + dashboard)
+    analytics_enabled: bool = True
+    analytics_retention_days: int = 7
+    analytics_rollup_retention_days: int = 90
+    analytics_batch_size: int = 50
+    analytics_flush_interval: float = 1.0
+    analytics_webhook_url: str | None = None
+    analytics_otlp_endpoint: str | None = None
+
     # Optional egress proxies (corporate networking — not for ban evasion)
     nim_egress_proxies: Annotated[list[str], NoDecode] = Field(default_factory=list)
     http_proxy: str | None = None

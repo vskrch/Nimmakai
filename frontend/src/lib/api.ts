@@ -66,3 +66,10 @@ export function errMsg(body: unknown, fallback = 'Request failed'): string {
   if (b.message) return String(b.message)
   return fallback
 }
+
+/** True when `api()` returned a successful JSON body (not an error envelope). */
+export function okBody(r: unknown): boolean {
+  if (!r || typeof r !== 'object') return false
+  const o = r as Record<string, unknown>
+  return o.__ok !== false && !o.error
+}

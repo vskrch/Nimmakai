@@ -6,17 +6,25 @@ import { useAuth, useSSE } from './hooks/useApi'
 import { ap } from './lib/api'
 
 import DashboardPage from './pages/DashboardPage'
+import AnalyticsOverviewPage from './pages/AnalyticsOverviewPage'
+import RequestsPage from './pages/RequestsPage'
+import LiveFeedPage from './pages/LiveFeedPage'
+import IntentsPage from './pages/IntentsPage'
+import CostPage from './pages/CostPage'
 import ProvidersPage from './pages/ProvidersPage'
 import HealthPage from './pages/HealthPage'
 import ModelsPage from './pages/ModelsPage'
 import RoutingPage from './pages/RoutingPage'
-import TracingPage from './pages/TracingPage'
 import PlaygroundPage from './pages/PlaygroundPage'
 
 const PAGE_TITLES: Record<string, string> = {
   dashboard: 'Overview',
+  analytics: 'Analytics',
+  requests: 'Request Explorer',
+  live: 'Live Feed',
+  intents: 'Intent Analytics',
+  cost: 'Cost Center',
   playground: 'Playground',
-  tracing: 'Tracing',
   providers: 'Providers',
   health: 'Provider Health',
   models: 'Models',
@@ -65,11 +73,15 @@ export default function App() {
 
         <div className="flex-1 overflow-y-auto p-8">
           {page === 'dashboard' && <DashboardPage onRefresh={handleRefreshAll} />}
+          {page === 'analytics' && <AnalyticsOverviewPage />}
+          {page === 'requests' && <RequestsPage />}
+          {page === 'live' && <LiveFeedPage />}
+          {page === 'intents' && <IntentsPage />}
+          {page === 'cost' && <CostPage />}
           {page === 'providers' && <ProvidersPage />}
           {page === 'health' && <HealthPage />}
           {page === 'models' && <ModelsPage />}
           {page === 'routing' && <RoutingPage />}
-          {page === 'tracing' && <TracingPage />}
           {page === 'playground' && <PlaygroundPage />}
         </div>
       </div>

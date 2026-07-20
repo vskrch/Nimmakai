@@ -24,12 +24,8 @@ def extract_bearer(request: Request) -> str | None:
     return auth.strip()
 
 
-def require_proxy_auth(request: Request, settings: Settings) -> str:
-    """
-    Validate the client API key against PROXY_API_KEYS.
-    Empty PROXY_API_KEYS only accepted when ALLOW_INSECURE_AUTH=true.
-    """
-    token = extract_bearer(request)
+def validate_proxy_token(token: str | None, settings: Settings) -> str:
+    """Validate a raw proxy API token (shared by header + query auth)."""
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -72,3 +68,11 @@ def require_proxy_auth(request: Request, settings: Settings) -> str:
             },
         )
     return token
+
+
+def require_proxy_auth(request: Request, settings: Settings) -> str:
+    """
+    Validate the client API key against PROXY_API_KEYS.
+    Empty PROXY_API_KEYS only accepted when ALLOW_INSECURE_AUTH=true.
+    """
+    return validate_proxy_token(extract_bearer(request), settings)
