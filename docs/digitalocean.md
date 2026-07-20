@@ -290,15 +290,18 @@ docker run --rm -p 8080:8080 \
 | Build fails on `npm ci` | Ensure `frontend/package-lock.json` is committed |
 | App unhealthy | Check `/health`; raise `initial_delay_seconds`; watch Runtime Logs |
 | 401 on dashboard | Set `PROXY_API_KEYS` and use that key in the Auth modal |
-| Providers empty after deploy | Set provider `*_API_KEYS` env vars (SQLite is wiped on App Platform) |
-| OOM / restarts | Bump to `apps-s-1vcpu-1gb` ($12) or Droplet 1 GiB |
+| Providers empty after deploy | Set provider `*_API_KEYS` env vars (App Platform wipes SQLite; Droplet keeps volume) |
+| OOM / restarts | Bump to `apps-s-1vcpu-1gb` ($12) or Droplet `s-1vcpu-2gb` |
+| Droplet: connection refused on :80 | `docker compose … ps` — container not up; check logs / firewall allows 80 |
+| Droplet: build OOM killed | Temporarily resize droplet up, rebuild, or build on CI and `docker pull` |
 | Student credits not applying | Billing → redeem promo; confirm account email matches GitHub Education |
 
 ---
 
 ## Cost control
 
-- Start on **$10 fixed** instance; stay at 1 instance.
+- **Droplet**: stay on `s-1vcpu-1gb` (~$6); destroy when unused.
+- **App Platform**: start on **$10 fixed**; stay at 1 instance.
 - No managed DB, no dedicated egress IP ($25).
-- Watch **Bandwidth** in the app Insights tab (allowance comes with the instance).
+- Watch bandwidth (Droplet Networking / App Insights).
 - Destroy unused preview apps / old droplets.
