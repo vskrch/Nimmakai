@@ -206,7 +206,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 settings.models_config_path,
             )
 
-        guard = AccountGuard(settings, pool)
+        guard = AccountGuard(
+            settings, pool, capacity_hint=hub.gate_capacity() or None
+        )
+        hub._on_capacity_change = lambda: guard.resize_gate(hub.gate_capacity())
 
         # Load user preferences (SQLite + legacy JSON)
         preferences = UserPreferences(
@@ -391,6 +394,63 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         version=__version__,
         lifespan=lifespan,
     )
+
+    from fastapi import HTTPException
+    from fastapi.responses import JSONResponse
+
+    from nimmakai.compat import openai_error
+
+    @app.exception_handler(HTTPException)
+    async def openai_http_exception_handler(
+        request: Request, exc: HTTPException
+    ) -> JSONResponse:
+        """Unwrap FastAPI ``detail`` so clients see a top-level OpenAI ``error`` object."""
+        detail = exc.detail
+        if isinstance(detail, dict) and isinstance(detail.get("error"), dict):
+            body: dict[str, Any] = detail
+        elif isinstance(detail, dict):
+            body = openai_error(
+                str(detail.get("message") or detail)[:2000],
+                code=str(detail.get("code") or "http_error"),
+                type_=str(
+                    detail.get("type")
+                    or (
+                        "invalid_request_error"
+                        if exc.status_code < 500
+                        else "server_error"
+                    )
+                ),
+            )
+        else:
+            body = openai_error(
+                str(detail)[:2000],
+                code="http_error",
+                type_=(
+                    "invalid_request_error"
+                    if exc.status_code < 500
+                    else "server_error"
+                ),
+            )
+        headers = dict(exc.headers or {})
+        if exc.status_code in (401, 403):
+            headers.setdefault("WWW-Authenticate", "Bearer")
+        return JSONResponse(
+            status_code=exc.status_code, content=body, headers=headers
+        )
+
+    @app.exception_handler(Exception)
+    async def openai_unhandled_exception_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        logger.exception("unhandled error path=%s", request.url.path)
+        return JSONResponse(
+            status_code=500,
+            content=openai_error(
+                "Internal Server Error",
+                code="internal_error",
+                type_="server_error",
+            ),
+        )
 
     cors_origins = [
         o.strip()

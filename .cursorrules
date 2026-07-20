@@ -1,19 +1,16 @@
 # Scratchpad
 
 ## Current task
-SMTP email sender — COMPLETE (implemented + documented, not wired)
+Document end-to-end DigitalOcean **Droplet** deploy (Path B) — expand `docs/digitalocean.md`
 
 ## Plan
-- [X] SmtpEmailSender (stdlib smtplib) + verify/OTP message builders
-- [X] SMTP_* settings in config (default EMAIL_BACKEND remains stub)
-- [X] get_email_sender ready for smtp; accounts routes still call without settings=
-- [X] Docs (docs/email-smtp.md, .env.example, README) + unit tests
+- [X] Read existing Path B + `docker-compose.do.yml` / `.env.example`
+- [X] Expand Path B into B1–B10 end-to-end steps
+- [X] Give user concise walkthrough in chat
 
 ## Design decisions
-- Stdlib only (no new deps)
-- Factory supports smtp when settings passed; routes not updated yet
-- OTP helper ready; OTP flow not implemented
-- EMAIL_BACKEND=smtp without settings= falls back to stub with warning
+- Droplet path: Docker Marketplace image, compose maps 80→8080, volume `nimmakai-data`
+- Prefer SSH key auth; HTTPS via optional Caddy; App Platform remains Path A
 
 ## Lessons
 - .cursorrules can be overwritten by concurrent agent sessions — re-read before editing, merge don't clobber
@@ -27,3 +24,5 @@ SMTP email sender — COMPLETE (implemented + documented, not wired)
 - EventSource cannot send Authorization — use ?token= or session cookie for SSE
 - CORS allow_credentials cannot pair with allow_origins=*
 - Global agent skills live in 4 dirs: ~/.claude/skills, ~/.agents/skills, ~/.config/opencode/skills, ~/.cursor/skills — keep copies in sync (verify with shasum). supercoder rewritten to v5 (98 lines, evidence-based verification, anti-rationalization table)
+- Explicit-model tests previously encoded buggy "best coder leads" behavior — F-08 requires pinned head first; update tests with the fix
+- Droplet compose publishes host port 80 (not 8080); data survives rebuilds via `nimmakai-data` volume

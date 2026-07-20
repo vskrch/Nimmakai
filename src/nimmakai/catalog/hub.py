@@ -63,6 +63,16 @@ class ProviderHub:
             return rt.pool
         raise RuntimeError("No providers configured")
 
+    def gate_capacity(self) -> int:
+        """Sum of key-slots across enabled provider runtimes (F-09)."""
+        total = 0
+        for rt in self.runtimes.values():
+            if not rt.config.enabled:
+                continue
+            per_key = max(1, int(rt.config.max_in_flight_per_key or 1))
+            total += len(rt.pool) * per_key
+        return total
+
     async def start(self) -> None:
         for cfg in self.store.providers.values():
             await self._ensure_runtime(cfg)
@@ -133,6 +143,7 @@ class ProviderHub:
     ) -> dict[str, Any]:
         self.store.upsert(cfg)
         await self._ensure_runtime(self.store.providers[cfg.id.lower()])
+        self._notify_capacity_change()
         # Immediate /models fetch into live pool (NMK-101)
         if registry is not None and self.has_runtime(cfg.id):
             try:
@@ -142,6 +153,14 @@ class ProviderHub:
             except Exception:
                 logger.exception("immediate model fetch failed for provider %s", cfg.id)
         return self.store.providers[cfg.id.lower()].mask()
+
+    def _notify_capacity_change(self) -> None:
+        resize = getattr(self, "_on_capacity_change", None)
+        if callable(resize):
+            try:
+                resize()
+            except Exception:
+                logger.debug("gate resize callback failed", exc_info=True)
 
     async def remove_provider(self, provider_id: str) -> bool:
         ok = self.store.remove(provider_id)
@@ -153,6 +172,7 @@ class ProviderHub:
                 del self.runtimes[pid]
             else:
                 await self._ensure_runtime(cfg)
+        self._notify_capacity_change()
         return ok
 
     def has_runtime(self, provider_id: str) -> bool:

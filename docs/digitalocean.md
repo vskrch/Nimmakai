@@ -97,23 +97,176 @@ Model:     nimmakai/auto
 ## Path B — Droplet + Docker Compose (persistent SQLite)
 
 Use when you need analytics / dashboard-added providers to survive redeploys.
+Compose file: `docker-compose.do.yml` (maps host **80 → 8080**, volume `nimmakai-data` → `/data`).
 
-1. Create Droplet **Basic $6** (`s-1vcpu-1gb`), image **Docker on Ubuntu**.
-2. SSH in, clone repo, copy `.env.example` → `.env`, fill keys.
-3. `docker compose -f docker-compose.do.yml up -d --build`
-4. Optional: attach a domain + Caddy/nginx TLS.
-5. CI/CD: add a GitHub Action that SSHs and runs `git pull && docker compose ... up -d --build` (or use [Watchtower](https://containrrr.dev/watchtower/)).
+### B1. Redeem credits & create the Droplet
 
-Data lives in Docker volume `nimmakai-data`.
+1. Redeem GitHub Student DigitalOcean credits (if any) in **Billing**.
+2. [Create Droplet](https://cloud.digitalocean.com/droplets/new):
+   - **Region**: closest to you
+   - **Image**: Marketplace → **Docker on Ubuntu** (or Ubuntu + install Docker yourself)
+   - **Size**: Basic **`$6`** — `s-1vcpu-1gb` (1 vCPU / 1 GiB)
+   - **Authentication**: SSH key (recommended) or one-time password
+   - Hostname: e.g. `nimmakai`
+3. Create → wait until status is **Active**. Copy the public IPv4.
+
+CLI alternative:
+
+```bash
+doctl compute ssh-key list   # note KEY_ID
+doctl compute droplet create nimmakai \
+  --size s-1vcpu-1gb \
+  --image docker-20-04 \
+  --region sfo3 \
+  --ssh-keys KEY_ID \
+  --wait
+doctl compute droplet list
+```
+
+### B2. Open the firewall (optional but recommended)
+
+DigitalOcean → **Networking** → **Firewalls** → create one attached to this droplet:
+
+| Type | Protocol | Port | Sources |
+|------|----------|------|---------|
+| SSH | TCP | 22 | Your IP (or `0.0.0.0/0` if you must) |
+| HTTP | TCP | 80 | `0.0.0.0/0` |
+| HTTPS | TCP | 443 | `0.0.0.0/0` (needed once you add TLS) |
+
+### B3. SSH in and clone the repo
+
+```bash
+ssh root@YOUR_DROPLET_IP
+# (or: ssh -i ~/.ssh/id_ed25519 root@YOUR_DROPLET_IP)
+
+mkdir -p /opt && cd /opt
+git clone https://github.com/YOUR_USER/Nimmakai.git
+cd Nimmakai
+```
+
+Private repo: use a deploy key or `git clone git@github.com:YOUR_USER/Nimmakai.git` after adding the droplet’s SSH key to GitHub.
+
+Confirm Docker is available:
+
+```bash
+docker --version
+docker compose version
+```
+
+### B4. Configure secrets (`.env`)
+
+```bash
+cp .env.example .env
+nano .env   # or vim / micro
+```
+
+Minimum for production:
+
+| Key | Value |
+|-----|--------|
+| `PROXY_API_KEYS` | Strong random key(s), comma-separated — clients use these as Bearer |
+| `ALLOW_INSECURE_AUTH` | Must stay `false` (compose also forces this) |
+| Provider keys | e.g. `NIM_API_KEYS`, `OPENCODE_ZEN_API_KEYS`, `GROQ_API_KEYS`, … |
+
+Compose already sets `SQLITE_PATH=/data/nimmakai.db` and seeds free presets. Do **not** set `ALLOW_INSECURE_AUTH=true` on the droplet.
+
+Generate a proxy key if needed:
+
+```bash
+openssl rand -hex 24
+# paste into PROXY_API_KEYS=sk-...
+```
+
+### B5. Build and start
+
+```bash
+cd /opt/Nimmakai
+docker compose -f docker-compose.do.yml up -d --build
+docker compose -f docker-compose.do.yml ps
+docker compose -f docker-compose.do.yml logs -f --tail=80
+```
+
+First build can take several minutes (frontend `npm ci` + Python image).
+
+### B6. Verify on the Droplet IP
+
+```bash
+# from your laptop
+curl -s http://YOUR_DROPLET_IP/health | jq .
+curl -s -H "Authorization: Bearer YOUR_PROXY_KEY" \
+  http://YOUR_DROPLET_IP/analytics/summary | jq .
+```
+
+Browser: `http://YOUR_DROPLET_IP/dashboard` → Auth modal → paste a `PROXY_API_KEYS` value.
+
+### B7. (Optional) Domain + HTTPS with Caddy
+
+1. Point an A record: `nimmakai.example.com` → Droplet IP.
+2. On the droplet, install Caddy and reverse-proxy to the container. Simplest pattern: change compose to publish **`127.0.0.1:8080:8080`** only, then Caddy listens on 80/443:
+
+```bash
+# /etc/caddy/Caddyfile
+nimmakai.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+```bash
+systemctl reload caddy
+```
+
+Then use `https://nimmakai.example.com` in Cursor.
+
+### B8. Point Cursor / agents at the Droplet
+
+```
+Base URL:  http://YOUR_DROPLET_IP/v1
+           # or https://nimmakai.example.com/v1 after TLS
+API Key:   <one of PROXY_API_KEYS>
+Model:     nimmakai/auto
+```
+
+### B9. Redeploy / updates
+
+```bash
+ssh root@YOUR_DROPLET_IP
+cd /opt/Nimmakai
+git pull
+docker compose -f docker-compose.do.yml up -d --build
+```
+
+SQLite + catalog live in Docker volume **`nimmakai-data`** — they survive rebuilds. To wipe data: `docker volume rm nimmakai_nimmakai-data` (destructive).
+
+Optional auto-update: [Watchtower](https://containrrr.dev/watchtower/) watching `nimmakai:latest`, or a GitHub Action that SSHs and runs the commands above.
+
+### B10. Useful ops commands
+
+```bash
+docker compose -f docker-compose.do.yml logs -f
+docker compose -f docker-compose.do.yml restart
+docker compose -f docker-compose.do.yml down          # stop (keeps volume)
+docker volume ls | grep nimmakai
+df -h                                                 # disk pressure on 1 GiB
+```
 
 ---
 
 ## Verify deploy
 
+**App Platform:**
+
 ```bash
 curl -s https://YOUR-APP.ondigitalocean.app/health | jq .
 curl -s -H "Authorization: Bearer $PROXY_KEY" \
   https://YOUR-APP.ondigitalocean.app/analytics/summary | jq .
+```
+
+**Droplet:**
+
+```bash
+curl -s http://YOUR_DROPLET_IP/health | jq .
+curl -s -H "Authorization: Bearer $PROXY_KEY" \
+  http://YOUR_DROPLET_IP/analytics/summary | jq .
 ```
 
 Local Docker smoke test before pushing:

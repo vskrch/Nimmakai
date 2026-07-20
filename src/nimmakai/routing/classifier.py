@@ -28,7 +28,10 @@ AGENT_FINGERPRINTS = (
     "opencode",
     "cline",
     "continue.dev",
-    "cursor",
+    # Phrase-level only — bare "cursor" false-positives on ordinary prose (T12)
+    "cursor ide",
+    "cursor rules",
+    "composer in cursor",
 )
 
 REASONING_KEYWORDS = re.compile(
@@ -111,6 +114,31 @@ class IntentClassifier:
         path_l = path.lower()
         if path_l.endswith("/embeddings") or "/embeddings" in path_l:
             return self._result(Intent.EMBEDDINGS, 1.0, "path_embeddings", {})
+
+        # Short-circuit tools before scanning megabyte Cursor payloads (T12 / F-12)
+        tools = body.get("tools") or body.get("functions") or []
+        tool_choice = body.get("tool_choice")
+        has_tool_choice = tool_choice not in (None, "none", "None")
+        messages = body.get("messages") or body.get("input") or []
+        has_tool_role = False
+        if isinstance(messages, list):
+            for m in messages:
+                if isinstance(m, dict) and m.get("role") in {"tool", "function"}:
+                    has_tool_role = True
+                    break
+        if tools or has_tool_choice or has_tool_role:
+            result = self._result(
+                Intent.CODING_AGENTIC,
+                0.98,
+                "tools_present",
+                {
+                    "has_tools": bool(tools),
+                    "has_tool_choice": has_tool_choice,
+                    "has_tool_role": has_tool_role,
+                },
+            )
+            self.stats[result.intent.value] = self.stats.get(result.intent.value, 0) + 1
+            return result
 
         features = self._extract_features(body, path_l)
         result = self._rules(features, path_l)
@@ -196,8 +224,15 @@ class IntentClassifier:
                             has_image = True
 
         joined = "\n".join(texts)
-        joined_l = joined.lower()
-        fence_count = len(CODE_FENCE_RE.findall(joined))
+        # Bound scan to head+tail — fingerprints live in system prompt head;
+        # recent intent lives at the tail (T12).
+        _scan_budget = 16_384
+        if len(joined) > _scan_budget * 2:
+            scan_text = joined[:_scan_budget] + "\n" + joined[-_scan_budget:]
+        else:
+            scan_text = joined
+        joined_l = scan_text.lower()
+        fence_count = len(CODE_FENCE_RE.findall(scan_text))
         has_tool_role = any(r in {"tool", "function"} for r in roles)
         agent_hit = any(fp in joined_l for fp in AGENT_FINGERPRINTS)
         char_len = len(joined)
@@ -219,7 +254,7 @@ class IntentClassifier:
             "char_len": char_len,
             "message_count": len(messages),
             "avg_chars_per_msg": char_len / max(1, len(messages)),
-            "code_keywords": bool(CODE_KEYWORDS_RE.search(joined)),
+            "code_keywords": bool(CODE_KEYWORDS_RE.search(scan_text)),
             "last_user": last_user[:2000],
             "path": path,
             "reasoning_kw": bool(REASONING_KEYWORDS.search(last_user)),

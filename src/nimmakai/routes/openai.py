@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from contextlib import suppress
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -14,7 +15,9 @@ from nimmakai.catalog import ModelRegistry
 from nimmakai.compat import (
     normalize_completion_json,
     normalize_sse_stream,
+    openai_error,
     sanitize_chat_body,
+    wrap_upstream_error,
 )
 from nimmakai.config import Settings, get_settings
 from nimmakai.logging_setup import RequestLog, log_request_line, request_logs
@@ -191,6 +194,7 @@ async def _prepare_routed(
     body: dict[str, Any],
     *,
     path: str,
+    auto_opts: Any | None = None,
 ) -> tuple[
     dict[str, Any],
     RouteDecision | None,
@@ -201,6 +205,8 @@ async def _prepare_routed(
     """
     Classify + select model chain. Returns (body, decision, guard_ctx, proxy_token, timing).
     When routing is off, decision is None and body may only get default_model.
+
+    ``auto_opts`` should be parsed from the raw body before ``sanitize_chat_body``.
     """
     from nimmakai.analytics.context import begin_span_collection
     from nimmakai.analytics.models import TraceSpan
@@ -236,8 +242,9 @@ async def _prepare_routed(
         )
         return body, None, ctx, proxy_token, timing
 
-    # OpenRouter plugins / session_id / models[] — parse before strip
-    auto_opts = parse_auto_router_options(body)
+    # Prefer caller-supplied opts (parsed from raw body); fall back to body parse
+    if auto_opts is None:
+        auto_opts = parse_auto_router_options(body)
 
     t_classify = time.perf_counter()
     intent = classifier.classify(path=path, body=body, headers=request.headers)
@@ -288,6 +295,17 @@ async def _prepare_routed(
         auto_opts=auto_opts,
         preferred_model=preferred_model,
     )
+    # Rough token estimate for context-length filtering (T13)
+    try:
+        msgs = body.get("messages") or body.get("input") or body.get("prompt") or ""
+        if isinstance(msgs, list):
+            char_n = sum(len(str(m)) for m in msgs)
+        else:
+            char_n = len(str(msgs))
+        max_tok = int(body.get("max_tokens") or body.get("max_completion_tokens") or 0)
+        decision.estimated_tokens = int(char_n / 3.5) + max_tok + 512
+    except Exception:
+        decision.estimated_tokens = None
     route_ms = (time.perf_counter() - t_route) * 1000
     timing["route_ms"] = route_ms
     collect_span(
@@ -301,6 +319,7 @@ async def _prepare_routed(
                 "mode": decision.mode,
                 "chain_len": len(decision.chain),
                 "chain_head": decision.chain[0] if decision.chain else None,
+                "estimated_tokens": decision.estimated_tokens,
             },
         )
     )
@@ -516,14 +535,32 @@ async def _chat_like(
     except Exception:
         pass
 
-    # OpenAI/Cursor body quirks (max_completion_tokens, stream_options, etc.)
-    body = sanitize_chat_body(body)
+    # OpenRouter plugins / session_id — parse from raw body before sanitize (F-02).
+    auto_opts_raw = parse_auto_router_options(body)
+    try:
+        body = sanitize_chat_body(body)
+    except ValueError as exc:
+        if str(exc) == "n_not_supported":
+            _finish_log(entry, status=400, t0=t0, error="n_not_supported")
+            return JSONResponse(
+                content=openai_error(
+                    "Only n=1 is supported",
+                    code="n_not_supported",
+                    type_="invalid_request_error",
+                    param="n",
+                ),
+                status_code=400,
+            )
+        raise
 
     timing: dict[str, Any] = {}
     proxy_token: str | None = None
     try:
         body, decision, ctx, proxy_token, timing = await _prepare_routed(
-            request, body, path=upstream_path
+            request,
+            body,
+            path=upstream_path,
+            auto_opts=auto_opts_raw,
         )
     except Exception as exc:
         # Auth HTTPException propagates via FastAPI — re-raise
@@ -537,6 +574,24 @@ async def _chat_like(
                 error=str(getattr(exc, "detail", "auth")),
             )
             raise
+        # Concurrency gate exhaustion before stream/json phase (F-09)
+        if isinstance(exc, RuntimeError) and "nimmakai_pool_exhausted" in str(exc):
+            _finish_log(entry, status=503, t0=t0, error=str(exc))
+            return JSONResponse(
+                content=guard.pool_exhausted_error(),
+                status_code=503,
+                headers={"Retry-After": "5"},
+            )
+        if isinstance(exc, ValueError) and str(exc) == "no_vision_model":
+            _finish_log(entry, status=400, t0=t0, error="no_vision_model")
+            return JSONResponse(
+                content=openai_error(
+                    "No vision-capable model is currently available.",
+                    code="no_vision_model",
+                    type_="invalid_request_error",
+                ),
+                status_code=400,
+            )
         _finish_log(entry, status=500, t0=t0, error=str(exc))
         raise
 
@@ -581,18 +636,26 @@ async def _chat_like(
                     decision,
                     preferred_key_id=preferred,
                 )
-                route_h = fallback.routing_headers(
-                    decision,
-                    model=result.model,
-                    key_id=result.key.key_id if result.key else None,
-                    fallback_index=result.fallback_index,
-                )
-                route_h["X-Request-Id"] = req_id
-                media = result.headers.get("content-type", "text/event-stream")
-                # Cursor-compat: map reasoning_content → content, fix model field
-                upstream_iter = normalize_sse_stream(
-                    result.byte_iter, routed_model=result.model or None
-                )
+                try:
+                    route_h = fallback.routing_headers(
+                        decision,
+                        model=result.model,
+                        key_id=result.key.key_id if result.key else None,
+                        fallback_index=result.fallback_index,
+                        provider_id=getattr(result, "provider_id", None),
+                    )
+                    route_h["X-Request-Id"] = req_id
+                    media = result.headers.get("content-type", "text/event-stream")
+                    # Cursor-compat: map reasoning_content → content, fix model field
+                    upstream_iter = normalize_sse_stream(
+                        result.byte_iter, routed_model=result.model or None
+                    )
+                except Exception:
+                    # Close upstream stream so key in_flight is released (F-07)
+                    if hasattr(result.byte_iter, "aclose"):
+                        with suppress(Exception):
+                            await result.byte_iter.aclose()
+                    raise
                 key_id = result.key.key_id if result.key else None
                 ok = 200 <= result.status_code < 300
                 provider = route_h.get("X-Nimmakai-Provider")
@@ -688,6 +751,7 @@ async def _chat_like(
                 model=result_j.model,
                 key_id=result_j.key.key_id if result_j.key else None,
                 fallback_index=result_j.fallback_index,
+                provider_id=getattr(result_j, "provider_id", None),
             )
             route_h["X-Request-Id"] = req_id
             pin_model = decision.mode in {
@@ -705,6 +769,8 @@ async def _chat_like(
             body_out = normalize_completion_json(
                 result_j.body, routed_model=result_j.model or None
             )
+            if result_j.status_code >= 400:
+                body_out = wrap_upstream_error(body_out, status=result_j.status_code)
             err_msg = (
                 None
                 if result_j.status_code < 400
@@ -888,10 +954,32 @@ async def embeddings(request: Request) -> JSONResponse:
     req_id = getattr(request.state, "request_id", None) or "noreq"
     upstream = _upstream(request)
     guard: AccountGuard = request.app.state.guard
-    body = await request.json()
-    body, decision, ctx, proxy_token, timing = await _prepare_routed(
-        request, body, path="/embeddings"
-    )
+    settings = _settings(request)
+    # Auth before body parse — reject unauthenticated clients early (T17)
+    require_active_user(request, settings)
+    try:
+        body = await request.json()
+    except Exception as exc:
+        return JSONResponse(
+            content=openai_error(
+                "Invalid JSON body",
+                code="invalid_json",
+                type_="invalid_request_error",
+            ),
+            status_code=400,
+        )
+    try:
+        body, decision, ctx, proxy_token, timing = await _prepare_routed(
+            request, body, path="/embeddings"
+        )
+    except RuntimeError as exc:
+        if "nimmakai_pool_exhausted" in str(exc):
+            return JSONResponse(
+                content=guard.pool_exhausted_error(),
+                status_code=503,
+                headers={"Retry-After": "5"},
+            )
+        raise
     preferred = ctx.preferred_key_id
     trace = None
     if getattr(_settings(request), "analytics_enabled", True):

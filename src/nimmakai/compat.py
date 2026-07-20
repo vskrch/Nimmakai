@@ -16,26 +16,57 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Fields Cursor / OpenAI SDKs may send that some upstreams reject
+# Fields some upstreams reject. OpenRouter client-only fields are stripped by
+# strip_router_client_fields AFTER parse_auto_router_options — not here.
+# prompt_cache_key / user are forwarded (providers ignore unknown fields).
 _STRIP_BODY_KEYS = {
-    "user",  # OpenAI org — not for NIM
     "service_tier",
-    "prompt_cache_key",
     "safety_identifier",
     "store",
     "metadata",
-    "n",  # some free APIs reject n>1; force 1 below
-    # OpenRouter / Kilo client-only (also stripped in strip_router_client_fields)
-    "session_id",
-    "sessionId",
-    "plugins",
-    "provider",
-    "route",
 }
 
 
+def openai_error(
+    message: str,
+    *,
+    code: str | None = None,
+    type_: str = "invalid_request_error",
+    param: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """OpenAI-compatible error envelope (top-level ``error`` object)."""
+    err: dict[str, Any] = {
+        "message": message,
+        "type": type_,
+        "code": code,
+        "param": param,
+    }
+    if metadata:
+        err["metadata"] = metadata
+    return {"error": err}
+
+
+def wrap_upstream_error(body: Any, *, status: int = 502) -> dict[str, Any]:
+    """Normalize non-OpenAI upstream error bodies into the OpenAI envelope."""
+    if isinstance(body, dict) and isinstance(body.get("error"), dict):
+        return body
+    raw: Any = body
+    if isinstance(body, dict) and "detail" in body and "error" not in body:
+        raw = body.get("detail")
+    return openai_error(
+        str(raw)[:2000] if raw is not None else f"Upstream error HTTP {status}",
+        code="upstream_error",
+        type_="server_error",
+        metadata={"raw": raw if not isinstance(raw, str) or len(raw) < 500 else raw[:500]},
+    )
+
+
 def sanitize_chat_body(body: dict[str, Any]) -> dict[str, Any]:
-    """Normalize client request for OpenAI-compatible upstreams (Cursor-safe)."""
+    """Normalize client request for OpenAI-compatible upstreams (Cursor-safe).
+
+    Raises ValueError with code ``n_not_supported`` when ``n > 1``.
+    """
     out = dict(body)
 
     # max_completion_tokens (newer OpenAI / Cursor) → max_tokens
@@ -51,9 +82,9 @@ def sanitize_chat_body(body: dict[str, Any]) -> dict[str, Any]:
     for k in list(_STRIP_BODY_KEYS):
         out.pop(k, None)
 
-    # Force n=1 for multi-key free tiers
-    if out.get("n") not in (None, 1):
-        out["n"] = 1
+    n = out.get("n")
+    if n not in (None, 1):
+        raise ValueError("n_not_supported")
 
     # Empty tools → drop (some providers 400)
     tools = out.get("tools")
@@ -156,11 +187,12 @@ def transform_sse_bytes(
     """
     if not chunk or chunk.strip() in (b"[DONE]", b"data: [DONE]"):
         return chunk
-    # Fast path: no reasoning field
-    if b"reasoning" not in chunk and (
-        routed_model is None or b'"model"' not in chunk
-    ):
-        return chunk
+    # Fast path: no reasoning — only rewrite model via cheap substitution
+    if b"reasoning" not in chunk:
+        if routed_model is None or b'"model"' not in chunk:
+            return chunk
+        # Rewrite "model":"..." without full JSON parse
+        return _rewrite_model_bytes(chunk, routed_model)
 
     lines = chunk.split(b"\n")
     out_lines: list[bytes] = []
@@ -188,6 +220,16 @@ def transform_sse_bytes(
     if chunk.endswith(b"\n") and not joined.endswith(b"\n"):
         joined += b"\n"
     return joined
+
+
+_MODEL_FIELD_RE = re.compile(rb'"model"\s*:\s*"(?:\\.|[^"\\])*"')
+
+
+def _rewrite_model_bytes(chunk: bytes, routed_model: str) -> bytes:
+    replacement = b'"model":' + json.dumps(routed_model, ensure_ascii=False).encode(
+        "utf-8"
+    )
+    return _MODEL_FIELD_RE.sub(replacement, chunk, count=1)
 
 
 async def normalize_sse_stream(

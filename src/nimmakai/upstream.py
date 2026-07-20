@@ -56,7 +56,7 @@ class UpstreamClient:
     async def start(self) -> None:
         kwargs: dict[str, Any] = {
             "base_url": self.base_url,
-            "timeout": httpx.Timeout(self.timeout, connect=30.0),
+            "timeout": httpx.Timeout(self.timeout, connect=5.0),
             "follow_redirects": True,
         }
         if self.proxy_url:

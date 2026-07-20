@@ -39,6 +39,7 @@ class UpstreamResult:
     completion_tokens: int = 0
     cached_tokens: int = 0
     upstream_ms: float | None = None
+    provider_id: str | None = None
 
 
 @dataclass
@@ -54,6 +55,7 @@ class StreamResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cached_tokens: int = 0
+    provider_id: str | None = None
     # Mutable usage bag updated as SSE chunks are scanned (stream may finish after return)
     usage: dict[str, int] = field(
         default_factory=lambda: {
@@ -173,13 +175,57 @@ def _is_non_retryable_client_error(status: int, body: Any) -> bool:
     return False
 
 
-def _analyze_success_body(body: Any, *, had_tools: bool) -> tuple[bool, bool | None]:
+def _analyze_success_body(
+    body: Any, *, had_tools: bool, path: str = "/chat/completions"
+) -> tuple[bool, bool | None]:
     """
     Returns (empty_reply, tool_ok).
     tool_ok is None when tools were not requested.
+
+    Schema-aware: chat (message), text completions (text), responses (output).
     """
     if not isinstance(body, dict):
         return False, None if not had_tools else False
+
+    path_l = (path or "").lower()
+    is_completions = path_l.endswith("/completions") and "chat" not in path_l
+    is_responses = "/responses" in path_l
+
+    # Text completions: choices[0].text
+    if is_completions:
+        choices = body.get("choices")
+        if not isinstance(choices, list) or not choices:
+            return True, None
+        ch0 = choices[0] if isinstance(choices[0], dict) else {}
+        text = ch0.get("text")
+        empty = text in (None, "")
+        return empty, None
+
+    # Responses API: output / output_text
+    if is_responses:
+        if body.get("output_text"):
+            return False, None if not had_tools else True
+        output = body.get("output")
+        if isinstance(output, list) and output:
+            # Any non-empty content/text in output items = success
+            for item in output:
+                if not isinstance(item, dict):
+                    continue
+                content = item.get("content")
+                if isinstance(content, str) and content:
+                    return False, None if not had_tools else True
+                if isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict) and (
+                            part.get("text") or part.get("type") == "function_call"
+                        ):
+                            return False, None if not had_tools else True
+                if item.get("type") in {"function_call", "tool_call"}:
+                    return False, True if had_tools else None
+            return True, False if had_tools else None
+        return True, False if had_tools else None
+
+    # Chat completions
     choices = body.get("choices")
     if not isinstance(choices, list) or not choices:
         return True, False if had_tools else None
@@ -238,10 +284,28 @@ class FallbackExecutor:
         if self.hub is None:
             return None
         try:
-            _c, pid, _u = self.hub.client_for_model(model)
+            from nimmakai.catalog.providers import split_provider_model
+
+            pid, _ = split_provider_model(
+                model, self.hub.provider_ids, default_provider="nim"
+            )
             return pid
         except Exception:
             return None
+
+    def _circuit_fail(self, provider_id: str | None) -> None:
+        if not provider_id or self.hub is None:
+            return
+        cb = getattr(self.hub, "circuit_breaker", None)
+        if cb is not None:
+            cb.fail(provider_id)
+
+    def _circuit_succeed(self, provider_id: str | None) -> None:
+        if not provider_id or self.hub is None:
+            return
+        cb = getattr(self.hub, "circuit_breaker", None)
+        if cb is not None:
+            cb.succeed(provider_id)
 
     def _make_upstream_span(
         self,
@@ -336,21 +400,66 @@ class FallbackExecutor:
                 variant = "cheap"
             elif "fast" in req or tier == "fast":
                 variant = "fast"
+        pinned = getattr(decision, "pinned_head", None) or getattr(
+            decision, "sticky_model", None
+        )
+        # Re-rank, but keep pinned head first unless unhealthy (F-08)
         if available:
             from nimmakai.routing.optimizer import optimize_chain
 
-            available = optimize_chain(
-                available,
-                self.registry,
-                intent=intent,
-                variant=variant,
-                max_n=None,
-            )
+            if pinned and pinned in available:
+                tail = [m for m in available if m != pinned]
+                tail = optimize_chain(
+                    tail,
+                    self.registry,
+                    intent=intent,
+                    variant=variant,
+                    max_n=None,
+                )
+                unhealthy = (
+                    hasattr(self.registry, "health")
+                    and self.registry.health.is_unhealthy(pinned)
+                )
+                if unhealthy:
+                    logger.info("pin_demoted model=%s reason=unhealthy", pinned)
+                    available = optimize_chain(
+                        [pinned] + tail,
+                        self.registry,
+                        intent=intent,
+                        variant=variant,
+                        max_n=None,
+                    )
+                else:
+                    available = [pinned] + tail
+            else:
+                available = optimize_chain(
+                    available,
+                    self.registry,
+                    intent=intent,
+                    variant=variant,
+                    max_n=None,
+                )
         # Fail-fast: skip cooling models for TTFT (keep 1 cold last-resort)
+        # Preserve pinned head if healthy.
         if available and hasattr(self.registry, "health"):
             hot = [m for m in available if not self.registry.health.is_unhealthy(m)]
             cold = [m for m in available if self.registry.health.is_unhealthy(m)]
+            if pinned and pinned in hot:
+                hot = [pinned] + [m for m in hot if m != pinned]
             available = hot + cold[:1]
+        # Drop models whose known context cannot fit the estimate (T13)
+        est = getattr(decision, "estimated_tokens", None)
+        if est and available:
+            fit: list[str] = []
+            unknown: list[str] = []
+            for m in available:
+                ctx_len = self.registry.context_length_for(m)
+                if ctx_len is None:
+                    unknown.append(m)
+                elif ctx_len >= est:
+                    fit.append(m)
+            if fit or unknown:
+                available = fit + unknown
         chain = available[: max(1, max_n)]
         return chain
 
@@ -361,6 +470,7 @@ class FallbackExecutor:
         model: str,
         key_id: str | None,
         fallback_index: int,
+        provider_id: str | None = None,
     ) -> dict[str, str]:
         h = {
             "X-Nimmakai-Model": model,
@@ -380,8 +490,8 @@ class FallbackExecutor:
         ctx_len = self.registry.context_length_for(model)
         if ctx_len is not None:
             h["X-Nimmakai-Context-Length"] = str(ctx_len)
-        if self.hub is not None:
-            _c, pid, _u = self.hub.client_for_model(model)
+        pid = provider_id or self._provider_id_for(model)
+        if pid:
             h["X-Nimmakai-Provider"] = pid
         return h
 
@@ -420,10 +530,55 @@ class FallbackExecutor:
         )
         last: UpstreamResult | None = None
 
+        import httpx
+
+        from nimmakai.compat import openai_error
+
+        deadline = time.monotonic() + float(
+            getattr(self.settings, "request_deadline_seconds", 180.0) or 180.0
+        )
+
         for idx, model in enumerate(chain):
-            client, upstream_mid = self._client_for(model)
+            remaining = deadline - time.monotonic()
+            if remaining < 8.0 and idx > 0:
+                return UpstreamResult(
+                    status_code=504,
+                    body=openai_error(
+                        "Request deadline exceeded before trying remaining models.",
+                        code="request_deadline_exceeded",
+                        type_="server_error",
+                    ),
+                    headers={},
+                    key=None,
+                    model=last.model if last else model,
+                    fallback_index=idx,
+                    decision=decision,
+                )
+            try:
+                client, upstream_mid = self._client_for(model)
+            except RuntimeError as exc:
+                if idx < len(chain) - 1:
+                    self.stats.fallback_advances += 1
+                    logger.info("client_for_model failed on %s: %s; advancing", model, exc)
+                    continue
+                return UpstreamResult(
+                    status_code=503,
+                    body={
+                        "error": {
+                            "message": str(exc),
+                            "type": "server_error",
+                            "code": "nimmakai_provider_unavailable",
+                        }
+                    },
+                    headers={},
+                    key=None,
+                    model=model,
+                    fallback_index=idx,
+                    decision=decision,
+                )
             attempt_body = {**body, "model": upstream_mid}
             t_attempt = time.perf_counter()
+            pid = self._provider_id_for(model)
             try:
                 status, resp_body, headers, key = await client.request_json(
                     "POST",
@@ -432,37 +587,41 @@ class FallbackExecutor:
                     forward_headers=forward_headers,
                     preferred_key_id=preferred_key_id,
                 )
-            except RuntimeError as exc:
+            except (RuntimeError, httpx.HTTPError, OSError) as exc:
                 msg = str(exc).lower()
                 retryable_pool = (
-                    "rate-limited" in msg
+                    isinstance(exc, (httpx.HTTPError, OSError))
+                    or "rate-limited" in msg
                     or "cooling" in msg
                     or "unavailable" in msg
                     or "no api keys" in msg
                     or "not available" in msg
                     or "provider" in msg
+                    or "circuit" in msg
                 )
-                if retryable_pool:
-                    self._emit_span(
-                        self._make_upstream_span(
-                            model=model,
-                            t0=t_attempt,
-                            status=503,
-                            success=False,
-                            error_message=str(exc),
-                            span_type="fallback_advance"
-                            if advance_on_pool and idx < len(chain) - 1
-                            else "upstream",
-                        )
+                self._circuit_fail(pid)
+                self._emit_span(
+                    self._make_upstream_span(
+                        model=model,
+                        t0=t_attempt,
+                        status=503,
+                        success=False,
+                        error_message=str(exc),
+                        span_type="fallback_advance"
+                        if (advance_on_pool or isinstance(exc, (httpx.HTTPError, OSError)))
+                        and idx < len(chain) - 1
+                        else "upstream",
                     )
-                    if advance_on_pool and idx < len(chain) - 1:
-                        self.stats.fallback_advances += 1
-                        logger.info(
-                            "provider/pool unavailable on %s (%s); advancing model",
-                            model,
-                            exc,
-                        )
-                        continue
+                )
+                if retryable_pool and idx < len(chain) - 1:
+                    self.stats.fallback_advances += 1
+                    logger.info(
+                        "provider/transport unavailable on %s (%s); advancing model",
+                        model,
+                        exc,
+                    )
+                    continue
+                if retryable_pool:
                     return UpstreamResult(
                         status_code=503,
                         body={
@@ -478,12 +637,17 @@ class FallbackExecutor:
                         fallback_index=idx,
                         decision=decision,
                         upstream_ms=(time.perf_counter() - t_attempt) * 1000,
+                        provider_id=pid,
                     )
                 raise
 
             key_id = key.key_id if key else None
             unavailable = _is_model_not_found(status, resp_body)
             success = 200 <= status < 300
+            if success:
+                self._circuit_succeed(pid)
+            elif status >= 500:
+                self._circuit_fail(pid)
             had_tools = bool(
                 (body.get("tools") or body.get("functions"))
                 or body.get("tool_choice") not in (None, "none", "None")
@@ -492,7 +656,7 @@ class FallbackExecutor:
             tool_ok: bool | None = None
             if success:
                 empty_reply, tool_ok = _analyze_success_body(
-                    resp_body, had_tools=had_tools
+                    resp_body, had_tools=had_tools, path=path
                 )
             # Adaptive speed signal: JSON path latency (if measured upstream)
             latency = (time.perf_counter() - t_attempt) * 1000
@@ -597,17 +761,21 @@ class FallbackExecutor:
                     completion_tokens=ct,
                     cached_tokens=cached,
                     upstream_ms=latency,
+                    provider_id=pid,
                 )
+
+            from nimmakai.compat import wrap_upstream_error
 
             last = UpstreamResult(
                 status_code=status,
-                body=resp_body,
+                body=wrap_upstream_error(resp_body, status=status),
                 headers=headers,
                 key=key,
                 model=model,
                 fallback_index=idx,
                 decision=decision,
                 upstream_ms=latency,
+                provider_id=pid,
             )
 
             if _is_non_retryable_client_error(status, resp_body):
@@ -707,13 +875,63 @@ class FallbackExecutor:
                 decision=decision,
             )
 
+        import json as _json
+
+        import httpx
+
+        from nimmakai.compat import openai_error, wrap_upstream_error
+
         last_status = 503
         last_headers: dict[str, str] = {}
         last_key = None
         last_model = chain[0]
+        last_pid: str | None = None
+        saw_ttft_stall = False
+
+        def _error_bytes(
+            message: str,
+            *,
+            code: str,
+            status: int = 502,
+            retry_after: str | None = None,
+        ) -> bytes:
+            meta = {"retry_after": retry_after} if retry_after else None
+            return _json.dumps(
+                openai_error(
+                    message,
+                    code=code,
+                    type_="server_error" if status >= 500 or status == 429 else "invalid_request_error",
+                    metadata=meta,
+                )
+            ).encode("utf-8")
 
         for idx, model in enumerate(chain):
-            client, upstream_mid = self._client_for(model)
+            pid = self._provider_id_for(model)
+            try:
+                client, upstream_mid = self._client_for(model)
+            except RuntimeError as exc:
+                self._circuit_fail(pid)
+                if idx < len(chain) - 1:
+                    self.stats.fallback_advances += 1
+                    logger.info("stream client_for failed on %s: %s; advancing", model, exc)
+                    continue
+                last_status, last_model, last_pid = 503, model, pid
+
+                async def fail_client(
+                    msg: str = str(exc),
+                ) -> AsyncIterator[bytes]:
+                    yield _error_bytes(msg, code="nimmakai_provider_unavailable", status=503)
+
+                return StreamResult(
+                    status_code=503,
+                    byte_iter=fail_client(),
+                    headers={"content-type": "application/json"},
+                    key=None,
+                    model=model,
+                    fallback_index=idx,
+                    decision=decision,
+                    provider_id=pid,
+                )
             attempt_body = {**body, "model": upstream_mid}
             t_attempt = time.perf_counter()
             try:
@@ -724,7 +942,8 @@ class FallbackExecutor:
                     forward_headers=forward_headers,
                     preferred_key_id=preferred_key_id,
                 )
-            except RuntimeError as exc:
+            except (RuntimeError, httpx.HTTPError, OSError) as exc:
+                self._circuit_fail(pid)
                 self._emit_span(
                     self._make_upstream_span(
                         model=model,
@@ -739,11 +958,33 @@ class FallbackExecutor:
                 )
                 if idx < len(chain) - 1:
                     self.stats.fallback_advances += 1
-                    logger.info("stream pool/error on %s: %s; advancing", model, exc)
+                    logger.info("stream pool/transport on %s: %s; advancing", model, exc)
                     continue
-                raise
+                last_status, last_model, last_pid = 503, model, pid
 
-            last_status, last_headers, last_key, last_model = status, headers, key, model
+                async def fail_transport(
+                    msg: str = str(exc),
+                ) -> AsyncIterator[bytes]:
+                    yield _error_bytes(msg, code="nimmakai_pool_exhausted", status=503)
+
+                return StreamResult(
+                    status_code=503,
+                    byte_iter=fail_transport(),
+                    headers={"content-type": "application/json"},
+                    key=None,
+                    model=model,
+                    fallback_index=idx,
+                    decision=decision,
+                    provider_id=pid,
+                )
+
+            last_status, last_headers, last_key, last_model, last_pid = (
+                status,
+                headers,
+                key,
+                model,
+                pid,
+            )
 
             if 200 <= status < 300:
                 import asyncio
@@ -765,11 +1006,14 @@ class FallbackExecutor:
                 except StopAsyncIteration:
                     first_chunk = b""
                 except TimeoutError:
+                    saw_ttft_stall = True
+                    last_status = 504
                     logger.warning(
                         "Stream TTFT stalled on %s after %.0fs; falling back",
                         model,
                         ttft,
                     )
+                    self._circuit_fail(pid)
                     self._emit_span(
                         self._make_upstream_span(
                             model=model,
@@ -795,9 +1039,11 @@ class FallbackExecutor:
                     )
                     continue
                 except Exception as exc:
+                    last_status = 502
                     logger.warning(
                         "Stream open failed on %s: %s; falling back", model, exc
                     )
+                    self._circuit_fail(pid)
                     self._emit_span(
                         self._make_upstream_span(
                             model=model,
@@ -822,6 +1068,7 @@ class FallbackExecutor:
                     continue
 
                 ttft_latency = max(0.01, time.monotonic() - t_stream0)
+                self._circuit_succeed(pid)
                 self._emit_span(
                     self._make_upstream_span(
                         model=model,
@@ -927,9 +1174,39 @@ class FallbackExecutor:
                         raise
                     except Exception as e:
                         logger.warning(
-                            "Stream ended early on %s: %s — closing SSE", mid, e
+                            "Stream ended early on %s: %s — closing SSE with error",
+                            mid,
+                            e,
+                        )
+                        # finish_reason=error chunk + error event before [DONE] (F-06/T6)
+                        err_msg = str(e)[:500]
+                        finish = {
+                            "id": "nimmakai-stream-error",
+                            "object": "chat.completion.chunk",
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {},
+                                    "finish_reason": "error",
+                                }
+                            ],
+                        }
+                        err_evt = openai_error(
+                            err_msg,
+                            code="upstream_stream_error",
+                            type_="server_error",
                         )
                         try:
+                            yield (
+                                b"data: "
+                                + _json.dumps(finish).encode("utf-8")
+                                + b"\n\n"
+                            )
+                            yield (
+                                b"data: "
+                                + _json.dumps(err_evt).encode("utf-8")
+                                + b"\n\n"
+                            )
                             yield b"data: [DONE]\n\n"
                         except Exception:
                             pass
@@ -948,9 +1225,12 @@ class FallbackExecutor:
                     prompt_tokens=usage_bag["prompt_tokens"],
                     completion_tokens=usage_bag["completion_tokens"],
                     cached_tokens=usage_bag["cached_tokens"],
+                    provider_id=pid,
                 )
 
             # Failed stream open — advance on same retryable set as JSON path
+            if status >= 500:
+                self._circuit_fail(pid)
             err_raw = b""
             try:
                 async for chunk in byte_iter:
@@ -962,12 +1242,23 @@ class FallbackExecutor:
 
             err_body: Any = None
             if err_raw:
-                import json as _json
-
                 try:
                     err_body = _json.loads(err_raw.decode("utf-8", errors="replace"))
                 except Exception:
                     err_body = err_raw.decode("utf-8", errors="replace")
+            else:
+                ra = headers.get("Retry-After") or headers.get("retry-after")
+                err_body = wrap_upstream_error(
+                    f"Upstream error HTTP {status}", status=status
+                )
+                if ra:
+                    err_body = openai_error(
+                        f"Upstream error HTTP {status}",
+                        code="upstream_error",
+                        type_="server_error" if status >= 500 or status == 429 else "invalid_request_error",
+                        metadata={"retry_after": ra},
+                    )
+                err_raw = _json.dumps(err_body).encode("utf-8")
 
             retryable = status in {404, 429, 500, 502, 503, 504} or (
                 status == 400 and _is_retryable_model_error(status, err_body)
@@ -1000,31 +1291,42 @@ class FallbackExecutor:
                 continue
 
             async def err_bytes(payload: bytes = err_raw) -> AsyncIterator[bytes]:
-                if payload:
-                    yield payload
+                yield payload
 
             self.stats.record(decision.intent.value, model, advanced=idx > 0)
             return StreamResult(
                 status_code=status,
                 byte_iter=err_bytes(),
-                headers=headers,
+                headers={**headers, "content-type": "application/json"},
                 key=key,
                 model=model,
                 fallback_index=idx,
                 decision=decision,
+                provider_id=pid,
             )
 
-        async def empty_fail() -> AsyncIterator[bytes]:
-            if False:  # pragma: no cover
-                yield b""
-            return
+        # No stream successfully relayed — never return 2xx with empty body (F-05)
+        terminal_status = 504 if saw_ttft_stall or last_status < 400 else last_status
+        if terminal_status < 400:
+            terminal_status = 504
+        code = "upstream_timeout" if terminal_status == 504 else "nimmakai_models_exhausted"
+        msg = (
+            "All models timed out waiting for the first stream token."
+            if terminal_status == 504
+            else "All models in routing chain failed to open a stream."
+        )
+        payload = _error_bytes(msg, code=code, status=terminal_status)
+
+        async def empty_fail(p: bytes = payload) -> AsyncIterator[bytes]:
+            yield p
 
         return StreamResult(
-            status_code=last_status,
+            status_code=terminal_status,
             byte_iter=empty_fail(),
             headers=last_headers or {"content-type": "application/json"},
             key=last_key,
             model=last_model,
             fallback_index=max(0, len(chain) - 1),
             decision=decision,
+            provider_id=last_pid,
         )

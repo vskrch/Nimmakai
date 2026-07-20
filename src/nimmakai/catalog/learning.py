@@ -194,6 +194,26 @@ class LearningStore:
             and now - self._last_save_at < self.save_debounce_seconds
         ):
             return
+        # Prefer off-loop disk I/O when called from an async request path (T11)
+        try:
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None and not force:
+            if getattr(self, "_save_scheduled", False):
+                return
+            self._save_scheduled = True
+
+            async def _save_bg() -> None:
+                try:
+                    await asyncio.to_thread(self.save)
+                finally:
+                    self._save_scheduled = False
+
+            loop.create_task(_save_bg())
+            return
         self.save()
 
     def save(self) -> None:

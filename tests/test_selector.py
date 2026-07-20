@@ -60,18 +60,17 @@ def test_passthrough_explicit() -> None:
     s = _selector(enable_fallback_on_explicit=False)
     d = s.resolve("org/my-model", _intent())
     assert d.mode == "passthrough"
-    # Best coding model always leads; user's model is in the chain
-    assert d.chain[0] != "org/my-model"
-    assert "org/my-model" in d.chain
+    # Explicit model stays pinned at head (F-08) — never surprise the client
+    assert d.chain[0] == "org/my-model"
+    assert d.pinned_head == "org/my-model"
 
 
 def test_passthrough_with_fallback() -> None:
     s = _selector(enable_fallback_on_explicit=True)
     d = s.resolve("org/my-model", _intent())
     assert d.mode == "passthrough_with_fallback"
-    # Best coding model always leads; user's model is in the chain
-    assert d.chain[0] != "org/my-model"
-    assert "org/my-model" in d.chain
+    assert d.chain[0] == "org/my-model"
+    assert d.pinned_head == "org/my-model"
     assert len(d.chain) > 1
 
 
@@ -94,7 +93,7 @@ def test_horizontal_fallback() -> None:
 
     d = s.resolve("groq/llama-3.3-70b-versatile", _intent())
     assert d.mode == "passthrough_with_fallback"
-    # Best coding model always leads; requested model is still in the chain
-    assert d.chain[0] != "groq/llama-3.3-70b-versatile"
-    assert "groq/llama-3.3-70b-versatile" in d.chain
+    # Requested model pinned first; horizontal sibling remains as fallback
+    assert d.chain[0] == "groq/llama-3.3-70b-versatile"
+    assert d.pinned_head == "groq/llama-3.3-70b-versatile"
     assert "cerebras/llama-3.3-70b-versatile" in d.chain

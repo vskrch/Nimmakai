@@ -46,7 +46,11 @@ class RouteDecision:
     auto_tier: str | None = None
     variant: str = "default"
     sticky_model: str | None = None
+    # Sticky/explicit head that _chain must keep first unless unhealthy
+    pinned_head: str | None = None
     allowed_models: list[str] = field(default_factory=list)
+    # Estimated prompt tokens for context-length filtering (T13)
+    estimated_tokens: int | None = None
 
 
 class ModelSelector:
@@ -138,6 +142,7 @@ class ModelSelector:
                     auto_tier=tier,
                     variant=variant,
                     sticky_model=preferred_model,
+                    pinned_head=preferred_model,
                     allowed_models=list(opts.allowed_models),
                 )
 
@@ -158,6 +163,26 @@ class ModelSelector:
                 requested_model=model_field,
                 auto_tier=tier,
                 variant=variant,
+            )
+
+        if intent == Intent.VISION:
+            chain = self.registry.chain_for_intent("vision", variant=variant)
+            chain = self.registry.health_reorder(
+                chain, intent="vision", variant=variant
+            )
+            if not chain:
+                # Never route image requests to alphabetical text models (T19)
+                raise ValueError("no_vision_model")
+            return RouteDecision(
+                chain=chain,
+                mode="auto",
+                intent=intent,
+                rule_id=intent_result.rule_id,
+                requested_model=model_field,
+                auto_tier=tier,
+                variant=variant,
+                pinned_head=preferred_model,
+                sticky_model=preferred_model,
             )
 
         # Auto router (OpenRouter/Kilo/Nimmakai virtual models)
@@ -194,6 +219,7 @@ class ModelSelector:
                 auto_tier=tier or "balanced",
                 variant=variant,
                 sticky_model=preferred_model,
+                pinned_head=preferred_model,
                 allowed_models=list(opts.allowed_models),
             )
 
@@ -251,6 +277,7 @@ class ModelSelector:
                 rule_id=intent_result.rule_id,
                 requested_model=model_field,
                 variant=variant,
+                pinned_head=head,
             )
 
         if self.registry.is_known(raw) or looks_like_nim_id(raw):
@@ -276,8 +303,8 @@ class ModelSelector:
             else:
                 chain = [resolved]
                 mode = "passthrough"
-            # For coding, always rank all candidates — the best coder leads,
-            # the user-requested model stays as fallback.
+            # For coding, rank candidates but keep the requested model pinned
+            # so _chain / sticky affinity is not silently discarded (F-08).
             if intent_key == "coding_agentic":
                 seen = set(chain)
                 for m in self.registry.coding_candidates():
@@ -287,6 +314,7 @@ class ModelSelector:
                 chain = self.registry.health_reorder(
                     chain, intent=intent_key, variant=variant
                 )
+                chain = pin_model_first(chain, resolved)
             return RouteDecision(
                 chain=chain,
                 mode=mode,
@@ -294,6 +322,7 @@ class ModelSelector:
                 rule_id=intent_result.rule_id,
                 requested_model=model_field,
                 variant=variant,
+                pinned_head=resolved,
             )
 
         # Unknown non-NIM string → treat as auto (Cursor defaults, etc.)
@@ -316,6 +345,7 @@ class ModelSelector:
             auto_tier=tier,
             variant=variant,
             sticky_model=preferred_model,
+            pinned_head=preferred_model,
             allowed_models=list(opts.allowed_models),
         )
 

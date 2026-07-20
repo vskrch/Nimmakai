@@ -22,16 +22,33 @@ class GuardContext:
 
 
 class AccountGuard:
-    def __init__(self, settings: Settings, pool: KeyPool) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        pool: KeyPool,
+        *,
+        capacity_hint: int | None = None,
+    ) -> None:
         self.settings = settings
         self.pool = pool
         max_global = settings.global_max_in_flight
         if max_global <= 0:
-            max_global = len(pool) * settings.nim_max_in_flight_per_key
+            # Prefer multi-provider capacity hint when provided (F-09)
+            if capacity_hint is not None and capacity_hint > 0:
+                max_global = capacity_hint
+            else:
+                max_global = len(pool) * settings.nim_max_in_flight_per_key
         self.gate = GlobalConcurrencyGate(max_global)
         self.sticky = StickySessionStore(
             ttl_seconds=settings.sticky_session_ttl_seconds,
         )
+
+    def resize_gate(self, capacity: int) -> None:
+        """Recompute global concurrency from sum of active provider pools."""
+        if self.settings.global_max_in_flight > 0:
+            return  # explicit override wins
+        if capacity > 0:
+            self.gate.max_in_flight = capacity
 
     async def before_request(
         self,
@@ -51,16 +68,20 @@ class AccountGuard:
             preferred_model = self.sticky.get_model(session_id)
 
         await self.gate.acquire(max_wait=30.0)
-        await apply_jitter(
-            enabled=self.settings.safety_jitter_enabled,
-            min_ms=self.settings.safety_jitter_ms_min,
-            max_ms=self.settings.safety_jitter_ms_max,
-        )
-        return GuardContext(
-            session_id=session_id,
-            preferred_key_id=preferred,
-            preferred_model=preferred_model,
-        )
+        try:
+            await apply_jitter(
+                enabled=self.settings.safety_jitter_enabled,
+                min_ms=self.settings.safety_jitter_ms_min,
+                max_ms=self.settings.safety_jitter_ms_max,
+            )
+            return GuardContext(
+                session_id=session_id,
+                preferred_key_id=preferred,
+                preferred_model=preferred_model,
+            )
+        except Exception:
+            await self.gate.release()
+            raise
 
     async def after_request(
         self,
