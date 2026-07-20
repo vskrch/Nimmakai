@@ -183,6 +183,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 every = max(1, int(settings.probe_every_n_refreshes))
                 heal_every = max(30, int(getattr(settings, "self_heal_seconds", 120) or 120))
                 last_heal = time.monotonic()
+                last_learning_save = time.monotonic()
+                learning_save_interval = 60.0
                 while True:
                     # Wake at the earlier of catalog refresh vs self-heal interval
                     sleep_for = min(
@@ -236,6 +238,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             )
                         except Exception:
                             logger.exception("periodic catalog refresh failed")
+                    # NMK-406: periodic learning persistence
+                    now_ts = time.monotonic()
+                    if now_ts - last_learning_save >= learning_save_interval:
+                        try:
+                            registry.learning.save()
+                            last_learning_save = now_ts
+                        except Exception:
+                            logger.exception("periodic learning save failed")
 
             refresh_task = asyncio.create_task(_refresh_loop())
 

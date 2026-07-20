@@ -249,3 +249,29 @@ class ModelHealthStore:
                 "cooldown_remaining_s": max(0.0, round(h.cooldown_until - now, 1)),
             }
         return out
+
+    def provider_health(
+        self, provider_models: set[str], provider_id: str = ""
+    ) -> float:
+        """Aggregate health across all models for a provider.
+
+        0 = all models down, 1 = all models healthy (or unknown).
+        Used by the optimizer's provider prior for health-weighted routing.
+        """
+        if not provider_models:
+            return 1.0
+        scores: list[float] = []
+        for mid in provider_models:
+            h = self._by_model.get(mid)
+            if h is None:
+                scores.append(0.7)
+                continue
+            if h.in_cooldown():
+                scores.append(0.05)
+                continue
+            total = h.success_count + h.error_count
+            if total < self.min_samples:
+                scores.append(0.7)
+                continue
+            scores.append(max(0.05, 1.0 - h.error_rate))
+        return sum(scores) / len(scores) if scores else 1.0

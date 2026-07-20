@@ -8,6 +8,16 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+_ALERT_LOG_NAME = "nimmakai.alerts"
+
+
+def _alert(event: str, **kw: Any) -> None:
+    """Emit a structured alert event for downstream aggregation / webhooks."""
+    import json as _json
+
+    payload = {"event": event, **kw}
+    logger.warning("ALERT %s", _json.dumps(payload, default=str))
+
 
 async def heal_and_refresh(
     *,
@@ -48,6 +58,10 @@ async def heal_and_refresh(
                 restored_providers.append(cfg.id)
             except Exception:
                 logger.exception("self-heal: failed to restore provider %s", cfg.id)
+                _alert(
+                    "nimmakai.provider_restore_failed",
+                    provider=cfg.id,
+                )
         report["active_providers"] = len(hub.active_provider_ids())
         report["restored_providers"] = len(restored_providers)
 
@@ -100,7 +114,20 @@ def emergency_coding_chain(registry: Any, *, max_n: int = 10) -> list[str]:
         # Cold ladder: rebuild then retry
         registry.ladder.rebuild(set(registry.live_ids))
         chain = registry.ladder.ladder_for("coding_agentic", max_n=max_n)
+        if not chain:
+            _alert(
+                "nimmakai.all_chains_empty",
+                intent="coding_agentic",
+                live_models=len(registry.live_ids),
+                cause="ladder_empty_after_rebuild",
+            )
         return registry.health_reorder(chain) if chain else sorted(registry.live_ids)[:max_n]
     except Exception:
         logger.exception("emergency_coding_chain failed")
+        _alert(
+            "nimmakai.all_chains_empty",
+            intent="coding_agentic",
+            live_models=len(registry.live_ids),
+            cause="emergency_chain_failed",
+        )
         return sorted(registry.live_ids)[:max_n]

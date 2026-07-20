@@ -90,13 +90,21 @@ def _speed_factor(health: Any, model_id: str) -> float:
     return (0.50 * tps_f + 0.40 * lat_f + 0.10) * streak
 
 
-def _provider_factor(model_id: str, provider_ids: set[str]) -> float:
+def _provider_factor(model_id: str, provider_ids: set[str], health: Any = None) -> float:
     from nimmakai.catalog.presets import speed_prior_for_provider
     from nimmakai.catalog.providers import split_provider_model
 
     pid, _ = split_provider_model(model_id, provider_ids, default_provider="nim")
-    # Map ~1.0–1.4 prior into mild 0.9–1.15
     prior = speed_prior_for_provider(pid)
+    # NMK-403: weight provider prior by aggregate health
+    if health is not None:
+        provider_models = {
+            m for m in getattr(health, "_by_model", {})
+            if m.startswith(pid + "/")
+        }
+        if provider_models:
+            agg_health = health.provider_health(provider_models, pid)
+            prior *= max(0.5, agg_health)
     return max(0.85, min(1.2, 0.75 + 0.25 * prior))
 
 
@@ -137,7 +145,7 @@ def score_model_live(
     intel = _quality_prior(model_id, ladder_scores=ladder_scores)
     speed = _speed_factor(health, model_id)
     avail = _availability_factor(health, model_id)
-    prov = _provider_factor(model_id, provider_ids)
+    prov = _provider_factor(model_id, provider_ids, health)
 
     score = (
         (intel**_ALPHA_INTEL)

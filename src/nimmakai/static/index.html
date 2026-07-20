@@ -181,6 +181,10 @@ select.input { appearance: auto; }
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12h4l2-9 4 18 2-9h4"/></svg>
       Providers
     </a>
+    <a href="#" data-p="health" onclick="go('health')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      Health
+    </a>
     <a href="#" data-p="models" onclick="go('models')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
       Models
@@ -268,6 +272,14 @@ select.input { appearance: auto; }
         <div class="hd"><h3>Usage by API Key</h3></div>
         <div class="bd" id="trace-keys" style="padding:0">Loading...</div>
       </div>
+      <div class="card" style="margin-top:24px">
+        <div class="hd"><h3>Request Trace</h3></div>
+        <div class="bd" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <input class="input" style="max-width:300px" placeholder="Request ID (X-Request-Id)" oninput="setTraceRid(this.value)">
+          <button class="btn" onclick="lookupTrace()">Lookup</button>
+        </div>
+        <div id="trace-results"></div>
+      </div>
     </div>
 
     <!-- PROVIDERS -->
@@ -312,6 +324,16 @@ select.input { appearance: auto; }
       <div class="card"><div class="bd" id="mtable" style="padding:0"></div></div>
     </div>
 
+    <!-- HEALTH -->
+    <div class="page" id="pg-health">
+      <div style="display:flex;gap:12px;margin-bottom:20px;align-items:center">
+        <h2 style="font-size:20px;font-weight:600">Provider Health</h2>
+        <button class="btn" onclick="loadHealth()">Refresh</button>
+        <span id="health-age" style="font-size:12px;color:var(--dim)"></span>
+      </div>
+      <div id="health-cards"></div>
+    </div>
+
     <!-- ROUTING -->
     <div class="page" id="pg-routing">
       <div style="margin-bottom: 32px;">
@@ -345,6 +367,7 @@ select.input { appearance: auto; }
         <div class="field"><label>Max in-flight</label><input class="input" id="pf-inflight" type="number" value="3"></div>
       </div>
       <div id="test-result" style="font-size:12px;color:var(--dim);min-height:18px"></div>
+      <div id="discovered-models"></div>
     </div>
     <div class="mft">
       <button class="btn" onclick="modal()">Cancel</button>
@@ -407,10 +430,11 @@ function go(p) {
   document.querySelectorAll('.page').forEach(e => e.classList.remove('active'));
   let el = $('pg-'+p); if (el) el.classList.add('active');
   document.querySelectorAll('.sidebar nav a').forEach(a => a.classList.toggle('active', a.dataset.p === p));
-  $('hdr').textContent = {dash:'Overview', playground:'Playground', tracing:'Tracing', providers:'Providers', models:'Models', routing:'Routing'}[p] || p;
+  $('hdr').textContent = {dash:'Overview', playground:'Playground', tracing:'Tracing', providers:'Providers', health:'Provider Health', models:'Models', routing:'Routing'}[p] || p;
   if(p==='dash') loadD();
   if(p==='tracing') loadT();
   if(p==='providers') loadP();
+  if(p==='health') loadHealth();
   if(p==='models') loadM();
   if(p==='routing') loadR();
   if(p==='playground') { if (!ALL_M.length) loadM(); }
@@ -1054,10 +1078,11 @@ async function addP() {
   toast(r.message || `Saved — ${r.live_model_count ?? '?'} models in pool`);
   modal();
   clearProviderForm();
+  // NMK-502: discover models after provider add
+  discoverModels(b.id);
   await loadP();
   await loadM();
   loadD();
-  // Jump to models so user sees the merged pool
   if ((r.live_model_count || 0) > 0) {
     setTimeout(() => go('models'), 400);
   }
@@ -1105,12 +1130,14 @@ function renderM(ms) {
     $('mtable').innerHTML = '<div style="padding:32px;text-align:center;color:var(--dim)">No models available. Add free provider keys (Providers tab) and click Refresh Catalog.</div>';
     return;
   }
-  $('mtable').innerHTML = '<table><thead><tr><th>Model</th><th>Provider</th><th>Context</th></tr></thead><tbody>' +
+  $('mtable').innerHTML = '<table><thead><tr><th>Model</th><th>Provider</th><th>Context</th><th style="width:100px">Quality</th></tr></thead><tbody>' +
     ms.map(m => {
       let parts = m.id.split('/'), prov = parts[0], mod = parts.slice(1).join('/') || m.id;
       let ctx = m.context_length || m.max_model_len || '—';
       let ctxStr = typeof ctx === 'number' ? ctx.toLocaleString() : esc(ctx);
-      return `<tr><td><strong>${esc(mod)}</strong><div style="font-size:11px;color:var(--muted)">${esc(m.id)}</div></td><td><span class="badge accent">${esc(prov)}</span></td><td style="color:var(--dim)">${ctxStr}</td></tr>`;
+      let qScore = m.quality_score || '';
+      return `<tr><td><strong>${esc(mod)}</strong><div style="font-size:11px;color:var(--muted)">${esc(m.id)}</div></td><td><span class="badge accent">${esc(prov)}</span></td><td style="color:var(--dim)">${ctxStr}</td>
+        <td><div style="display:flex;align-items:center;gap:6px"><input class="input" style="width:60px;padding:4px 6px;font-size:11px;height:28px" type="number" min="0" max="100" value="${qScore}" onchange="setQuality('${esc(m.id)}',this.value)" placeholder="—"><span style="font-size:11px;color:var(--muted)">0-100</span></div></td></tr>`;
     }).join('') + '</tbody></table>';
 }
 function filterM() { applyMFilter(); }
@@ -1239,10 +1266,136 @@ async function loadR() {
   }).join('');
 }
 
+// ── NMK-504: Provider Health Dashboard ──
+async function loadHealth() {
+  let r = await api('/admin/health/providers');
+  if (!r || !r.providers) {
+    $('health-cards').innerHTML = '<div class="card"><div class="bd" style="color:var(--dim)">Auth required.</div></div>';
+    return;
+  }
+  let provs = r.providers;
+  let keys = Object.keys(provs).sort();
+  if (!keys.length) {
+    $('health-cards').innerHTML = '<div class="card"><div class="bd" style="color:var(--dim)">No providers.</div></div>';
+    return;
+  }
+  $('health-cards').innerHTML = keys.map(pid => {
+    let p = provs[pid];
+    let hScore = p.aggregate_health ?? 1.0;
+    let barColor = hScore > 0.8 ? 'var(--green)' : hScore > 0.5 ? 'var(--blue)' : 'var(--red)';
+    let cbState = p.circuit_breaker || 'closed';
+    let cbColor = cbState === 'open' ? 'var(--red)' : cbState === 'half_open' ? 'var(--blue)' : 'var(--green)';
+    let models = p.models || {};
+    let modelKeys = Object.keys(models).sort();
+    return `<div class="card" style="margin-bottom:16px">
+      <div class="hd" style="padding:14px 20px">
+        <div style="display:flex;align-items:center;gap:12px;flex:1">
+          <strong style="font-size:15px">${esc(pid)}</strong>
+          <span class="badge ${p.enabled && p.runtime ? 'ok' : 'err'}">${p.enabled && p.runtime ? 'Active' : 'Inactive'}</span>
+          <span class="badge" style="background:${cbColor}22;color:${cbColor};border:1px solid ${cbColor}44">CB: ${cbState}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:12px;color:var(--dim)">${p.model_count} models · ${p.available_keys} keys</span>
+          <div style="width:80px;height:6px;background:var(--bg-sidebar);border-radius:3px;overflow:hidden">
+            <div style="height:100%;width:${(hScore*100).toFixed(0)}%;background:${barColor};border-radius:3px"></div>
+          </div>
+          <span style="font-size:12px;font-weight:600;color:${barColor}">${(hScore*100).toFixed(0)}%</span>
+        </div>
+      </div>
+      ${modelKeys.length > 0 ? `<div class="bd" style="padding:0">
+        <table style="width:100%">
+          <thead><tr><th>Model</th><th>Status</th><th>TPS</th><th>Latency</th><th>Error Rate</th></tr></thead>
+          <tbody>${modelKeys.map(mid => {
+            let m = models[mid];
+            let ok = m.ok !== false;
+            return `<tr>
+              <td style="font-size:12px;padding:8px 20px">${esc(mid.split('/').slice(1).join('/'))}</td>
+              <td><span class="badge ${ok ? 'ok' : 'err'}" style="font-size:11px">${ok ? 'Healthy' : m.cooldown ? 'Cooldown' : 'Unhealthy'}</span></td>
+              <td style="font-size:12px;color:var(--dim)">${m.ewma_tok_per_s || '—'}</td>
+              <td style="font-size:12px;color:var(--dim)">${m.ewma_latency_s != null ? m.ewma_latency_s + 's' : '—'}</td>
+              <td style="font-size:12px;color:${m.error_rate > 0.3 ? 'var(--red)' : 'var(--dim)'}">${m.error_rate != null ? (m.error_rate * 100).toFixed(1) + '%' : '—'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>` : ''}
+    </div>`;
+  }).join('');
+  $('health-age').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+}
+
+// ── NMK-505: SSE Auto-Refresh ──
+let _evtSource = null;
+function startSSE() {
+  if (_evtSource) return;
+  _evtSource = new EventSource('/admin/events');
+  _evtSource.addEventListener('health', (e) => {
+    try {
+      let d = JSON.parse(e.data);
+      let pill = $('status-pill');
+      if (pill) {
+        let ok = d.live_models > 0;
+        pill.innerHTML = `<div class="dot" style="background:${ok?'var(--green)':'var(--red)'};box-shadow:0 0 8px ${ok?'var(--green)':'var(--red)'}"></div>${d.live_models} models · ${d.active_providers} providers`;
+      }
+    } catch(_){}
+  });
+  _evtSource.onerror = () => { setTimeout(() => { _evtSource = null; }, 5000); };
+}
+
+// ── NMK-506: Request Trace Lookup ──
+let TRACE_RID = '';
+function setTraceRid(v) { TRACE_RID = v; }
+async function lookupTrace() {
+  if (!TRACE_RID.trim()) { toast('Enter a request ID', true); return; }
+  let r = await api('/admin/trace/' + encodeURIComponent(TRACE_RID.trim()));
+  if (!r) return;
+  let el = $('trace-results');
+  let entries = r.entries || [];
+  if (!entries.length) {
+    el.innerHTML = '<div style="padding:16px;color:var(--dim);text-align:center">No log entries found for this request ID.</div>';
+    return;
+  }
+  el.innerHTML = entries.map(e => `<div style="padding:8px 16px;border-bottom:1px solid var(--border);font-size:12px;font-family:monospace">
+    <span style="color:var(--muted)">${esc(e.time || '')}</span>
+    <span style="color:${e.status >= 400 ? 'var(--red)' : 'var(--green)'};margin:0 8px">${e.status || '—'}</span>
+    <span>${esc(e.message || JSON.stringify(e))}</span>
+  </div>`).join('');
+}
+
+// ── NMK-503: Model Quality Override ──
+async function setQuality(modelId, value) {
+  let v = parseFloat(value);
+  if (isNaN(v) || v < 0 || v > 100) { toast('Quality must be 0-100', true); return; }
+  let parts = modelId.split('/');
+  let pid = parts[0];
+  let r = await ap('/admin/models/register', {
+    provider_id: pid,
+    models: [parts.slice(1).join('/')],
+    quality_override: v,
+  });
+  if (r && r.ok) toast('Quality override set for ' + modelId);
+  else toast(errMsg(r, 'Failed to set override'), true);
+}
+
+// ── NMK-502: Provider Add with Model Discovery ──
+async function discoverModels(pid) {
+  let r = await api('/admin/providers/' + encodeURIComponent(pid) + '/refresh');
+  if (!r || r.__ok === false) { toast(errMsg(r, 'Discovery failed'), true); return; }
+  let models = r.catalog?.dynamic_chains?.coding_agentic || [];
+  let discovered = document.getElementById('discovered-models');
+  if (discovered && models.length) {
+    discovered.innerHTML = '<div style="margin-top:16px"><h4 style="font-size:13px;margin-bottom:8px">Discovered Models (' + models.length + ')</h4>' +
+      models.slice(0, 30).map(m => `<span class="badge accent" style="margin:2px">${esc(m)}</span>`).join('') +
+      (models.length > 30 ? `<span style="font-size:11px;color:var(--muted)"> +${models.length-30} more</span>` : '') +
+      '</div>';
+    toast('Discovered ' + models.length + ' models from ' + pid);
+  }
+}
+
 async function boot() {
   await loadD();
   if (ak()) {
     await loadM();
+    startSSE();
   }
 }
 

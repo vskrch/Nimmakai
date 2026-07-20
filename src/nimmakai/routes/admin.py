@@ -898,3 +898,116 @@ async def clear_all_preferences(request: Request) -> JSONResponse:
         )
     prefs.clear_all()
     return JSONResponse({"ok": True, "preferences": []})
+
+
+# ── Real-time Events (SSE) & Provider Health (NMK-504, 505) ─────────────
+
+
+@router.get("/admin/events")
+async def sse_events(request: Request):
+    """Server-Sent Events stream for live health/status updates (NMK-505)."""
+    import asyncio
+    from fastapi.responses import StreamingResponse
+
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+
+    async def event_generator():
+        import json
+        yield "event: connected\ndata: {}\n\n"
+        cycle = 0
+        while True:
+            await asyncio.sleep(10)
+            cycle += 1
+            hub = getattr(request.app.state, "hub", None)
+            registry = getattr(request.app.state, "registry", None)
+            stats = getattr(request.app.state, "routing_stats", None)
+            health_payload = {}
+            provider_health = {}
+            if hub:
+                for pid, rt in hub.runtimes.items():
+                    provider_health[pid] = {
+                        "enabled": rt.config.enabled,
+                        "runtime": hub.has_runtime(pid),
+                        "available_keys": rt.pool.available_count(),
+                    }
+            if registry and registry.live_ids:
+                for mid in list(registry.live_ids)[:50]:
+                    h = registry.health._by_model.get(mid)
+                    if h:
+                        health_payload[mid] = {
+                            "ok": not registry.health.is_unhealthy(mid),
+                            "tps": round(h.ewma_tok_per_s, 1) if h.ewma_tok_per_s > 0 else 0,
+                            "latency": round(h.ewma_latency, 2) if h.ewma_latency > 0 else 0,
+                            "error_rate": round(h.error_rate, 2),
+                        }
+            payload = {
+                "cycle": cycle,
+                "live_models": len(registry.live_ids) if registry else 0,
+                "active_providers": len(hub.active_provider_ids()) if hub else 0,
+                "fallback_advances": stats.fallback_advances if stats else 0,
+                "provider_health": provider_health,
+                "model_health": health_payload,
+            }
+            yield f"event: health\ndata: {json.dumps(payload)}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.get("/admin/health/providers")
+async def provider_health_view(request: Request) -> JSONResponse:
+    """Per-provider aggregated health data (NMK-403/504)."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    hub = getattr(request.app.state, "hub", None)
+    registry = getattr(request.app.state, "registry", None)
+    if not hub or not registry:
+        return JSONResponse({"providers": {}})
+
+    providers: dict[str, dict] = {}
+    for pid, rt in hub.runtimes.items():
+        model_ids = {m for m in registry.live_ids if m.split("/")[0] == pid}
+        health_agg = registry.health.provider_health(model_ids, pid)
+        model_details: dict[str, dict] = {}
+        for mid in sorted(model_ids)[:30]:
+            h = registry.health._by_model.get(mid)
+            if h:
+                model_details[mid] = {
+                    "ok": not registry.health.is_unhealthy(mid),
+                    "ewma_latency_s": round(h.ewma_latency, 3),
+                    "ewma_tok_per_s": round(h.ewma_tok_per_s, 1),
+                    "success_count": h.success_count,
+                    "error_count": h.error_count,
+                    "error_rate": round(h.error_rate, 3),
+                    "cooldown": h.in_cooldown(),
+                }
+        cb_state = hub.circuit_breaker.state(pid).value
+        providers[pid] = {
+            "enabled": rt.config.enabled,
+            "runtime": hub.has_runtime(pid),
+            "aggregate_health": round(health_agg, 3),
+            "circuit_breaker": cb_state,
+            "model_count": len(model_ids),
+            "available_keys": rt.pool.available_count(),
+            "models": model_details,
+        }
+    return JSONResponse({"providers": providers})
+
+
+@router.get("/admin/trace/{request_id}")
+async def request_trace(request_id: str, request: Request) -> JSONResponse:
+    """Request trace view — full routing decision breakdown (NMK-506)."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    from nimmakai.logging_setup import request_logs
+    entries = request_logs.list(limit=200)
+    matching = [e for e in entries if e.get("req") == request_id]
+    return JSONResponse({
+        "request_id": request_id,
+        "entries": matching,
+        "hint": "Returns all log entries for the given request_id",
+    })
