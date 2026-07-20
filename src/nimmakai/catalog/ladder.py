@@ -348,6 +348,8 @@ class LadderService:
         self.live_ids: set[str] = set()
         # Capability hints learned from probes / docs: model_id → flags
         self.capabilities: dict[str, dict[str, bool]] = {}
+        # Quality score overrides for custom/explicit models (NMK-104)
+        self.quality_overrides: dict[str, float] = {}
         # Overridable from config/models.yaml
         self.provider_ids: set[str] = {"nim"}
         # Sticky rankings: freeze after precompute until explicit refresh
@@ -568,7 +570,7 @@ class LadderService:
                 return ScoredModel(model_id, -1e9, reasons=["nemotron_non_chat"])
 
         # ── 1. Benchmark quality ─────────────────────────────────
-        quality = self._base_quality(mid)
+        quality = self._base_quality(mid, model_id)
         reasons.append(f"quality={quality:.0f}")
 
         # ── 2. Intent affinity (multiplicative) ──────────────────
@@ -664,8 +666,12 @@ class LadderService:
             reasons=reasons,
         )
 
-    def _base_quality(self, mid_lower: str) -> float:
+    def _base_quality(self, mid_lower: str, model_id: str = "") -> float:
         """Look up benchmark quality from the tier table, fall back to param estimate."""
+        # Check explicit overrides (NMK-104)
+        override = self.quality_overrides.get(model_id)
+        if override is not None:
+            return float(override)
         for fam_re, size_re, quality in _QUALITY_COMPILED:
             if fam_re.search(mid_lower):
                 if size_re is None:
@@ -815,18 +821,17 @@ class LadderService:
         α = successes + 1 (optimistic prior)
         β = failures + 1
 
-        Returns a bonus in [-10, +10]. Early on (few samples) we blend the
-        posterior mean with a smaller random draw so ladders don't thrash
-        randomly in production while still exploring.
+        When frozen: use deterministic posterior mean so two identical startups
+        produce identical ladders. Random exploration only during unfrozen recompute.
         """
         alpha, beta = self.learning.thompson_params(intent, model_id)
         mean = alpha / (alpha + beta)
+        if self.frozen:
+            return (mean - 0.5) * 16.0
         sample = random.betavariate(alpha, beta)
         model_n = self.learning.model_requests(intent, model_id)
-        # More samples → trust the draw; cold models → lean on mean
         weight = min(1.0, model_n / 12.0)
         blended = weight * sample + (1.0 - weight) * mean
-        # Map [0, 1] → [-8, +8] (slightly tighter than before for stability)
         return (blended - 0.5) * 16.0
 
     def _doc_keyword_bonus(

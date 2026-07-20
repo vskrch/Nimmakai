@@ -80,7 +80,6 @@ def test_score_live_positive() -> None:
     reg = _FakeReg()
     s = score_model_live(
         "nim/deepseek-ai/deepseek-v4-pro",
-        sticky_chain=list(reg.live_ids),
         ladder_scores=None,
         health=reg.health,
         provider_ids=reg.ladder.provider_ids,

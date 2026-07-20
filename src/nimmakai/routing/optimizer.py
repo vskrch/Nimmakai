@@ -3,15 +3,16 @@ Continuous request-time optimizer: always pick best intelligence × speed.
 
 On every request (not just cache refresh):
 
-    score(m) = I(m)^α × S(m)^β × H(m)^γ × P(m)^δ
+    score(m) = quality_prior(m)^α × speed(m)^β × avail(m)^γ × provider(m)^δ
 
 where:
-  I = intelligence prior (sticky precomputed ladder score / rank)
-  S = live speed (EWMA tokens/s + inverse latency)
-  H = health / responding (cooldown → near 0)
-  P = provider speed prior (Zen, Groq, Cerebras, …)
+  quality_prior = ladder precomputed score normalized to (0, 1]
+  speed = live EWMA tokens/s + inverse latency
+  avail = health / responding (cooldown → near 0)
+  provider = provider speed prior (Zen, Groq, Cerebras, …)
 
-α,β,γ,δ favor coding: intelligence + speed dominate; dead models never lead.
+α dominates (0.55): a 95-quality model at 40 TPS beats an 80-quality at 120 TPS.
+Dead models never lead (availability gate near-zero).
 """
 
 from __future__ import annotations
@@ -25,35 +26,37 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Weights: capability (quality gate) + availability + low-latency dominate.
-# ponytail: efficiency = best coder that is up *right now* and answers fastest.
-_ALPHA_INTEL = 0.42
-_BETA_SPEED = 0.46
+# Weights: intelligence dominates for coding efficiency + low latency.
+# A 95-quality model at 40 TPS beats an 80-quality model at 120 TPS.
+_ALPHA_INTEL = 0.55
+_BETA_SPEED = 0.30
 _GAMMA_AVAIL = 0.12
-_DELTA_PROVIDER = 0.04
+_DELTA_PROVIDER = 0.03
 
 
-def _intelligence_prior(
+def _quality_prior(
     model_id: str,
     *,
-    sticky_chain: list[str],
     ladder_scores: dict[str, float] | None,
 ) -> float:
-    """Capability prior: narrow range so live speed+availability dominate.
+    """Quality prior from precomputed ladder scores, normalized to (0, 1].
 
-    ponytail: frozen rank position must never overpower a fast, available model
-    that isn't in the sticky chain yet. Range 0.65–1.0 keeps capability as a
-    quality gate while letting speed+availability decide the head.
+    Uses the ladder's actual composite score to preserve the full quality
+    spread. A 95-quality model maps to ~0.95, a 60-quality model to ~0.60.
+    Floor at 0.35 so weak models participate as deep fallbacks only.
     """
-    if ladder_scores:
-        if model_id in ladder_scores:
-            raw = float(ladder_scores[model_id])
-            return max(0.65, min(1.0, raw / 160.0))
-        return 0.70  # not in frozen ladder — neutral, speed decides
-    if model_id in sticky_chain:
-        rank = sticky_chain.index(model_id)
-        return max(0.65, 1.0 / (1.0 + 0.06 * rank))
-    return 0.70  # no ladder at all — neutral, speed decides
+    if not ladder_scores:
+        return 0.70
+    raw = ladder_scores.get(model_id)
+    if raw is None:
+        return 0.70
+    raw = float(raw)
+    if raw <= 0:
+        return 0.50
+    max_score = max(ladder_scores.values())
+    if max_score <= 0:
+        return 0.65
+    return max(0.35, min(1.0, raw / max_score))
 
 
 def _speed_factor(health: Any, model_id: str) -> float:
@@ -123,35 +126,25 @@ def _availability_factor(health: Any, model_id: str) -> float:
 def score_model_live(
     model_id: str,
     *,
-    sticky_chain: list[str],
     ladder_scores: dict[str, float] | None,
     health: Any,
     provider_ids: set[str],
 ) -> float:
     """Single composite score for continuous ranking."""
     if health is not None and health.is_unhealthy(model_id):
-        # Still rank cold models, but far below anything live
-        return 1e-6 * _intelligence_prior(
-            model_id, sticky_chain=sticky_chain, ladder_scores=ladder_scores
-        )
+        return 1e-6 * _quality_prior(model_id, ladder_scores=ladder_scores)
 
-    intel = _intelligence_prior(
-        model_id, sticky_chain=sticky_chain, ladder_scores=ladder_scores
-    )
+    intel = _quality_prior(model_id, ladder_scores=ladder_scores)
     speed = _speed_factor(health, model_id)
     avail = _availability_factor(health, model_id)
     prov = _provider_factor(model_id, provider_ids)
 
-    # Geometric combination — no zeros unless unhealthy handled above
     score = (
         (intel**_ALPHA_INTEL)
         * (speed**_BETA_SPEED)
         * (avail**_GAMMA_AVAIL)
         * (prov**_DELTA_PROVIDER)
     )
-    # Tiny sticky tie-break so equal scores keep quality order
-    if model_id in sticky_chain:
-        score += 1e-6 * (len(sticky_chain) - sticky_chain.index(model_id))
     return score
 
 
@@ -186,7 +179,6 @@ def optimize_chain(
     for mid in sticky:
         s = score_model_live(
             mid,
-            sticky_chain=sticky,
             ladder_scores=ladder_scores,
             health=health,
             provider_ids=provider_ids,
@@ -221,14 +213,11 @@ def explain_top(
 
     rows = []
     for mid in sticky[: max(n * 3, 12)]:
-        intel = _intelligence_prior(
-            mid, sticky_chain=sticky, ladder_scores=ladder_scores
-        )
+        intel = _quality_prior(mid, ladder_scores=ladder_scores)
         speed = _speed_factor(health, mid)
         hs = health.health_score(mid) if health else 1.0
         total = score_model_live(
             mid,
-            sticky_chain=sticky,
             ladder_scores=ladder_scores,
             health=health,
             provider_ids=provider_ids,

@@ -57,12 +57,24 @@ class RoutingStats:
     model_tokens: dict[str, TokenStats] = field(default_factory=dict)
     key_tokens: dict[str, TokenStats] = field(default_factory=dict)
     fallback_advances: int = 0
+    # Adaptive ranking: track last 50 requests' advance status (NMK-304)
+    _recent_advances: list[bool] = field(default_factory=list)
+    _max_advances_track: int = 50
 
     def record(self, intent: str, model: str, advanced: bool) -> None:
         self.intents_total[intent] = self.intents_total.get(intent, 0) + 1
         self.models_total[model] = self.models_total.get(model, 0) + 1
         if advanced:
             self.fallback_advances += 1
+        self._recent_advances.append(advanced)
+        if len(self._recent_advances) > self._max_advances_track:
+            self._recent_advances = self._recent_advances[-self._max_advances_track:]
+
+    def should_rerank(self) -> bool:
+        """True when >30% of recent requests advanced → rankings may be stale."""
+        if len(self._recent_advances) < 20:
+            return False
+        return sum(self._recent_advances) / len(self._recent_advances) > 0.30
 
     def record_tokens(self, model: str, key_id: str | None, in_tok: int, out_tok: int) -> None:
         if model not in self.model_tokens:
@@ -594,6 +606,11 @@ class FallbackExecutor:
                 ttft = float(
                     getattr(self.settings, "stream_ttft_timeout_seconds", 12.0) or 12.0
                 )
+                # Adaptive TTFT: fast models fail over faster (NMK-405)
+                h = self.registry.health._by_model.get(model)
+                if h is not None and h.ewma_latency > 0:
+                    base_ttft = h.ewma_latency * 2.0 + 3.0
+                    ttft = min(ttft, max(3.0, base_ttft))
                 idle = float(
                     getattr(self.settings, "stream_idle_timeout_seconds", 180.0) or 180.0
                 )

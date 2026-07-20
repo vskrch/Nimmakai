@@ -342,7 +342,7 @@ class ModelSelector:
         # best on capability × availability × latency.
         if intent_key == "coding_agentic":
             seen = set(chain)
-            for m in self.registry.coding_candidates():
+            for m in self.registry.coding_candidates()[:20]:
                 if m not in seen:
                     chain = chain + [m]
                     seen.add(m)
@@ -353,15 +353,7 @@ class ModelSelector:
         chain = filter_chain(
             chain, allowed_models=allowed or None, free_only=free_only
         )
-        # Session model pin (OpenRouter sticky routing)
+        # Session model pin (OpenRouter sticky routing) — pin once after ranking
         if preferred_model:
             chain = pin_model_first(chain, preferred_model)
-            chain = self.registry.health_reorder(
-                chain, intent=intent_key, variant=variant
-            )
-            # Re-pin after health reorder so sticky model stays head if healthy
-            if preferred_model and not self.registry.health.is_unhealthy(
-                preferred_model
-            ):
-                chain = pin_model_first(chain, preferred_model)
         return chain

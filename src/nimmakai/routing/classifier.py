@@ -39,6 +39,19 @@ REASONING_KEYWORDS = re.compile(
 
 CODE_FENCE_RE = re.compile(r"```")
 
+# Code-language keywords for stronger coding detection (NMK-202)
+CODE_KEYWORDS_RE = re.compile(
+    r"\b(import\s+\w+|from\s+\w+\s+import|function\s+\w+|class\s+\w+|"
+    r"def\s+\w+|return\s|const\s+\w+|let\s+\w+|var\s+\w+|"
+    r"async\s+(function|def|fn)|await\s|try\s*[{:]|catch\s*[(]|"
+    r"#include\s*[<\"]|package\s+\w+|interface\s+\w+|"
+    r"public\s+(class|interface|void|static)|private\s+\w+|"
+    r"protected\s+\w+|export\s+(default\s+)?|use\s+(strict|state|effect|"
+    r"callback|memo|ref|context)|fmt\.\w+|log\.\w+|impl\s+\w+|"
+    r"(diff|patch|refactor|debug|fix|implement|test)\s+)",
+    re.I,
+)
+
 
 class _LRUCache:
     def __init__(self, max_size: int = 256, ttl: float = 600.0) -> None:
@@ -135,6 +148,7 @@ class IntentClassifier:
             )
 
         model = fast_model or "google/gemma-4-31b-it"
+        # NMK-204: caller already passes fastest chat_fast model from chain
         try:
             intent = await self._llm_classify(upstream, model, body, base.features)
             if intent is not None:
@@ -204,6 +218,8 @@ class IntentClassifier:
             "agent_fingerprint": agent_hit,
             "char_len": char_len,
             "message_count": len(messages),
+            "avg_chars_per_msg": char_len / max(1, len(messages)),
+            "code_keywords": bool(CODE_KEYWORDS_RE.search(joined)),
             "last_user": last_user[:2000],
             "path": path,
             "reasoning_kw": bool(REASONING_KEYWORDS.search(last_user)),
@@ -231,6 +247,20 @@ class IntentClassifier:
             return self._result(
                 Intent.CODING_AGENTIC, 0.92, "agent_fingerprint", features
             )
+
+        # Code keywords with sufficient text → coding (NMK-202)
+        if features["code_keywords"] and features["char_len"] > short_chars:
+            return self._result(Intent.CODING_AGENTIC, 0.70, "code_keywords", features)
+
+        # NMK-203: use avg_chars_per_msg to avoid long multi-turn chats
+        # being misclassified as long_horizon
+        if features["avg_chars_per_msg"] > long_chars:
+            intent = (
+                Intent.CODING_AGENTIC
+                if features["has_tools"] or features["fence_count"]
+                else Intent.CHAT_FAST
+            )
+            return self._result(intent, 0.50, "long_per_msg", features)
 
         if features["char_len"] > long_chars:
             intent = (
@@ -264,8 +294,8 @@ class IntentClassifier:
         ):
             return self._result(Intent.CHAT_FAST, 0.7, "short_chat", features)
 
-        # Ambiguous chat → coding_agentic (design decision #12)
-        return self._result(Intent.CODING_AGENTIC, 0.55, "default_coding", features)
+        # Ambiguous → chat_fast (let optimizer handle if code signals appear later)
+        return self._result(Intent.CHAT_FAST, 0.45, "default_chat", features)
 
     @staticmethod
     def _result(

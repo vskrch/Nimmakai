@@ -14,6 +14,7 @@ from nimmakai.catalog.providers import (
     split_provider_model,
 )
 from nimmakai.config import Settings
+from nimmakai.safety.circuit_breaker import ProviderCircuitBreaker
 from nimmakai.upstream import UpstreamClient
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ class ProviderHub:
         self.store = store
         self.settings = settings
         self.runtimes: dict[str, ProviderRuntime] = {}
+        self.circuit_breaker = ProviderCircuitBreaker()
 
     @property
     def provider_ids(self) -> set[str]:
@@ -126,9 +128,19 @@ class ProviderHub:
         )
         return rt
 
-    async def upsert_provider(self, cfg: ProviderConfig) -> dict[str, Any]:
+    async def upsert_provider(
+        self, cfg: ProviderConfig, registry: Any = None
+    ) -> dict[str, Any]:
         self.store.upsert(cfg)
         await self._ensure_runtime(self.store.providers[cfg.id.lower()])
+        # Immediate /models fetch into live pool (NMK-101)
+        if registry is not None and self.has_runtime(cfg.id):
+            try:
+                await registry.refresh_single_provider(
+                    cfg.id, self, recompute_rankings=True
+                )
+            except Exception:
+                logger.exception("immediate model fetch failed for provider %s", cfg.id)
         return self.store.providers[cfg.id.lower()].mask()
 
     async def remove_provider(self, provider_id: str) -> bool:
@@ -163,14 +175,21 @@ class ProviderHub:
         pid, upstream_mid = split_provider_model(
             model_id, self.provider_ids, default_provider="nim"
         )
+        # Circuit breaker: skip providers in open state (NMK-401)
+        if not self.circuit_breaker.allow(pid):
+            raise RuntimeError(
+                f"provider '{pid}' circuit is open — skipping model '{model_id}'"
+            )
         rt = self.runtimes.get(pid)
         if rt is not None and rt.config.enabled and rt.config.resolved_keys():
             return rt.upstream, pid, upstream_mid
 
         if rt is None or not rt.config.enabled:
+            self.circuit_breaker.fail(pid)
             raise RuntimeError(
                 f"provider '{pid}' is not available for model '{model_id}'"
             )
+        self.circuit_breaker.fail(pid)
         raise RuntimeError(
             f"provider '{pid}' has no API keys for model '{model_id}'"
         )

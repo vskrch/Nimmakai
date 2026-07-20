@@ -678,17 +678,12 @@ async def upsert_provider(request: Request) -> JSONResponse:
             status_code=400,
         )
 
-    masked = await hub.upsert_provider(cfg)
-    live_added = 0
+    # Register provider + immediately fetch its /models (NMK-101)
     if registry is not None:
         registry.ladder.provider_ids = set(hub.provider_ids)
-        # New provider models must re-enter sticky ranking cache
-        ok = await registry.refresh_from_hub(
-            hub, fetch_docs=False, run_probes=False, recompute_rankings=True
-        )
-        live_added = len(registry.live_ids)
-    else:
-        ok = True
+    masked = await hub.upsert_provider(cfg, registry=registry)
+    live_added = len(registry.live_ids) if registry else 0
+    ok = bool(registry and registry.live_ids)
     return JSONResponse(
         {
             "ok": True,
@@ -702,6 +697,62 @@ async def upsert_provider(request: Request) -> JSONResponse:
         }
     )
 
+
+@router.post("/admin/models/register")
+async def register_models(request: Request) -> JSONResponse:
+    """
+    Explicitly register models into the routing pool with quality overrides.
+
+    Body: {provider_id, models[], quality_override?, supports_tools?, supports_vision?}
+    """
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_proxy_auth(request, settings)
+    registry = getattr(request.app.state, "registry", None)
+    hub = getattr(request.app.state, "hub", None)
+    if registry is None:
+        return JSONResponse(
+            {"error": {"message": "Catalog not ready", "code": "nimmakai_not_ready"}},
+            status_code=503,
+        )
+    body: dict[str, Any] = await request.json()
+    provider_id = str(body.get("provider_id") or "").strip().lower()
+    models = body.get("models") if isinstance(body.get("models"), list) else []
+    if not provider_id or not models:
+        return JSONResponse(
+            {"error": {"message": "provider_id and models (list) required", "code": "invalid_request"}},
+            status_code=400,
+        )
+
+    from nimmakai.catalog.providers import namespace_model
+
+    quality_override = body.get("quality_override")
+    supports_tools = body.get("supports_tools")
+    supports_vision = body.get("supports_vision")
+
+    added: list[str] = []
+    for mid in models:
+        if not isinstance(mid, str) or not mid.strip():
+            continue
+        ns = namespace_model(provider_id, mid.strip())
+        registry.live_ids.add(ns)
+        added.append(ns)
+
+        if quality_override is not None and isinstance(quality_override, (int, float)):
+            registry.ladder.quality_overrides[ns] = float(quality_override)
+        if supports_tools is not None:
+            registry.ladder.set_capability(ns, supports_tools=bool(supports_tools))
+        if supports_vision is not None:
+            registry.ladder.set_capability(ns, supports_vision=bool(supports_vision))
+
+    registry.ladder.provider_ids.add(provider_id)
+    registry.recompute_rankings(persist=True)
+
+    return JSONResponse({
+        "ok": True,
+        "added": added,
+        "live_model_count": len(registry.live_ids),
+        "message": f"Registered {len(added)} model(s) from provider '{provider_id}'",
+    })
 
 @router.delete("/admin/providers/{provider_id}")
 async def delete_provider(provider_id: str, request: Request) -> JSONResponse:

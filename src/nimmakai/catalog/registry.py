@@ -661,6 +661,58 @@ class ModelRegistry:
         self._persist_snapshot()
         return self.last_refresh_ok
 
+    async def refresh_single_provider(
+        self, provider_id: str, hub: Any, *, recompute_rankings: bool = True
+    ) -> bool:
+        """Fetch /models from one provider and merge into live_ids immediately."""
+        from nimmakai.catalog.providers import namespace_model
+
+        rt = hub.runtimes.get(provider_id.lower())
+        if rt is None or not rt.config.enabled:
+            logger.warning("provider %s has no active runtime — skip fetch", provider_id)
+            return False
+
+        try:
+            status, body, _h, _k = await rt.upstream.request_json("GET", "/models")
+            if status >= 400 or not isinstance(body, dict):
+                logger.warning("provider %s /models → HTTP %s", provider_id, status)
+                return False
+            data = body.get("data")
+            if not isinstance(data, list):
+                return False
+            pid = provider_id.lower()
+            new_ids: set[str] = set()
+            namespaced_items: list[dict] = []
+            whitelist = rt.config.model_whitelist
+            blacklist = rt.config.model_blacklist
+            for item in data:
+                if not isinstance(item, dict) or not item.get("id"):
+                    continue
+                upstream_id = str(item["id"])
+                # Per-provider model whitelist/blacklist (NMK-103)
+                low_uid = upstream_id.lower()
+                if blacklist and any(b.lower() in low_uid for b in blacklist):
+                    continue
+                if whitelist and not any(w.lower() in low_uid for w in whitelist):
+                    continue
+                ns = namespace_model(pid, upstream_id)
+                new_ids.add(ns)
+                namespaced_items.append({**item, "id": ns})
+            self._ingest_context_from_api_items(namespaced_items)
+            self.live_ids |= new_ids
+            logger.info(
+                "provider %s imported %s model(s) into live pool (total=%s)",
+                pid, len(new_ids), len(self.live_ids),
+            )
+        except Exception:
+            logger.exception("provider %s catalog fetch failed", provider_id)
+            return False
+
+        if recompute_rankings:
+            self._rebuild_all_chains()
+        self._persist_snapshot()
+        return True
+
     async def refresh_from_hub(
         self,
         hub: Any,
@@ -702,6 +754,18 @@ class ModelRegistry:
                     if not isinstance(item, dict) or not item.get("id"):
                         continue
                     upstream_id = str(item["id"])
+                    # Per-provider model whitelist/blacklist (NMK-103)
+                    whitelist = rt.config.model_whitelist
+                    blacklist = rt.config.model_blacklist
+                    low_uid = upstream_id.lower()
+                    if blacklist and any(
+                        b.lower() in low_uid for b in blacklist
+                    ):
+                        continue
+                    if whitelist and not any(
+                        w.lower() in low_uid for w in whitelist
+                    ):
+                        continue
                     ns = namespace_model(pid, upstream_id)
                     merged.add(ns)
                     namespaced_items.append({**item, "id": ns})

@@ -202,6 +202,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                 force=empty,
                             )
                             last_heal = now
+                            # NMK-304: auto-rerank when fallback rate is high
+                            if routing_stats.should_rerank() and not empty:
+                                try:
+                                    registry.recompute_rankings(persist=True)
+                                    logger.info(
+                                        "adaptive rerank: %.0f%% recent fallback advances",
+                                        sum(routing_stats._recent_advances)
+                                        / len(routing_stats._recent_advances)
+                                        * 100,
+                                    )
+                                except Exception:
+                                    logger.exception("adaptive rerank failed")
                             if report.get("healed_models") or report.get("refreshed"):
                                 logger.info("self-heal: %s", report)
                         except Exception:

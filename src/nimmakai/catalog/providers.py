@@ -51,6 +51,9 @@ class ProviderConfig:
     api_style: str = "openai"  # phase 1: openai only
     # When true, this is the built-in NIM provider (env NIM_* wins)
     builtin: bool = False
+    # Per-provider model filters (NMK-103)
+    model_whitelist: list[str] = field(default_factory=list)
+    model_blacklist: list[str] = field(default_factory=list)
 
     def resolved_keys(self) -> list[str]:
         keys = [k.strip() for k in self.api_keys if k and str(k).strip()]

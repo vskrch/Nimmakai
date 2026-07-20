@@ -27,10 +27,12 @@ async def heal_and_refresh(
         "refreshed": False,
         "live_models": 0,
         "active_providers": 0,
+        "restored_providers": 0,
     }
     if registry is not None and hasattr(registry, "health"):
         report["healed_models"] = registry.health.expire_stale_cooldowns()
 
+    restored_providers: list[str] = []
     if hub is not None:
         # Re-ensure runtimes for enabled providers that dropped out
         for cfg in list(hub.store.providers.values()):
@@ -43,9 +45,11 @@ async def heal_and_refresh(
             try:
                 await hub._ensure_runtime(cfg)
                 logger.info("self-heal: restored runtime for provider %s", cfg.id)
+                restored_providers.append(cfg.id)
             except Exception:
                 logger.exception("self-heal: failed to restore provider %s", cfg.id)
         report["active_providers"] = len(hub.active_provider_ids())
+        report["restored_providers"] = len(restored_providers)
 
     need_refresh = force
     if registry is not None:
@@ -67,6 +71,18 @@ async def heal_and_refresh(
             )
         except Exception:
             logger.exception("self-heal catalog refresh failed")
+
+    # NMK-402: If providers were restored, recompute rankings so their models
+    # immediately participate in routing.
+    if restored_providers and registry is not None and registry.live_ids:
+        try:
+            registry.recompute_rankings(persist=True)
+            logger.info(
+                "self-heal: recomputed rankings after restoring %s provider(s)",
+                len(restored_providers),
+            )
+        except Exception:
+            logger.exception("self-heal: ranking recompute failed")
 
     return report
 
