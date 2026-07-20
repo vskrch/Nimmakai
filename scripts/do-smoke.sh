@@ -10,6 +10,15 @@ test -f docker-compose.do.yml
 test -f docs/digitalocean.md
 test -f frontend/package-lock.json
 test -f .github/workflows/deploy-digitalocean.yml
+test -x scripts/generate-do-userdata.sh
+
+echo "==> Generating sample userdata (non-interactive)"
+tmp_ud="$(mktemp)"
+NONINTERACTIVE=1 PROXY_API_KEYS=sk-smoke-test \
+  ./scripts/generate-do-userdata.sh -o "$tmp_ud"
+grep -q 'docker compose -f docker-compose.do.yml up -d --build' "$tmp_ud"
+grep -q 'base64 -d' "$tmp_ud"
+rm -f "$tmp_ud"
 
 echo "==> Validating app.yaml has deploy_on_push"
 grep -q 'deploy_on_push: true' .do/app.yaml

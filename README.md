@@ -788,6 +788,7 @@ uv run nimmakai
 │   ├── models.yaml              # Model aliases + intent chains + family policy
 │   └── providers.yaml           # Provider definitions
 ├── docs/
+│   ├── digitalocean.md          # App Platform + Droplet one-click deploy
 │   ├── integration.md           # OpenAI drop-in integration guide
 │   └── design-intelligent-router.md  # Full design document
 ├── src/nimmakai/
@@ -847,7 +848,11 @@ uv run nimmakai
 │   ├── test_providers.py
 │   ├── test_safety.py
 │   └── test_selector.py
+├── scripts/
+│   ├── generate-do-userdata.sh  # Interactive → DO Droplet User data (one-click)
+│   └── do-smoke.sh              # Local Docker smoke for DO artifacts
 ├── .env.example                 # Example environment
+├── docker-compose.do.yml        # Droplet Compose (port 80 + persistent volume)
 ├── pyproject.toml               # Dependencies + project metadata
 └── LICENSE                      # MIT
 ```
@@ -948,25 +953,68 @@ The dashboard is at `https://your-nimmakai-name.herokuapp.com/dashboard`.
 
 ## Deploy on DigitalOcean
 
-**Recommended for GitHub Student credits** (~$10–12/mo). Push to `main` → App Platform rebuilds (Heroku-style).
-
 Full guide: **[docs/digitalocean.md](docs/digitalocean.md)**
 
-Quick path:
+| Path | Cost | Persistence | Best for |
+|------|------|-------------|----------|
+| **Droplet + one-click userdata** | ~$6/mo | Durable SQLite volume | Analytics, dashboard providers, simplest “paste & go” |
+| App Platform (Heroku-style) | ~$10/mo | Ephemeral disk | Push-to-`main` auto-deploy |
 
-1. Redeem DigitalOcean credits from [GitHub Student Pack](https://education.github.com/pack).
-2. [Create App](https://cloud.digitalocean.com/apps/new) → connect this GitHub repo → **Dockerfile**.
-3. Size: **1 vCPU / 1 GiB fixed** (~$10/mo). HTTP port **8080**.
-4. Set encrypted env: `PROXY_API_KEYS`, provider `*_API_KEYS`, `ALLOW_INSECURE_AUTH=false`.
-5. Push to `main` for auto-redeploy. Optional: `.github/workflows/deploy-digitalocean.yml` + `DIGITALOCEAN_*` secrets.
+Redeem [GitHub Student Pack](https://education.github.com/pack) DigitalOcean credits first when available.
+
+### One-click Droplet (recommended for persistence)
+
+On your laptop, run the interactive generator. It prompts for keys, then writes a **single User data script** you paste into droplet creation — the droplet clones this repo, builds Docker, and serves on port 80.
+
+```bash
+chmod +x scripts/generate-do-userdata.sh
+./scripts/generate-do-userdata.sh
+# → writes ./nimmakai-droplet-userdata.sh  (gitignored; contains secrets)
+```
+
+Then in DigitalOcean:
+
+1. [Create Droplet](https://cloud.digitalocean.com/droplets/new)
+2. **Image**: Marketplace → **Docker on Ubuntu**
+3. **Size**: Basic **s-1vcpu-1gb** (~$6)
+4. **SSH key** auth
+5. **Advanced** → **User data** → paste the **entire** contents of `nimmakai-droplet-userdata.sh`
+6. Create → wait **5–10 minutes** for the first image build
+7. Open `http://YOUR_DROPLET_IP/health` or SSH and `cat /root/NIMMAKAI-READY.txt`
+
+Cursor / agents:
+
+```
+Base URL:  http://YOUR_DROPLET_IP/v1
+API Key:   <PROXY_API_KEYS from the generator output>
+Model:     nimmakai/auto
+```
+
+Compose file used on the droplet: [`docker-compose.do.yml`](docker-compose.do.yml) (host **80→8080**, volume `nimmakai-data`).
+
+Updates later:
+
+```bash
+ssh root@YOUR_DROPLET_IP
+cd /opt/nimmakai && git pull && docker compose -f docker-compose.do.yml up -d --build
+```
+
+⚠ User data embeds secrets (visible via DO API/metadata). Keep the generated file out of git (already gitignored). Rotate keys if it leaks.
+
+### App Platform (push-to-deploy)
+
+1. [Create App](https://cloud.digitalocean.com/apps/new) → connect this GitHub repo → **Dockerfile**.
+2. Size: **1 vCPU / 1 GiB fixed** (~$10/mo). HTTP port **8080**.
+3. Encrypted env: `PROXY_API_KEYS`, provider `*_API_KEYS`, `ALLOW_INSECURE_AUTH=false`.
+4. Push to `main` for auto-redeploy. Optional: `.github/workflows/deploy-digitalocean.yml` + `DIGITALOCEAN_*` secrets.
+
+App spec: [`.do/app.yaml`](.do/app.yaml)
 
 ```bash
 # Local image smoke test
 docker build -t nimmakai:local .
 docker run --rm -p 8080:8080 -e PROXY_API_KEYS=sk-test -e ALLOW_INSECURE_AUTH=false nimmakai:local
 ```
-
-App spec template: [`.do/app.yaml`](.do/app.yaml) · persistent SQLite alternative: [`docker-compose.do.yml`](docker-compose.do.yml) on a $6 Droplet.
 
 ---
 

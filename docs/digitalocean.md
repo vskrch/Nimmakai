@@ -12,7 +12,7 @@ GitHub Student Pack often includes **DigitalOcean credits** (redeem at [Educatio
 |--------|---------|-------------|----------|
 | **App Platform** `apps-s-1vcpu-1gb-fixed` | **~$10** | Ephemeral disk (keys via env) | Heroku-like one-click, recommended |
 | App Platform `apps-s-1vcpu-1gb` | **$12** | Ephemeral | Same + manual scaling |
-| Droplet `s-1vcpu-1gb` + Docker | **~$6** | Persistent volume | Durable SQLite / analytics |
+| **Droplet** `s-1vcpu-1gb` + Docker | **~$6** | Persistent volume | Durable SQLite / analytics — use **one-click userdata** (`scripts/generate-do-userdata.sh`) |
 | App Platform 512 MiB | **$5** | Ephemeral | Tight budget (may OOM under load) |
 
 **Do not** add a Managed Postgres ($7+) on the $12 plan — Nimmakai uses SQLite. App Platform **does not support volumes**, so SQLite is wiped on every redeploy. Put all provider keys in encrypted env vars so the app rehydrates cleanly.
@@ -98,6 +98,38 @@ Model:     nimmakai/auto
 
 Use when you need analytics / dashboard-added providers to survive redeploys.
 Compose file: `docker-compose.do.yml` (maps host **80 → 8080**, volume `nimmakai-data` → `/data`).
+
+### B0. One-click User data (fastest)
+
+Generate a paste-ready bootstrap script on your laptop (prompts for keys, embeds them as base64):
+
+```bash
+./scripts/generate-do-userdata.sh
+# writes ./nimmakai-droplet-userdata.sh  (gitignored)
+```
+
+Then [Create Droplet](https://cloud.digitalocean.com/droplets/new):
+
+| Setting | Value |
+|---------|--------|
+| Image | Marketplace → **Docker on Ubuntu** |
+| Size | Basic **s-1vcpu-1gb** (~$6) |
+| Auth | SSH key |
+| User data | Paste **entire** `nimmakai-droplet-userdata.sh` |
+
+Wait 5–10 minutes → `http://YOUR_IP/health` or `cat /root/NIMMAKAI-READY.txt` over SSH.
+
+Non-interactive (CI / scripting):
+
+```bash
+NONINTERACTIVE=1 \
+  PROXY_API_KEYS=sk-your-key \
+  NIM_API_KEYS=nvapi-... \
+  GROQ_API_KEYS=gsk-... \
+  ./scripts/generate-do-userdata.sh -o /tmp/nimmakai-userdata.sh
+```
+
+Manual SSH steps below (B1+) are the same outcome without user data.
 
 ### B1. Redeem credits & create the Droplet
 

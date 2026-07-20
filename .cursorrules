@@ -1,16 +1,20 @@
 # Scratchpad
 
 ## Current task
-Document end-to-end DigitalOcean **Droplet** deploy (Path B) — expand `docs/digitalocean.md`
+One-click DigitalOcean Droplet userdata generator + README/docs — COMPLETE
 
 ## Plan
-- [X] Read existing Path B + `docker-compose.do.yml` / `.env.example`
-- [X] Expand Path B into B1–B10 end-to-end steps
-- [X] Give user concise walkthrough in chat
+- [X] `scripts/generate-do-userdata.sh` — interactive prompts → paste-ready User data
+- [X] README Deploy section: Droplet one-click first, then App Platform
+- [X] `docs/digitalocean.md` B0 one-click section
+- [X] gitignore generated userdata; do-smoke checks generator
+- [X] Non-interactive smoke: generate + bash -n + decode .env
 
 ## Design decisions
-- Droplet path: Docker Marketplace image, compose maps 80→8080, volume `nimmakai-data`
-- Prefer SSH key auth; HTTPS via optional Caddy; App Platform remains Path A
+- Secrets embedded as base64 in userdata (safe from shell metacharacters)
+- Install dir `/opt/nimmakai`; ready file `/root/NIMMAKAI-READY.txt` + motd
+- Prefer Docker Marketplace image; script also installs Docker if missing
+- Generator default repo: https://github.com/vskrch/Nimmakai.git
 
 ## Lessons
 - .cursorrules can be overwritten by concurrent agent sessions — re-read before editing, merge don't clobber
@@ -26,3 +30,4 @@ Document end-to-end DigitalOcean **Droplet** deploy (Path B) — expand `docs/di
 - Global agent skills live in 4 dirs: ~/.claude/skills, ~/.agents/skills, ~/.config/opencode/skills, ~/.cursor/skills — keep copies in sync (verify with shasum). supercoder rewritten to v5 (98 lines, evidence-based verification, anti-rationalization table)
 - Explicit-model tests previously encoded buggy "best coder leads" behavior — F-08 requires pinned head first; update tests with the fix
 - Droplet compose publishes host port 80 (not 8080); data survives rebuilds via `nimmakai-data` volume
+- DO User data embeds secrets (visible via metadata/API) — gitignore generated scripts; warn to rotate

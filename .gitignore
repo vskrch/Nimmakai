@@ -18,6 +18,8 @@ ENV/
 .env.local
 .env.*.local
 *.pem
+nimmakai-droplet-userdata.sh
+*-droplet-userdata.sh
 
 # IDE / OS
 .idea/
