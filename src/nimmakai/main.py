@@ -323,10 +323,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers.setdefault("X-Request-Id", rid)
         return response
 
+    from fastapi.staticfiles import StaticFiles
+
+    # Serve Vite build assets (dist/) with aggressive caching
+    dist_path = Path(__file__).parent / "static" / "dist"
+    if dist_path.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(dist_path / "assets")), name="vite-assets")
+
     app.include_router(admin.router)
     app.include_router(openai.router)
 
     def _dashboard_html() -> HTMLResponse:
+        # Serve Vite build if available, fall back to legacy single-file dashboard
+        dist_index = Path(__file__).parent / "static" / "dist" / "index.html"
+        if dist_index.is_file():
+            return HTMLResponse(
+                content=dist_index.read_text(encoding="utf-8"),
+                headers={"Cache-Control": "no-cache"},
+            )
         html_path = Path(__file__).parent / "static" / "index.html"
         if html_path.is_file():
             return HTMLResponse(

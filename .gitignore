@@ -16,6 +16,7 @@ ENV/
 # Env / secrets
 .env
 .env.local
+.env.*.local
 *.pem
 
 # IDE / OS
@@ -29,14 +30,9 @@ ENV/
 .coverage
 htmlcov/
 .cache/
-
-.ruff_cache/
+.cursor/
+.claude/
 .cursorrules/
-.cursor/
-.claude/
-.cursor/
-.claude/
-.cursor/
 
 # UV / tooling
 uv.lock
@@ -47,3 +43,21 @@ logs/
 
 # Runtime catalog cache
 .nimmakai/
+
+# Node / frontend
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.pnpm-store/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+*.tsbuildinfo
+.turbo/
+
+# Frontend build output
+src/nimmakai/static/dist/
+frontend/node_modules/

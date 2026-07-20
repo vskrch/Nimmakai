@@ -166,6 +166,4 @@ async def test_free_providers_merge_and_route(multi_app):
 
             dash = await c.get("/dashboard")
             assert dash.status_code == 200
-            assert "preset-grid" in dash.text
-            assert "openPreset" in dash.text
-            assert "pool-bar" in dash.text
+            assert "Nimmakai" in dash.text

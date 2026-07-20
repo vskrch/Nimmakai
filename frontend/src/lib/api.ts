@@ -1,4 +1,4 @@
-function getAuthKey(): string {
+export function getAuthKey(): string {
   return localStorage.getItem('nk') || ''
 }
 
