@@ -1,33 +1,21 @@
 # Scratchpad
 
 ## Current task
-SUPERCODER — Implement analytics dashboard ADR (Deep track) — COMPLETE
+Prepare Nimmakai for DigitalOcean App Platform deploy + GitHub CI/CD (~$12/mo) — COMPLETE
 
 ## Plan
-- [X] Phase 1: Read ADR + map codebase
-- [X] Epic 1: analytics schema/models/writer/retention/cost
-- [X] Epic 2: Instrument openai + fallback span callbacks (wired into _chat_like)
-- [X] Epic 3: Analytics API routes
-- [X] Epic 4: SSE EventBus
-- [X] Epic 5: Dashboard UI (Analytics, Requests, Live, Intents, Cost)
-- [X] Epic 6: Export CSV/JSON + webhook + OTLP stub
-- [X] Epic 7: Tests + harden + verify suite (173 passed)
+- [X] Dockerfile (multi-stage: frontend + Python) — smoke tested healthy
+- [X] .do/app.yaml (App Platform, auto-deploy from GitHub)
+- [X] docs/digitalocean.md + README Deploy section
+- [X] GitHub Actions deploy-digitalocean.yml
+- [X] docker-compose.do.yml for persistent Droplet path
+- [X] scripts/do-smoke.sh
 
-## Design decisions
-- Reuse existing NimmakaiDB (WAL + lock) — migrate analytics DDL into same DB
-- Zero-overhead enqueue via put_nowait; batch writes in to_thread
-- Auth: require_proxy_auth on /analytics/* (SSE allows ?token=)
-- UI: React Vite frontend pages + rebuilt static/dist
-- Track: Deep (1-10 phases, 3-pass hardening)
-
-## Branches
-- `main` — uncommitted analytics work
+## Budget
+- Recommended: apps-s-1vcpu-1gb-fixed (~$10/mo)
+- No managed DB; App Platform = ephemeral SQLite (keys via env)
 
 ## Lessons
-- Spokenly MCP may be unavailable; supercoder says NEVER ASK — proceed autonomously
-- Backend analytics package was scaffolded but NOT wired into _chat_like (helpers unused + 5-tuple unpack bug) — always verify call sites
-- FastAPI union StreamingResponse|JSONResponse needs response_model=None
-- httpx ASGIClient streaming SSE hangs on teardown — avoid draining infinite streams in tests
-- RangePicker JSX must live in .tsx not .ts
-- Project venv is `.venv` (uv), not `venv`
-- Duplicate `[tool.pytest.ini_options]` in pyproject breaks pytest collection
+- App Platform does NOT support volumes — document ephemeral SQLite clearly
+- Hatch force-include of missing static/dist breaks local installs — copy dist post-pip in Docker instead
+- Colima must be started before docker build on this machine

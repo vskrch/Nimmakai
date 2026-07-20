@@ -24,6 +24,7 @@ Drop-in OpenAI-compatible proxy for NVIDIA NIM, Groq, Cerebras, Gemini, OpenRout
 - [Troubleshooting](#troubleshooting)
 - [Project Layout](#project-layout)
 - [Development](#development)
+- [Deploy on DigitalOcean](#deploy-on-digitalocean)
 - [License](#license)
 
 ---
@@ -927,6 +928,30 @@ The dashboard is at `https://your-nimmakai-name.herokuapp.com/dashboard`.
 - Runs via `gunicorn` with `uvicorn` workers for production concurrency
 - Persistent state (`.nimmakai/`) lives on the ephemeral filesystem and resets on each dyno restart — learning data resets are normal
 - For production use with persistent state across restarts, consider [Heroku Postgres](https://elements.heroku.com/addons/heroku-postgresql) or [Heroku Redis](https://elements.heroku.com/addons/heroku-redis)
+
+---
+
+## Deploy on DigitalOcean
+
+**Recommended for GitHub Student credits** (~$10–12/mo). Push to `main` → App Platform rebuilds (Heroku-style).
+
+Full guide: **[docs/digitalocean.md](docs/digitalocean.md)**
+
+Quick path:
+
+1. Redeem DigitalOcean credits from [GitHub Student Pack](https://education.github.com/pack).
+2. [Create App](https://cloud.digitalocean.com/apps/new) → connect this GitHub repo → **Dockerfile**.
+3. Size: **1 vCPU / 1 GiB fixed** (~$10/mo). HTTP port **8080**.
+4. Set encrypted env: `PROXY_API_KEYS`, provider `*_API_KEYS`, `ALLOW_INSECURE_AUTH=false`.
+5. Push to `main` for auto-redeploy. Optional: `.github/workflows/deploy-digitalocean.yml` + `DIGITALOCEAN_*` secrets.
+
+```bash
+# Local image smoke test
+docker build -t nimmakai:local .
+docker run --rm -p 8080:8080 -e PROXY_API_KEYS=sk-test -e ALLOW_INSECURE_AUTH=false nimmakai:local
+```
+
+App spec template: [`.do/app.yaml`](.do/app.yaml) · persistent SQLite alternative: [`docker-compose.do.yml`](docker-compose.do.yml) on a $6 Droplet.
 
 ---
 

@@ -1,0 +1,35 @@
+# Optional: run Nimmakai on a DigitalOcean Droplet ($6–12/mo) with persistent SQLite.
+# Use this when you need durable providers/analytics across redeploys.
+#
+#   doctl compute droplet create nimmakai --size s-1vcpu-1gb --image docker-20-04 ...
+#   scp / rsync this repo, then:
+#   docker compose -f docker-compose.do.yml up -d --build
+
+services:
+  nimmakai:
+    build: .
+    image: nimmakai:latest
+    ports:
+      - "80:8080"
+    env_file:
+      - .env
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      SQLITE_PATH: /data/nimmakai.db
+      CATALOG_SNAPSHOT_PATH: /data/catalog_snapshot.json
+      PROVIDERS_OVERLAY_PATH: /data/providers.json
+      SQLITE_SEED_FREE_PRESETS: "true"
+      ALLOW_INSECURE_AUTH: "false"
+    volumes:
+      - nimmakai-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  nimmakai-data:

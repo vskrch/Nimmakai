@@ -1,0 +1,111 @@
+# DigitalOcean App Platform — push-to-deploy (Heroku-style)
+#
+# Budget (~$10–12/mo):
+#   apps-s-1vcpu-1gb-fixed  → $10/mo  (recommended under $12 cap)
+#   apps-s-1vcpu-1gb        → $12/mo  (manual scale allowed)
+#
+# Create once:
+#   1. Redeem GitHub Student DigitalOcean credits
+#   2. doctl apps create --spec .do/app.yaml
+#      OR: Control Panel → Apps → Create → GitHub → this repo → Dockerfile
+#   3. Set encrypted secrets in the UI (PROXY_API_KEYS, NIM_API_KEYS, …)
+#
+# After that: every push to `main` rebuilds and redeploys automatically.
+#
+# NOTE: App Platform has NO persistent volumes. SQLite under /data is
+# ephemeral (wiped on redeploy). Put all API keys in env vars so providers
+# rehydrate. For durable SQLite, use the Droplet path in docs/digitalocean.md.
+
+name: nimmakai
+region: nyc
+
+features:
+  - buildpack-stack=ubuntu-22
+
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+
+ingress:
+  rules:
+    - component:
+        name: web
+      match:
+        path:
+          prefix: /
+
+services:
+  - name: web
+    dockerfile_path: Dockerfile
+    github:
+      # REPLACE with your fork / repo
+      repo: YOUR_GITHUB_USER/Nimmakai
+      branch: main
+      deploy_on_push: true
+    http_port: 8080
+    instance_count: 1
+    # $10/mo — stays under $12 budget with headroom for bandwidth overages
+    instance_size_slug: apps-s-1vcpu-1gb-fixed
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 30
+      period_seconds: 15
+      timeout_seconds: 5
+      success_threshold: 1
+      failure_threshold: 5
+    envs:
+      # ── Required (set encrypted values in DO UI or doctl) ─────────
+      - key: PROXY_API_KEYS
+        scope: RUN_TIME
+        type: SECRET
+        value: REPLACE_ME_PROXY_KEY
+      - key: NIM_API_KEYS
+        scope: RUN_TIME
+        type: SECRET
+        value: ""
+      # ── Optional free-tier provider keys ──────────────────────────
+      - key: OPENCODE_ZEN_API_KEYS
+        scope: RUN_TIME
+        type: SECRET
+        value: ""
+      - key: GROQ_API_KEYS
+        scope: RUN_TIME
+        type: SECRET
+        value: ""
+      - key: CEREBRAS_API_KEYS
+        scope: RUN_TIME
+        type: SECRET
+        value: ""
+      - key: OPENROUTER_API_KEYS
+        scope: RUN_TIME
+        type: SECRET
+        value: ""
+      # ── Runtime defaults ──────────────────────────────────────────
+      - key: ALLOW_INSECURE_AUTH
+        scope: RUN_TIME
+        value: "false"
+      - key: ROUTING_ENABLED
+        scope: RUN_TIME
+        value: "true"
+      - key: ANALYTICS_ENABLED
+        scope: RUN_TIME
+        value: "true"
+      - key: SQLITE_PATH
+        scope: RUN_TIME
+        value: "/data/nimmakai.db"
+      - key: CATALOG_SNAPSHOT_PATH
+        scope: RUN_TIME
+        value: "/data/catalog_snapshot.json"
+      - key: PROVIDERS_OVERLAY_PATH
+        scope: RUN_TIME
+        value: "/data/providers.json"
+      - key: SQLITE_SEED_FREE_PRESETS
+        scope: RUN_TIME
+        value: "true"
+      - key: LOG_LEVEL
+        scope: RUN_TIME
+        value: "info"
+      - key: HOST
+        scope: RUN_TIME
+        value: "0.0.0.0"
+      # PORT is injected by App Platform automatically
