@@ -102,3 +102,42 @@ def test_forced_header() -> None:
     )
     assert r.intent == Intent.REASONING
     assert r.rule_id == "forced_header"
+
+
+def test_agent_header_opencode() -> None:
+    c = IntentClassifier()
+    r = c.classify(
+        path="/v1/chat/completions",
+        body={"messages": [{"role": "user", "content": "hi"}]},
+        headers={"user-agent": "OpenCode/1.0 (agentic)"},
+    )
+    assert r.intent == Intent.CODING_AGENTIC
+    assert r.rule_id == "agent_header"
+    assert r.features["agent_header"] == "opencode"
+
+
+def test_agent_header_kiro() -> None:
+    c = IntentClassifier()
+    r = c.classify(
+        path="/v1/chat/completions",
+        body={"messages": [{"role": "user", "content": "hi"}]},
+        headers={"x-client-name": "kiro"},
+    )
+    assert r.intent == Intent.CODING_AGENTIC
+    assert r.rule_id == "agent_header"
+    assert r.features["agent_header"] == "kiro"
+
+
+def test_kiro_fingerprint() -> None:
+    c = IntentClassifier()
+    r = c.classify(
+        path="/v1/chat/completions",
+        body={
+            "messages": [
+                {"role": "system", "content": "You are Kiro, an agentic coding assistant."},
+                {"role": "user", "content": "refactor auth"},
+            ]
+        },
+    )
+    assert r.intent == Intent.CODING_AGENTIC
+    assert r.rule_id == "agent_fingerprint"

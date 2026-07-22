@@ -65,3 +65,37 @@ async def test_normalize_sse_stream_async() -> None:
     joined = b"".join(chunks)
     assert b'"content":"Hi"' in joined or b'"content": "Hi"' in joined
     assert b"[DONE]" in joined
+
+
+def test_normalize_json_keeps_tool_calls_empty_content() -> None:
+    body = {
+        "model": "x",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "reasoning_content": "thinking...",
+                    "tool_calls": [
+                        {"id": "t1", "type": "function", "function": {"name": "read_file"}}
+                    ],
+                }
+            }
+        ],
+    }
+    out = normalize_completion_json(body)
+    msg = out["choices"][0]["message"]
+    assert msg["content"] == ""
+    assert "tool_calls" in msg
+
+
+def test_transform_sse_keeps_tool_calls_empty_content() -> None:
+    raw = (
+        b'data: {"choices":[{"delta":{"content":"","reasoning_content":"thinking...",'
+        b'"tool_calls":[{"id":"t1","type":"function","function":{"name":"read_file"}}]}}]}\n'
+    )
+    out = transform_sse_bytes(raw, routed_model="nim/m")
+    payload = json.loads(out.split(b"data: ", 1)[1].strip())
+    delta = payload["choices"][0]["delta"]
+    assert delta["content"] == ""
+    assert "tool_calls" in delta

@@ -28,10 +28,31 @@ AGENT_FINGERPRINTS = (
     "opencode",
     "cline",
     "continue.dev",
+    "kiro",
+    "kiro ide",
+    "kiro editor",
+    "codeium",
+    "windsurf",
+    "cascade",
     # Phrase-level only — bare "cursor" false-positives on ordinary prose (T12)
     "cursor ide",
     "cursor rules",
     "composer in cursor",
+    "cursor agent",
+    "cursor composer",
+)
+
+# Agent client signatures in User-Agent or custom headers (lowercase).
+# Used for a cheap, body-size-independent agent-mode detection.
+AGENT_HEADER_SIGNS = (
+    "cursor",
+    "opencode",
+    "cline",
+    "continue.dev",
+    "kiro",
+    "codeium",
+    "windsurf",
+    "cascade",
 )
 
 REASONING_KEYWORDS = re.compile(
@@ -111,6 +132,18 @@ class IntentClassifier:
                 except ValueError:
                     pass
 
+            # Cheap header-based agent detection before body scan (F-12)
+            agent_header = self._detect_agent_header(headers)
+            if agent_header:
+                result = self._result(
+                    Intent.CODING_AGENTIC,
+                    0.90,
+                    "agent_header",
+                    {"agent_header": agent_header},
+                )
+                self.stats[result.intent.value] = self.stats.get(result.intent.value, 0) + 1
+                return result
+
         path_l = path.lower()
         if path_l.endswith("/embeddings") or "/embeddings" in path_l:
             return self._result(Intent.EMBEDDINGS, 1.0, "path_embeddings", {})
@@ -144,6 +177,26 @@ class IntentClassifier:
         result = self._rules(features, path_l)
         self.stats[result.intent.value] = self.stats.get(result.intent.value, 0) + 1
         return result
+
+    def _detect_agent_header(self, headers: Any) -> str | None:
+        """Return the matched agent sign if User-Agent or x-*-client looks agentic."""
+        if not hasattr(headers, "get"):
+            return None
+        candidates = [
+            headers.get("user-agent") or "",
+            headers.get("User-Agent") or "",
+            headers.get("x-client") or "",
+            headers.get("X-Client") or "",
+            headers.get("x-client-name") or "",
+            headers.get("X-Client-Name") or "",
+            headers.get("x-cursor-chat-id") or "",
+            headers.get("X-Cursor-Chat-Id") or "",
+        ]
+        joined = "\n".join(str(c) for c in candidates if c).lower()
+        for sign in AGENT_HEADER_SIGNS:
+            if sign in joined:
+                return sign
+        return None
 
     async def classify_maybe_llm(
         self,

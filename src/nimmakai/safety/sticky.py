@@ -131,7 +131,16 @@ class StickySessionStore:
         if explicit:
             return explicit
 
-        chat_id = _h("x-cursor-chat-id") or _h("x-chat-id")
+        chat_id = (
+            _h("x-cursor-chat-id")
+            or _h("x-chat-id")
+            or _h("x-opencode-session")
+            or _h("x-cline-session")
+            or _h("x-kiro-session")
+            or _h("x-codeium-session")
+            or _h("x-windsurf-session")
+            or _h("x-cascade-session")
+        )
         if chat_id:
             basis = f"{proxy_token or 'anon'}:{chat_id}"
             return hashlib.sha256(basis.encode()).hexdigest()[:32]

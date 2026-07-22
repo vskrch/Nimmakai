@@ -97,13 +97,18 @@ def sanitize_chat_body(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_message_dict(msg: dict[str, Any]) -> dict[str, Any]:
-    """Ensure assistant message has ``content`` when only reasoning was returned."""
+    """Ensure assistant message has ``content`` when only reasoning was returned.
+
+    Skip mirroring when the message already carries tool_calls / function_call
+    so agent clients see a clean tool delta instead of reasoning text mixed in.
+    """
     if not isinstance(msg, dict):
         return msg
     content = msg.get("content")
     reasoning = msg.get("reasoning_content") or msg.get("reasoning")
     empty_content = content in (None, "", [])
-    if empty_content and isinstance(reasoning, str) and reasoning:
+    has_tools = msg.get("tool_calls") or msg.get("function_call")
+    if empty_content and not has_tools and isinstance(reasoning, str) and reasoning:
         msg = {**msg, "content": reasoning}
     # Keep reasoning_content for advanced clients; Cursor ignores it
     return msg
@@ -140,11 +145,12 @@ def _normalize_delta(delta: dict[str, Any]) -> dict[str, Any]:
     content = d.get("content")
     reasoning = d.get("reasoning_content") or d.get("reasoning")
     empty = content in (None, "")
-    if empty and isinstance(reasoning, str) and reasoning:
+    has_tools = d.get("tool_calls") or d.get("function_call")
+    if empty and not has_tools and isinstance(reasoning, str) and reasoning:
         # Cursor only renders content — mirror reasoning into content
         d["content"] = reasoning
     # Ensure role on first useful delta (Cursor OpenAI client)
-    if d.get("content") and "role" not in d:
+    if (d.get("content") or d.get("tool_calls") or d.get("function_call")) and "role" not in d:
         d["role"] = "assistant"
     # tool_calls must stay intact (Cursor agent mode)
     return d
