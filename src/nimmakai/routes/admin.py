@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -68,10 +70,8 @@ async def admin_logs(request: Request) -> JSONResponse:
     from nimmakai.logging_setup import request_logs
 
     limit = 50
-    try:
+    with suppress(ValueError):
         limit = min(200, max(1, int(request.query_params.get("limit") or 50)))
-    except ValueError:
-        pass
     errors_only = request.query_params.get("errors") in {"1", "true", "yes"}
     path_prefix = request.query_params.get("path") or None
     return JSONResponse(
@@ -161,6 +161,25 @@ async def health(request: Request) -> JSONResponse:
             "dashboard": "/dashboard",
         }
     )
+
+
+@router.get("/ready")
+async def readiness(request: Request) -> JSONResponse:
+    """Strict readiness: auth, a provider runtime, and live models must exist."""
+    health_response = await health(request)
+    payload = json.loads(health_response.body)
+    failures: list[str] = []
+    if not payload.get("proxy_auth_configured"):
+        failures.append("proxy_auth_not_configured")
+    if int(payload.get("active_providers") or 0) < 1:
+        failures.append("no_active_providers")
+    if int(payload.get("live_models") or 0) < 1:
+        failures.append("no_live_models")
+    if not payload.get("catalog_ok"):
+        failures.append("catalog_unavailable")
+    payload["ready"] = not failures
+    payload["readiness_failures"] = failures
+    return JSONResponse(payload, status_code=200 if not failures else 503)
 
 
 @router.get("/stats")
@@ -395,10 +414,16 @@ async def list_providers(request: Request) -> JSONResponse:
             p["free_tier"] = bool(preset.get("free_tier"))
             p["speed_tier"] = preset.get("speed_tier")
             p["signup_url"] = preset.get("signup_url") or ""
+    configured = {p["id"] for p in providers if p.get("enabled") and (p.get("key_count") or 0) > 0}
+    presets = list_presets()
+    for preset in presets:
+        preset["already_configured"] = (
+            preset["id"] in configured and preset["id"] != "custom"
+        )
     return JSONResponse(
         {
             "providers": providers,
-            "presets": list_presets(),
+            "presets": presets,
             "pool": {
                 "live_models": len(live_ids),
                 "active_providers": sum(1 for p in providers if p.get("runtime")),
@@ -420,7 +445,11 @@ async def provider_presets(request: Request) -> JSONResponse:
     from nimmakai.catalog.presets import list_presets
 
     hub = getattr(request.app.state, "hub", None)
-    configured = set(hub.store.providers.keys()) if hub else set()
+    configured: set[str] = set()
+    if hub is not None:
+        for p in hub.store.list_masked():
+            if p.get("enabled") and (p.get("key_count") or 0) > 0:
+                configured.add(p["id"])
     presets = list_presets()
     for p in presets:
         p["already_configured"] = p["id"] in configured and p["id"] != "custom"
@@ -567,7 +596,8 @@ async def upsert_provider(request: Request) -> JSONResponse:
             {"error": {"message": "Provider hub not ready", "code": "nimmakai_no_hub"}},
             status_code=503,
         )
-    body: dict[str, Any] = await request.json()
+    raw_body: dict[str, Any] = await request.json()
+    body: dict[str, Any] = dict(raw_body)
 
     # Expand from free-provider preset when requested
     preset_id = str(body.get("preset") or body.get("from_preset") or "").strip().lower()
@@ -626,6 +656,8 @@ async def upsert_provider(request: Request) -> JSONResponse:
             "max_in_flight_per_key": existing.max_in_flight_per_key,
             "api_style": existing.api_style,
             "builtin": existing.builtin,
+            "model_whitelist": list(existing.model_whitelist),
+            "model_blacklist": list(existing.model_blacklist),
         }
         for k, v in body.items():
             if v is None or v == "_":
@@ -678,6 +710,23 @@ async def upsert_provider(request: Request) -> JSONResponse:
             status_code=400,
         )
 
+    # Seeded free presets start disabled (templates). Adding keys via the
+    # dashboard must enable them unless the client explicitly sets enabled=false.
+    # Only auto-enable when this request actually supplies keys/preset — do not
+    # re-enable a deliberately disabled provider on unrelated edits.
+    keys_in_req = raw_body.get("api_keys")
+    has_new_keys = (
+        (isinstance(keys_in_req, list) and any(str(k).strip() for k in keys_in_req))
+        or (isinstance(keys_in_req, str) and bool(keys_in_req.strip()))
+        or bool(str(raw_body.get("preset") or raw_body.get("from_preset") or "").strip())
+    )
+    if (
+        has_new_keys
+        and cfg.resolved_keys()
+        and raw_body.get("enabled") is not False
+    ):
+        cfg.enabled = True
+
     # Register provider + immediately fetch its /models (NMK-101)
     if registry is not None:
         registry.ladder.provider_ids = set(hub.provider_ids)
@@ -708,7 +757,6 @@ async def register_models(request: Request) -> JSONResponse:
     settings = getattr(request.app.state, "settings", None) or get_settings()
     require_admin(request, settings)
     registry = getattr(request.app.state, "registry", None)
-    hub = getattr(request.app.state, "hub", None)
     if registry is None:
         return JSONResponse(
             {"error": {"message": "Catalog not ready", "code": "nimmakai_not_ready"}},
@@ -719,7 +767,12 @@ async def register_models(request: Request) -> JSONResponse:
     models = body.get("models") if isinstance(body.get("models"), list) else []
     if not provider_id or not models:
         return JSONResponse(
-            {"error": {"message": "provider_id and models (list) required", "code": "invalid_request"}},
+            {
+                "error": {
+                    "message": "provider_id and models (list) required",
+                    "code": "invalid_request",
+                }
+            },
             status_code=400,
         )
 
@@ -753,6 +806,99 @@ async def register_models(request: Request) -> JSONResponse:
         "live_model_count": len(registry.live_ids),
         "message": f"Registered {len(added)} model(s) from provider '{provider_id}'",
     })
+
+
+@router.post("/admin/models/set-enabled")
+async def set_model_enabled(request: Request) -> JSONResponse:
+    """Include or exclude a live model from the routing pool.
+
+    Body: {model_id: "zen/mimo-v2.5-free", enabled: true|false}
+    """
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    registry = getattr(request.app.state, "registry", None)
+    if registry is None:
+        return JSONResponse(
+            {"error": {"message": "Catalog not ready", "code": "nimmakai_not_ready"}},
+            status_code=503,
+        )
+    body: dict[str, Any] = await request.json()
+    model_id = str(body.get("model_id") or "").strip()
+    if "enabled" not in body:
+        return JSONResponse(
+            {
+                "error": {
+                    "message": "enabled (bool) is required",
+                    "code": "invalid_request",
+                }
+            },
+            status_code=400,
+        )
+    enabled = bool(body.get("enabled"))
+    try:
+        result = registry.set_model_enabled(model_id, enabled)
+    except ValueError as exc:
+        return JSONResponse(
+            {"error": {"message": str(exc), "code": "invalid_request"}},
+            status_code=400,
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "error": {
+                    "message": f"Failed to persist model pool change: {exc}",
+                    "code": "persist_failed",
+                }
+            },
+            status_code=500,
+        )
+    return JSONResponse({"ok": True, **result})
+
+
+@router.post("/admin/models/bulk-enabled")
+async def bulk_models_enabled(request: Request) -> JSONResponse:
+    """Bulk include/exclude models in the pool.
+
+    Body: {enable?: string[], disable?: string[], provider_id?: string}
+    When provider_id is set with enable_all/disable_all, toggles that provider's models.
+    """
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    registry = getattr(request.app.state, "registry", None)
+    if registry is None:
+        return JSONResponse(
+            {"error": {"message": "Catalog not ready", "code": "nimmakai_not_ready"}},
+            status_code=503,
+        )
+    body: dict[str, Any] = await request.json()
+    enable = body.get("enable") if isinstance(body.get("enable"), list) else []
+    disable = body.get("disable") if isinstance(body.get("disable"), list) else []
+    provider_id = str(body.get("provider_id") or "").strip().lower()
+    if provider_id:
+        prov_models = sorted(
+            m for m in registry.live_ids if m.split("/", 1)[0] == provider_id
+        )
+        if body.get("enable_all") is True:
+            enable = list(enable) + prov_models
+        if body.get("disable_all") is True:
+            disable = list(disable) + prov_models
+    try:
+        result = registry.set_models_enabled(
+            enable=[str(x) for x in enable],
+            disable=[str(x) for x in disable],
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "error": {
+                    "message": f"Failed to persist model pool change: {exc}",
+                    "code": "persist_failed",
+                }
+            },
+            status_code=500,
+        )
+    return JSONResponse({"ok": True, **result})
+
 
 @router.delete("/admin/providers/{provider_id}")
 async def delete_provider(provider_id: str, request: Request) -> JSONResponse:
@@ -925,9 +1071,7 @@ async def sse_events(request: Request):
         )
         accounts = getattr(request.app.state, "accounts", None)
         is_admin = False
-        if settings.accept_any_proxy_key:
-            is_admin = True
-        elif token and any(
+        if settings.accept_any_proxy_key or token and any(
             hmac.compare_digest(token, k) for k in (settings.proxy_api_keys or [])
         ):
             is_admin = True

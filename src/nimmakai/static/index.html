@@ -1327,7 +1327,7 @@ async function loadHealth() {
 let _evtSource = null;
 function startSSE() {
   if (_evtSource) return;
-  _evtSource = new EventSource('/admin/events');
+  _evtSource = new EventSource('/admin/events?token=' + encodeURIComponent(ak()));
   _evtSource.addEventListener('health', (e) => {
     try {
       let d = JSON.parse(e.data);
@@ -1378,7 +1378,7 @@ async function setQuality(modelId, value) {
 
 // ── NMK-502: Provider Add with Model Discovery ──
 async function discoverModels(pid) {
-  let r = await api('/admin/providers/' + encodeURIComponent(pid) + '/refresh');
+  let r = await ap('/admin/providers/' + encodeURIComponent(pid) + '/refresh', {});
   if (!r || r.__ok === false) { toast(errMsg(r, 'Discovery failed'), true); return; }
   let models = r.catalog?.dynamic_chains?.coding_agentic || [];
   let discovered = document.getElementById('discovered-models');

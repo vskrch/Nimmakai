@@ -18,6 +18,12 @@ NONINTERACTIVE=1 PROXY_API_KEYS=sk-smoke-test \
   ./scripts/generate-do-userdata.sh -o "$tmp_ud"
 grep -q 'docker compose -f docker-compose.do.yml up -d --build' "$tmp_ud"
 grep -q 'base64 -d' "$tmp_ud"
+grep -q 'remote set-url origin "$REPO_URL"' "$tmp_ud"
+if grep -Eq '^[[:space:]]*cloud-init status --wait|set -euxo pipefail' "$tmp_ud"; then
+  echo "generated userdata can deadlock or leak credentials via xtrace" >&2
+  rm -f "$tmp_ud"
+  exit 1
+fi
 rm -f "$tmp_ud"
 
 echo "==> Validating app.yaml has deploy_on_push"

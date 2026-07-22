@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -107,27 +106,32 @@ def emergency_coding_chain(registry: Any, *, max_n: int = 10) -> list[str]:
     """
     if registry is None or not getattr(registry, "live_ids", None):
         return []
+    active = (
+        registry.active_live_ids()
+        if hasattr(registry, "active_live_ids")
+        else set(registry.live_ids)
+    )
     try:
         chain = registry.ladder.ladder_for("coding_agentic", max_n=max_n)
         if chain:
             return registry.health_reorder(chain)
-        # Cold ladder: rebuild then retry
-        registry.ladder.rebuild(set(registry.live_ids))
+        # Cold ladder: rebuild then retry (respect admin-disabled models)
+        registry.ladder.rebuild(set(active))
         chain = registry.ladder.ladder_for("coding_agentic", max_n=max_n)
         if not chain:
             _alert(
                 "nimmakai.all_chains_empty",
                 intent="coding_agentic",
-                live_models=len(registry.live_ids),
+                live_models=len(active),
                 cause="ladder_empty_after_rebuild",
             )
-        return registry.health_reorder(chain) if chain else sorted(registry.live_ids)[:max_n]
+        return registry.health_reorder(chain) if chain else sorted(active)[:max_n]
     except Exception:
         logger.exception("emergency_coding_chain failed")
         _alert(
             "nimmakai.all_chains_empty",
             intent="coding_agentic",
-            live_models=len(registry.live_ids),
+            live_models=len(active),
             cause="emergency_chain_failed",
         )
-        return sorted(registry.live_ids)[:max_n]
+        return sorted(active)[:max_n]

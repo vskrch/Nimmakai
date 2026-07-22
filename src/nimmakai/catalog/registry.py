@@ -57,6 +57,8 @@ class ModelRegistry:
         self.ladder = LadderService(health=self.health, learning=self.learning)
         self._apply_catalog_policy()
         self.live_ids: set[str] = set()
+        # Admin model-pool customization: discovered models opted out of routing
+        self.disabled_models: set[str] = set()
         self.context_by_model: dict[str, int] = {}
         self.probed_ok: set[str] = set()
         self.doc_models: list[DocModel] = []
@@ -77,7 +79,7 @@ class ModelRegistry:
         if self.live_ids:
             self.ladder.set_docs(self.doc_models)
             # Prefer frozen rebuild; cache load may override in bind_db()
-            self.ladder.rebuild(self.live_ids, freeze=True)
+            self.ladder.rebuild(self.active_live_ids(), freeze=True)
             self._sync_chains_from_ladder()
 
     @classmethod
@@ -255,18 +257,31 @@ class ModelRegistry:
     def is_known(self, model_id: str) -> bool:
         return self.resolve_live_id(model_id) is not None
 
-    def resolve_live_id(self, model_id: str) -> str | None:
-        """Map client model id to a namespaced live id when possible."""
+    def resolve_live_id(
+        self, model_id: str, *, include_disabled: bool = False
+    ) -> str | None:
+        """Map client model id to a namespaced live id when possible.
+
+        Disabled models are treated as unknown unless ``include_disabled``.
+        """
         mid = normalize_model_name(model_id)
         if not mid:
             return None
-        if mid in self.live_ids:
+
+        def _ok(candidate: str) -> bool:
+            if candidate not in self.live_ids:
+                return False
+            if include_disabled:
+                return True
+            return candidate not in self.disabled_models
+
+        if _ok(mid):
             return mid
-        if mid in self.catalog.models and (not self.live_ids or mid in self.live_ids):
+        if mid in self.catalog.models and (not self.live_ids or _ok(mid)):
             return mid
         for pid in sorted(self.ladder.provider_ids, key=len, reverse=True):
             cand = f"{pid}/{mid}"
-            if cand in self.live_ids:
+            if _ok(cand):
                 return cand
         return None
 
@@ -346,12 +361,121 @@ class ModelRegistry:
         self._db = db
         if db is None:
             return
+        self._load_disabled_models()
         loaded = self.load_rankings_cache()
         if loaded:
             logger.info(
                 "using sticky ranking cache (coding head=%s)",
                 self.dynamic_chains.get("coding_agentic", [])[:3],
             )
+        # Ensure disabled models are out of the sticky pool after restore
+        if self.disabled_models:
+            self.recompute_rankings(persist=True)
+        elif loaded:
+            self._sync_chains_from_ladder()
+
+    def active_live_ids(self) -> set[str]:
+        """Live catalog minus admin-disabled models (the routable pool)."""
+        if not self.disabled_models:
+            return set(self.live_ids)
+        return {m for m in self.live_ids if m not in self.disabled_models}
+
+    def is_model_enabled(self, model_id: str) -> bool:
+        mid = normalize_model_name(model_id)
+        return bool(mid) and mid in self.live_ids and mid not in self.disabled_models
+
+    def set_model_enabled(self, model_id: str, enabled: bool) -> dict[str, Any]:
+        """Enable/disable a discovered model in the routing pool (persisted)."""
+        mid = normalize_model_name(model_id)
+        if not mid:
+            raise ValueError("model_id is required")
+        if mid not in self.live_ids:
+            raise ValueError(f"Unknown model '{mid}' — refresh catalog first")
+        previous = set(self.disabled_models)
+        if enabled:
+            self.disabled_models.discard(mid)
+        else:
+            self.disabled_models.add(mid)
+        try:
+            self._persist_disabled_models(require_ok=True)
+        except Exception:
+            self.disabled_models = previous
+            raise
+        # Rebuild sticky ladders so disabled models leave the pool immediately
+        self.recompute_rankings(persist=True)
+        return {
+            "model_id": mid,
+            "enabled": enabled,
+            "disabled_count": len(self.disabled_models),
+            "active_count": len(self.active_live_ids()),
+            "live_count": len(self.live_ids),
+        }
+
+    def set_models_enabled(
+        self, *, enable: list[str] | None = None, disable: list[str] | None = None
+    ) -> dict[str, Any]:
+        """Bulk enable/disable. Unknown ids are skipped."""
+        previous = set(self.disabled_models)
+        changed: list[str] = []
+        for mid in enable or []:
+            m = normalize_model_name(mid)
+            if m and m in self.live_ids and m in self.disabled_models:
+                self.disabled_models.discard(m)
+                changed.append(m)
+        for mid in disable or []:
+            m = normalize_model_name(mid)
+            if m and m in self.live_ids and m not in self.disabled_models:
+                self.disabled_models.add(m)
+                changed.append(m)
+        if changed:
+            try:
+                self._persist_disabled_models(require_ok=True)
+            except Exception:
+                self.disabled_models = previous
+                raise
+            self.recompute_rankings(persist=True)
+        return {
+            "changed": changed,
+            "disabled_models": sorted(self.disabled_models),
+            "active_count": len(self.active_live_ids()),
+            "live_count": len(self.live_ids),
+        }
+
+    def _persist_disabled_models(self, *, require_ok: bool = False) -> None:
+        if self._db is None:
+            if require_ok:
+                raise RuntimeError("disabled_models not persisted: no sqlite bound")
+            return
+        try:
+            import json
+
+            self._db.set_meta(
+                "disabled_models", json.dumps(sorted(self.disabled_models))
+            )
+        except Exception:
+            logger.exception("persist disabled_models failed")
+            if require_ok:
+                raise
+
+    def _load_disabled_models(self) -> None:
+        if self._db is None:
+            return
+        try:
+            import json
+
+            raw = self._db.get_meta("disabled_models")
+            if not raw:
+                return
+            data = json.loads(raw)
+            if isinstance(data, list):
+                self.disabled_models = {
+                    normalize_model_name(str(x)) for x in data if str(x).strip()
+                }
+                logger.info(
+                    "loaded %s disabled model(s) from sqlite", len(self.disabled_models)
+                )
+        except Exception:
+            logger.exception("load disabled_models failed")
 
     def coding_candidates(self) -> list[str]:
         """Every live model that can serve coding_agentic, right now.
@@ -361,12 +485,13 @@ class ModelRegistry:
         to lead. This exposes the full live coding pool so the per-request
         scorer can always pick the most efficient available coder.
         """
-        if not self.live_ids:
+        active = self.active_live_ids()
+        if not active:
             return []
         ladder = getattr(self, "ladder", None)
         if ladder is None:
-            return list(self.live_ids)
-        return [m for m in self.live_ids if ladder.is_coding_capable(m)]
+            return list(active)
+        return [m for m in active if ladder.is_coding_capable(m)]
 
     def load_rankings_cache(self) -> bool:
         if self._db is None:
@@ -385,7 +510,7 @@ class ModelRegistry:
         cached_live = data.get("live_ids") or []
         if isinstance(cached_live, list) and cached_live and not self.live_ids:
             self.live_ids = {str(x) for x in cached_live}
-            self.ladder.live_ids = set(self.live_ids)
+            self.ladder.live_ids = set(self.active_live_ids())
         self._sync_chains_from_ladder()
         return True
 
@@ -426,7 +551,8 @@ class ModelRegistry:
         """
         self.ladder.set_docs(self.doc_models)
         self.ladder.provider_ids = set(self.ladder.provider_ids)
-        self.ladder.rebuild(self.live_ids, freeze=True)
+        active = self.active_live_ids()
+        self.ladder.rebuild(active, freeze=True)
         self._sync_chains_from_ladder()
         if persist:
             self.persist_rankings_cache()
@@ -438,6 +564,8 @@ class ModelRegistry:
             "frozen": self.ladder.frozen,
             "computed_at": self.ladder.computed_at,
             "live_models": len(self.live_ids),
+            "active_models": len(active),
+            "disabled_models": len(self.disabled_models),
         }
         logger.info("best models precomputed: %s", best)
         return best
@@ -484,8 +612,11 @@ class ModelRegistry:
                 )
                 self.recompute_rankings(persist=True)
                 return
-            # Only update live set; keep precomputed order
-            self.ladder.live_ids = set(self.live_ids)
+            # Only update live set; keep precomputed order (minus disabled)
+            if self.disabled_models:
+                self.recompute_rankings(persist=True)
+                return
+            self.ladder.live_ids = set(self.active_live_ids())
             self._sync_chains_from_ladder()
             logger.info(
                 "rankings sticky — kept cached ladders (coding head=%s)",
@@ -495,15 +626,20 @@ class ModelRegistry:
         self.recompute_rankings(persist=True)
 
     def _filter_available(self, chain: list[str]) -> list[str]:
+        # No live catalog yet — keep static YAML chains as-is.
         if not self.live_ids:
             return list(chain)
-        filtered = [m for m in chain if m in self.live_ids]
+        active = self.active_live_ids()
+        filtered = [m for m in chain if m in active]
         for m in chain:
             if m not in self.live_ids:
                 logger.warning("catalog: skipping unavailable model id %s", m)
+            elif m in self.disabled_models:
+                logger.debug("catalog: skipping admin-disabled model id %s", m)
         if not filtered and self.strict_catalog:
             raise RuntimeError("strict_catalog: no models available for chain")
-        return filtered if filtered else list(chain)
+        # Never fail-open to disabled/unavailable models (empty pool → []).
+        return filtered
 
     def health_reorder(
         self, chain: list[str], *, intent: str = "coding_agentic", variant: str = "default"
@@ -804,10 +940,10 @@ class ModelRegistry:
             force_rank = (not self.rankings_sticky) or (not self.ladder.frozen) or (
                 not self.ladder._ladders
             )
-        if force_rank:
+        if force_rank or self.disabled_models:
             self.recompute_rankings(persist=True)
         else:
-            self.ladder.live_ids = set(self.live_ids)
+            self.ladder.live_ids = set(self.active_live_ids())
             self._sync_chains_from_ladder()
 
         if run_probes and self.probe_budget.remaining() > 0:
@@ -844,11 +980,16 @@ class ModelRegistry:
         age = None
         if self.last_refresh_at is not None:
             age = round(time.monotonic() - self.last_refresh_at, 1)
+        active = self.active_live_ids()
         return {
             "yaml_version": self.catalog.version,
             "yaml_updated": self.catalog.updated,
             "yaml_path": str(self._yaml_path) if self._yaml_path else None,
             "live_model_count": len(self.live_ids),
+            "active_model_count": len(active),
+            "disabled_model_count": len(self.disabled_models),
+            "live_ids": sorted(self.live_ids),
+            "disabled_models": sorted(self.disabled_models),
             "context_known_count": len(self.context_by_model),
             "docs_count": len(self.doc_models),
             "docs_ok": self.last_docs_ok,

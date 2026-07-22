@@ -41,13 +41,14 @@ services:
       # REPLACE with your fork / repo
       repo: YOUR_GITHUB_USER/Nimmakai
       branch: main
-      deploy_on_push: true
+      # CI creates deployments only after tests pass.
+      deploy_on_push: false
     http_port: 8080
     instance_count: 1
     # $10/mo — stays under $12 budget with headroom for bandwidth overages
     instance_size_slug: apps-s-1vcpu-1gb-fixed
     health_check:
-      http_path: /health
+      http_path: /ready
       initial_delay_seconds: 30
       period_seconds: 15
       timeout_seconds: 5
@@ -58,7 +59,7 @@ services:
       - key: PROXY_API_KEYS
         scope: RUN_TIME
         type: SECRET
-        value: REPLACE_ME_PROXY_KEY
+        value: ""
       - key: NIM_API_KEYS
         scope: RUN_TIME
         type: SECRET

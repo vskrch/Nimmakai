@@ -10,7 +10,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from nimmakai.auth import require_active_user, require_proxy_auth
+from nimmakai.auth import require_active_user
 from nimmakai.catalog import ModelRegistry
 from nimmakai.compat import (
     normalize_completion_json,
@@ -108,8 +108,8 @@ def _finalize_trace(
     spans: list[Any] | None = None,
     timing: dict[str, Any] | None = None,
 ) -> None:
-    from nimmakai.analytics.cost import estimate_cost
     from nimmakai.analytics.context import end_span_collection
+    from nimmakai.analytics.cost import estimate_cost
 
     settings = _settings(request)
     if not getattr(settings, "analytics_enabled", True):
@@ -298,10 +298,11 @@ async def _prepare_routed(
     # Rough token estimate for context-length filtering (T13)
     try:
         msgs = body.get("messages") or body.get("input") or body.get("prompt") or ""
-        if isinstance(msgs, list):
-            char_n = sum(len(str(m)) for m in msgs)
-        else:
-            char_n = len(str(msgs))
+        char_n = (
+            sum(len(str(m)) for m in msgs)
+            if isinstance(msgs, list)
+            else len(str(msgs))
+        )
         max_tok = int(body.get("max_tokens") or body.get("max_completion_tokens") or 0)
         decision.estimated_tokens = int(char_n / 3.5) + max_tok + 512
     except Exception:
@@ -344,10 +345,11 @@ async def list_models(request: Request) -> JSONResponse:
     hub = getattr(request.app.state, "hub", None)
     registry: ModelRegistry | None = getattr(request.app.state, "registry", None)
 
-    # Prefer unified live catalog from hub refresh (namespaced ids)
+    # Prefer unified live catalog from hub refresh (namespaced ids).
+    # Admin-disabled models are omitted from the client-visible pool.
     if registry is not None and registry.live_ids:
         data = []
-        for mid in sorted(registry.live_ids):
+        for mid in sorted(registry.active_live_ids()):
             item: dict[str, Any] = {
                 "id": mid,
                 "object": "model",
@@ -422,7 +424,7 @@ async def get_model(model_id: str, request: Request) -> JSONResponse:
             return JSONResponse(content=registry.synthetic_auto_model())
     if registry is not None:
         resolved = registry.resolve_live_id(model_id) or model_id
-        if resolved in registry.live_ids:
+        if resolved in registry.active_live_ids():
             item = {
                 "id": resolved,
                 "object": "model",
@@ -430,6 +432,17 @@ async def get_model(model_id: str, request: Request) -> JSONResponse:
                 "owned_by": resolved.split("/", 1)[0],
             }
             return JSONResponse(content=registry.enrich_model_entry(item))
+        if resolved in registry.disabled_models:
+            return JSONResponse(
+                {
+                    "error": {
+                        "message": f"Model '{resolved}' is disabled in the pool.",
+                        "type": "invalid_request_error",
+                        "code": "model_disabled",
+                    }
+                },
+                status_code=404,
+            )
     if hub is not None:
         client, _pid, upstream_mid = hub.client_for_model(model_id)
         status, body, headers, _key = await client.request_json(
@@ -592,6 +605,17 @@ async def _chat_like(
                 ),
                 status_code=400,
             )
+        if isinstance(exc, ValueError) and str(exc) == "model_disabled":
+            _finish_log(entry, status=400, t0=t0, error="model_disabled")
+            return JSONResponse(
+                content=openai_error(
+                    "The requested model is disabled in the model pool.",
+                    code="model_disabled",
+                    type_="invalid_request_error",
+                    param="model",
+                ),
+                status_code=400,
+            )
         _finish_log(entry, status=500, t0=t0, error=str(exc))
         raise
 
@@ -679,10 +703,8 @@ async def _chat_like(
                             result.model,
                             stream_exc,
                         )
-                        try:
+                        with suppress(Exception):
                             yield b"data: [DONE]\n\n"
-                        except Exception:
-                            pass
                     finally:
                         await guard.after_request(
                             ctx,
@@ -717,7 +739,9 @@ async def _chat_like(
                             provider=provider,
                             fallback_index=result.fallback_index,
                             error=err,
-                            prompt_tokens=int(usage.get("prompt_tokens") or result.prompt_tokens or 0),
+                            prompt_tokens=int(
+                                usage.get("prompt_tokens") or result.prompt_tokens or 0
+                            ),
                             completion_tokens=int(
                                 usage.get("completion_tokens") or result.completion_tokens or 0
                             ),
@@ -831,10 +855,8 @@ async def _chat_like(
                         yield chunk
                 except Exception as stream_exc:
                     err = str(stream_exc)
-                    try:
+                    with suppress(Exception):
                         yield b"data: [DONE]\n\n"
-                    except Exception:
-                        pass
                 finally:
                     await guard.after_request(ctx, key_id=key_id, success=ok and not err)
                     status_final = status if not err else 499
@@ -959,7 +981,7 @@ async def embeddings(request: Request) -> JSONResponse:
     require_active_user(request, settings)
     try:
         body = await request.json()
-    except Exception as exc:
+    except Exception:
         return JSONResponse(
             content=openai_error(
                 "Invalid JSON body",

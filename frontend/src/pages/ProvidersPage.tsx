@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Card, CardHeader, CardBody, Badge, Button, Input, Spinner, StatusDot } from '../components/ui'
 import { useProviders } from '../hooks/useApi'
-import { ap, errMsg } from '../lib/api'
+import { ad, ap, errMsg } from '../lib/api'
 
 export default function ProvidersPage() {
   const { data, reload } = useProviders()
@@ -18,10 +18,17 @@ export default function ProvidersPage() {
 
   async function handleAdd() {
     if (!form.id || !form.base_url) { setMsg({ text: 'ID and Base URL required', ok: false }); return }
+    const keys = form.api_keys ? form.api_keys.split(',').map(s => s.trim()).filter(Boolean) : []
+    if (keys.length === 0) {
+      setMsg({ text: 'Paste at least one API key (OpenCode Zen uses the key from opencode.ai/auth)', ok: false })
+      return
+    }
     setSaving(true)
     const r = await ap('/admin/providers', {
       ...form,
-      api_keys: form.api_keys ? form.api_keys.split(',').map(s => s.trim()).filter(Boolean) : [],
+      api_keys: keys,
+      // Seeded free presets start disabled — enable when keys are saved
+      enabled: true,
     })
     setSaving(false)
     if (r && (r as Record<string, unknown>).ok) {
@@ -36,13 +43,23 @@ export default function ProvidersPage() {
 
   async function handleTest(pid: string) {
     setMsg({ text: 'Testing...', ok: true })
-    const r = await ap('/admin/providers/test', { id: pid })
+    const keys = form.api_keys ? form.api_keys.split(',').map(s => s.trim()).filter(Boolean) : []
+    const r = await ap('/admin/providers/test', {
+      id: pid || undefined,
+      base_url: form.base_url || undefined,
+      api_keys: keys,
+    })
     setMsg({ text: (r as Record<string, unknown>)?.message as string || 'Test complete', ok: !!(r as Record<string, unknown>)?.ok })
   }
 
   async function handleDelete(pid: string) {
-    const r = await ap(`/admin/providers/${pid}`, undefined)
-    if (r) { reload(); setMsg({ text: 'Deleted', ok: true }) }
+    const r = await ad(`/admin/providers/${pid}`)
+    if (r && (r as Record<string, unknown>).ok !== false) {
+      reload()
+      setMsg({ text: 'Deleted', ok: true })
+    } else {
+      setMsg({ text: errMsg(r, 'Delete failed'), ok: false })
+    }
   }
 
   return (
@@ -122,10 +139,19 @@ export default function ProvidersPage() {
               <div><label className="block text-xs text-zinc-400 mb-1.5">Display Name</label><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Groq" /></div>
             </div>
             <div><label className="block text-xs text-zinc-400 mb-1.5">Base URL (OpenAI-compatible /v1)</label><Input value={form.base_url} onChange={e => setForm(f => ({ ...f, base_url: e.target.value }))} placeholder="https://api.groq.com/openai/v1" /></div>
-            <div><label className="block text-xs text-zinc-400 mb-1.5">API Keys (comma-separated)</label><Input value={form.api_keys} onChange={e => setForm(f => ({ ...f, api_keys: e.target.value }))} placeholder="gsk-..." /></div>
+            <div>
+              <label className="block text-xs text-zinc-400 mb-1.5">API Keys (comma-separated)</label>
+              <Input value={form.api_keys} onChange={e => setForm(f => ({ ...f, api_keys: e.target.value }))} placeholder="Paste key from opencode.ai/auth or provider console" />
+              {form.id === 'zen' && (
+                <p className="text-[11px] text-zinc-500 mt-1.5">
+                  OpenCode Zen and OpenCode API key are the same credential — one key for{' '}
+                  <code className="text-zinc-400">https://opencode.ai/zen/v1</code>.
+                </p>
+              )}
+            </div>
             <div className="flex gap-2 justify-end">
               <Button onClick={() => setShowAdd(false)}>Cancel</Button>
-              <Button onClick={handleTest.bind(null, form.id)}>Test</Button>
+              <Button onClick={() => handleTest(form.id)}>Test</Button>
               <Button variant="primary" onClick={handleAdd} disabled={saving}>{saving ? 'Saving...' : 'Save & Merge'}</Button>
             </div>
           </CardBody>

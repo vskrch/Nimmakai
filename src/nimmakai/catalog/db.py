@@ -32,6 +32,8 @@ CREATE TABLE IF NOT EXISTS providers (
     max_in_flight_per_key INTEGER NOT NULL DEFAULT 3,
     api_style TEXT NOT NULL DEFAULT 'openai',
     builtin INTEGER NOT NULL DEFAULT 0,
+    model_whitelist_json TEXT NOT NULL DEFAULT '[]',
+    model_blacklist_json TEXT NOT NULL DEFAULT '[]',
     updated_at REAL NOT NULL DEFAULT 0
 );
 
@@ -74,6 +76,7 @@ class NimmakaiDB:
         self._conn.execute("PRAGMA synchronous=NORMAL")
         with self._lock:
             self._conn.executescript(_SCHEMA)
+            self._migrate_provider_filter_columns()
             try:
                 from nimmakai.analytics.schema import migrate_analytics
 
@@ -87,6 +90,22 @@ class NimmakaiDB:
             except Exception:
                 logger.exception("accounts schema migration failed")
         logger.info("sqlite ready at %s", self.path)
+
+    def _migrate_provider_filter_columns(self) -> None:
+        cols = {
+            str(r[1])
+            for r in self._conn.execute("PRAGMA table_info(providers)").fetchall()
+        }
+        if "model_whitelist_json" not in cols:
+            self._conn.execute(
+                "ALTER TABLE providers ADD COLUMN model_whitelist_json "
+                "TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "model_blacklist_json" not in cols:
+            self._conn.execute(
+                "ALTER TABLE providers ADD COLUMN model_blacklist_json "
+                "TEXT NOT NULL DEFAULT '[]'"
+            )
 
     def close(self) -> None:
         with self._lock:
@@ -130,6 +149,8 @@ class NimmakaiDB:
         keys = data.get("api_keys") or []
         if isinstance(keys, str):
             keys = [k.strip() for k in keys.split(",") if k.strip()]
+        wl = data.get("model_whitelist") or []
+        bl = data.get("model_blacklist") or []
         payload = (
             pid,
             str(data.get("name") or pid),
@@ -142,6 +163,8 @@ class NimmakaiDB:
             int(data.get("max_in_flight_per_key", 3)),
             str(data.get("api_style") or "openai"),
             1 if data.get("builtin") else 0,
+            json.dumps(list(wl)),
+            json.dumps(list(bl)),
             float(data.get("updated_at") or time.time()),
         )
         with self._lock:
@@ -150,8 +173,8 @@ class NimmakaiDB:
                 INSERT INTO providers (
                     id, name, base_url, api_keys_json, api_keys_env, enabled,
                     rpm_limit, rpd_limit, max_in_flight_per_key, api_style,
-                    builtin, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    builtin, model_whitelist_json, model_blacklist_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     name = excluded.name,
                     base_url = excluded.base_url,
@@ -163,6 +186,8 @@ class NimmakaiDB:
                     max_in_flight_per_key = excluded.max_in_flight_per_key,
                     api_style = excluded.api_style,
                     builtin = excluded.builtin,
+                    model_whitelist_json = excluded.model_whitelist_json,
+                    model_blacklist_json = excluded.model_blacklist_json,
                     updated_at = excluded.updated_at
                 """,
                 payload,
@@ -186,13 +211,16 @@ class NimmakaiDB:
                     keys = data.get("api_keys") or []
                     if isinstance(keys, str):
                         keys = [k.strip() for k in keys.split(",") if k.strip()]
+                    wl = data.get("model_whitelist") or []
+                    bl = data.get("model_blacklist") or []
                     self._conn.execute(
                         """
                         INSERT INTO providers (
                             id, name, base_url, api_keys_json, api_keys_env, enabled,
                             rpm_limit, rpd_limit, max_in_flight_per_key, api_style,
-                            builtin, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            builtin, model_whitelist_json, model_blacklist_json,
+                            updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             pid,
@@ -206,6 +234,8 @@ class NimmakaiDB:
                             int(data.get("max_in_flight_per_key", 3)),
                             str(data.get("api_style") or "openai"),
                             1 if data.get("builtin") else 0,
+                            json.dumps(list(wl)),
+                            json.dumps(list(bl)),
                             float(data.get("updated_at") or time.time()),
                         ),
                     )
@@ -216,17 +246,21 @@ class NimmakaiDB:
 
     @staticmethod
     def _provider_row(row: sqlite3.Row) -> dict[str, Any]:
-        try:
-            keys = json.loads(row["api_keys_json"] or "[]")
-        except json.JSONDecodeError:
-            keys = []
-        if not isinstance(keys, list):
-            keys = []
+        def _json_list(col: str) -> list[str]:
+            try:
+                raw = row[col]
+                data = json.loads(raw or "[]")
+            except (json.JSONDecodeError, IndexError, KeyError):
+                return []
+            if not isinstance(data, list):
+                return []
+            return [str(x) for x in data if str(x).strip()]
+
         return {
             "id": row["id"],
             "name": row["name"],
             "base_url": row["base_url"],
-            "api_keys": [str(k) for k in keys],
+            "api_keys": _json_list("api_keys_json"),
             "api_keys_env": row["api_keys_env"],
             "enabled": bool(row["enabled"]),
             "rpm_limit": float(row["rpm_limit"]),
@@ -234,6 +268,8 @@ class NimmakaiDB:
             "max_in_flight_per_key": int(row["max_in_flight_per_key"]),
             "api_style": row["api_style"] or "openai",
             "builtin": bool(row["builtin"]),
+            "model_whitelist": _json_list("model_whitelist_json"),
+            "model_blacklist": _json_list("model_blacklist_json"),
             "updated_at": float(row["updated_at"] or 0),
         }
 

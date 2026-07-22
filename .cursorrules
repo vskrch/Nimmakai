@@ -1,20 +1,25 @@
 # Scratchpad
 
 ## Current task
-One-click DigitalOcean Droplet userdata generator + README/docs — COMPLETE
+Second whole-repo adversarial hardening pass — IN PROGRESS
 
 ## Plan
-- [X] `scripts/generate-do-userdata.sh` — interactive prompts → paste-ready User data
-- [X] README Deploy section: Droplet one-click first, then App Platform
-- [X] `docs/digitalocean.md` B0 one-click section
-- [X] gitignore generated userdata; do-smoke checks generator
-- [X] Non-interactive smoke: generate + bash -n + decode .env
+- [X] Baseline full tests, Ruff, TypeScript build, shell syntax
+- [X] Independent audits: auth/persistence, routing/upstream, frontend/deploy
+- [ ] Reproduce and fix evidence-backed Critical/High/Medium failures
+- [ ] Add regression tests for every behavior change
+- [ ] Re-run full verification and review the final diff
+
+## Second-pass findings
+- Deploy: default admin placeholder, cloud-init self-deadlock, xtrace/MOTD leaks, false success
+- Auth: global preference/retention authz, cross-user SSE, stale sessions, bearer precedence
+- Routing: disabled bypass, embeddings fanout, JSON auth-key rotation, empty streams, hard filters
+- Frontend: wrong DELETE, auth expiry, fragmented SSE, reconnect leaks, legacy auth/XSS
 
 ## Design decisions
-- Secrets embedded as base64 in userdata (safe from shell metacharacters)
-- Install dir `/opt/nimmakai`; ready file `/root/NIMMAKAI-READY.txt` + motd
-- Prefer Docker Marketplace image; script also installs Docker if missing
-- Generator default repo: https://github.com/vskrch/Nimmakai.git
+- Disabled models = unknown for routing/`is_known`; `include_disabled=True` for admin introspection
+- Auto-enable providers only when request supplies keys/preset (not on every edit)
+- Persist disabled_models failures raise → 500 to admin API
 
 ## Lessons
 - .cursorrules can be overwritten by concurrent agent sessions — re-read before editing, merge don't clobber
@@ -31,3 +36,6 @@ One-click DigitalOcean Droplet userdata generator + README/docs — COMPLETE
 - Explicit-model tests previously encoded buggy "best coder leads" behavior — F-08 requires pinned head first; update tests with the fix
 - Droplet compose publishes host port 80 (not 8080); data survives rebuilds via `nimmakai-data` volume
 - DO User data embeds secrets (visible via metadata/API) — gitignore generated scripts; warn to rotate
+- `_filter_available` must never fail-open to disabled models (empty → [])
+- Seeded `api_keys_env` can block env aliases — `resolved_keys` must check alias envs
+- Session auth must gate on account status the same as API keys

@@ -352,7 +352,8 @@ class FallbackExecutor:
             )
             return self.hub.has_runtime(pid)
         except Exception:
-            return True
+            logger.exception("provider availability check failed for model %s", model)
+            return False
 
     def _chain(self, decision: RouteDecision) -> list[str]:
         max_n = int(getattr(self.settings, "max_model_fallbacks", 10) or 10)
@@ -381,11 +382,7 @@ class FallbackExecutor:
             except Exception:
                 logger.exception("emergency chain rebuild failed")
         if not available and raw:
-            logger.warning(
-                "all %s chain models have unavailable providers; keeping raw chain",
-                len(raw),
-            )
-            available = raw
+            logger.warning("all %s chain models have unavailable providers", len(raw))
         # Continuous optimizer: intelligence × speed × health (every request)
         intent = decision.intent.value
         variant = getattr(decision, "variant", None) or "default"
@@ -900,7 +897,11 @@ class FallbackExecutor:
                 openai_error(
                     message,
                     code=code,
-                    type_="server_error" if status >= 500 or status == 429 else "invalid_request_error",
+                    type_=(
+                        "server_error"
+                        if status >= 500 or status == 429
+                        else "invalid_request_error"
+                    ),
                     metadata=meta,
                 )
             ).encode("utf-8")
@@ -1255,7 +1256,11 @@ class FallbackExecutor:
                     err_body = openai_error(
                         f"Upstream error HTTP {status}",
                         code="upstream_error",
-                        type_="server_error" if status >= 500 or status == 429 else "invalid_request_error",
+                        type_=(
+                            "server_error"
+                            if status >= 500 or status == 429
+                            else "invalid_request_error"
+                        ),
                         metadata={"retry_after": ra},
                     )
                 err_raw = _json.dumps(err_body).encode("utf-8")

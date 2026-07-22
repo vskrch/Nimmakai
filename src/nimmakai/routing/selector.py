@@ -86,14 +86,13 @@ class ModelSelector:
         variant = tier_to_variant(tier) if tier else "default"
 
         # Force coding intent for coding / frontier tiers (agent + architecture)
-        if tier in ("coding", "frontier"):
-            if intent not in (Intent.EMBEDDINGS, Intent.VISION):
-                if tier == "coding" or intent == Intent.CHAT_FAST:
-                    # frontier keeps reasoning/long_horizon when classified
-                    if tier == "coding":
-                        intent = Intent.CODING_AGENTIC
-                    elif intent == Intent.CHAT_FAST:
-                        intent = Intent.CODING_AGENTIC
+        if (
+            tier in ("coding", "frontier")
+            and intent not in (Intent.EMBEDDINGS, Intent.VISION)
+            and (tier == "coding" or intent == Intent.CHAT_FAST)
+        ):
+            # frontier keeps reasoning/long_horizon when classified
+            intent = Intent.CODING_AGENTIC
 
         intent_key = intent.value
 
@@ -110,6 +109,10 @@ class ModelSelector:
                 auto_tier=tier,
                 variant=variant,
             )
+
+        requested_live = self.registry.resolve_live_id(raw, include_disabled=True)
+        if requested_live in self.registry.disabled_models:
+            raise ValueError("model_disabled")
 
         # User preferences first
         if self.preferences is not None and self.preferences.has_preference(intent_key):
@@ -194,13 +197,13 @@ class ModelSelector:
         )
         if is_auto:
             chain = self.registry.chain_for_intent(intent_key, variant=variant)
-            if not chain and self.registry.live_ids:
+            if not chain and self.registry.active_live_ids():
                 if intent_key == "coding_agentic":
                     from nimmakai.resilience import emergency_coding_chain
 
                     chain = emergency_coding_chain(self.registry)
                 if not chain:
-                    chain = sorted(self.registry.live_ids)
+                    chain = sorted(self.registry.active_live_ids())
             chain = self._finalize_chain(
                 chain,
                 intent_key=intent_key,
@@ -247,10 +250,16 @@ class ModelSelector:
                     variant=variant,
                 )
             # alias → concrete model
-            chain = [target.value]
+            target_model = (
+                self.registry.resolve_live_id(target.value, include_disabled=True)
+                or target.value
+            )
+            if target_model in self.registry.disabled_models:
+                raise ValueError("model_disabled")
+            chain = [target_model]
             if self.settings.enable_fallback_on_explicit:
                 siblings = self.registry.chain_for_intent(intent_key, variant=variant)
-                chain = chain + [m for m in siblings if m != target.value]
+                chain = chain + [m for m in siblings if m != target_model]
             # For coding, always rank all candidates — the best coder leads,
             # the user-requested model stays as fallback.
             if intent_key == "coding_agentic":
@@ -268,7 +277,7 @@ class ModelSelector:
                 optimized = self.registry.health_reorder(
                     chain, intent=intent_key, variant=variant
                 )
-                head = target.value
+                head = target_model
                 rest = [m for m in optimized if m != head]
             return RouteDecision(
                 chain=[head] + rest,
@@ -363,6 +372,9 @@ class ModelSelector:
         # OpenRouter models[] as extra fallback candidates
         if models_fallback:
             for m in models_fallback:
+                discovered = self.registry.resolve_live_id(m, include_disabled=True)
+                if discovered in self.registry.disabled_models:
+                    continue
                 resolved = self.registry.resolve_live_id(m) or m
                 if resolved not in chain:
                     chain = chain + [resolved]
@@ -383,7 +395,22 @@ class ModelSelector:
         chain = filter_chain(
             chain, allowed_models=allowed or None, free_only=free_only
         )
+        # Drop admin-disabled models from every finalized route chain
+        if self.registry.live_ids and self.registry.disabled_models:
+            chain = [
+                m
+                for m in chain
+                if (
+                    self.registry.resolve_live_id(m, include_disabled=True) or m
+                )
+                not in self.registry.disabled_models
+            ]
         # Session model pin (OpenRouter sticky routing) — pin once after ranking
-        if preferred_model:
+        preferred_live = (
+            self.registry.resolve_live_id(preferred_model, include_disabled=True)
+            if preferred_model
+            else None
+        )
+        if preferred_model and preferred_live not in self.registry.disabled_models:
             chain = pin_model_first(chain, preferred_model)
         return chain

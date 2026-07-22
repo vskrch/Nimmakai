@@ -109,6 +109,10 @@ export interface Model {
 export interface CatalogResponse {
   yaml_version: string
   live_model_count: number
+  active_model_count?: number
+  disabled_model_count?: number
+  live_ids?: string[]
+  disabled_models?: string[]
   dynamic_chains: Record<string, string[]>
   ladders?: Record<string, LadderInfo>
   health?: Record<string, ModelHealthData>

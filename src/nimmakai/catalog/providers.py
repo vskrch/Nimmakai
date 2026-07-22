@@ -57,8 +57,21 @@ class ProviderConfig:
 
     def resolved_keys(self) -> list[str]:
         keys = [k.strip() for k in self.api_keys if k and str(k).strip()]
+        env_names: list[str] = []
         if self.api_keys_env:
-            raw = os.environ.get(self.api_keys_env, "")
+            env_names.append(self.api_keys_env)
+        # Known aliases (e.g. OPENCODE_API_KEYS → zen) even when seed wired
+        # a different primary env name.
+        try:
+            from nimmakai.catalog.presets import env_aliases_for_provider
+
+            for name in env_aliases_for_provider(self.id):
+                if name not in env_names:
+                    env_names.append(name)
+        except Exception:
+            pass
+        for env_name in env_names:
+            raw = os.environ.get(env_name, "")
             keys.extend(p.strip() for p in raw.split(",") if p.strip())
         # de-dupe preserve order
         seen: set[str] = set()
@@ -316,6 +329,8 @@ class ProviderStore:
                     "max_in_flight_per_key": p.max_in_flight_per_key,
                     "api_style": p.api_style,
                     "builtin": p.builtin,
+                    "model_whitelist": list(p.model_whitelist),
+                    "model_blacklist": list(p.model_blacklist),
                 }
             )
         self._db.replace_all_providers(payload)
@@ -329,11 +344,13 @@ class ProviderStore:
             if not raw:
                 continue
             if preset_id in self.providers:
-                # Ensure env name is wired so resolved_keys picks it up
                 cfg = self.providers[preset_id]
-                if not cfg.api_keys_env:
+                primary = (cfg.api_keys_env or "").strip()
+                primary_has = bool(primary and os.environ.get(primary, "").strip())
+                # Seed may wire OPENCODE_ZEN_API_KEYS while ops only set the
+                # OPENCODE_API_KEYS alias — retarget to the env that has keys.
+                if not cfg.api_keys_env or (not primary_has and raw):
                     cfg.api_keys_env = env_name
-                # Seeded templates start disabled — env keys mean go live
                 if not cfg.enabled and cfg.resolved_keys():
                     cfg.enabled = True
                     logger.info(
@@ -417,6 +434,8 @@ class ProviderStore:
                         "max_in_flight_per_key": p.max_in_flight_per_key,
                         "api_style": p.api_style,
                         "builtin": p.builtin,
+                        "model_whitelist": list(p.model_whitelist),
+                        "model_blacklist": list(p.model_blacklist),
                     }
                     for p in self.providers.values()
                 ],
@@ -438,6 +457,12 @@ def _cfg_from_dict(item: dict[str, Any]) -> ProviderConfig:
     keys = item.get("api_keys") or []
     if isinstance(keys, str):
         keys = [k.strip() for k in keys.split(",") if k.strip()]
+    wl = item.get("model_whitelist") or []
+    bl = item.get("model_blacklist") or []
+    if isinstance(wl, str):
+        wl = [p.strip() for p in wl.split(",") if p.strip()]
+    if isinstance(bl, str):
+        bl = [p.strip() for p in bl.split(",") if p.strip()]
     return ProviderConfig(
         id=pid,
         name=str(item.get("name") or pid),
@@ -450,6 +475,8 @@ def _cfg_from_dict(item: dict[str, Any]) -> ProviderConfig:
         max_in_flight_per_key=int(item.get("max_in_flight_per_key", 3)),
         api_style=str(item.get("api_style") or "openai"),
         builtin=bool(item.get("builtin", False)),
+        model_whitelist=[str(x) for x in wl if str(x).strip()],
+        model_blacklist=[str(x) for x in bl if str(x).strip()],
     )
 
 

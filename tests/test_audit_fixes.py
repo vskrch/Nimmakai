@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from nimmakai.balancer import KeyStats
@@ -17,8 +17,6 @@ from nimmakai.config import Settings
 from nimmakai.routing import (
     FallbackExecutor,
     Intent,
-    IntentResult,
-    ModelSelector,
     RouteDecision,
     parse_auto_router_options,
 )
@@ -29,6 +27,36 @@ YAML = Path(__file__).resolve().parents[1] / "config" / "models.yaml"
 
 def _key(i: int = 0) -> KeyStats:
     return KeyStats(key_id=f"key-{i}", api_key=f"k{i}")
+
+
+def test_missing_vite_assets_does_not_crash_app_startup(tmp_path: Path) -> None:
+    from nimmakai.main import _mount_vite_assets
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    app = FastAPI()
+
+    assert _mount_vite_assets(app, dist) is False
+    assert not any(getattr(route, "path", None) == "/assets" for route in app.routes)
+
+
+def test_fallback_chain_never_readds_unavailable_provider_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    settings = Settings(nim_api_keys=["k"])
+    registry = ModelRegistry.from_yaml(YAML)
+    registry.live_ids = set()
+    executor = FallbackExecutor(MagicMock(), registry, settings)
+    monkeypatch.setattr(executor, "_provider_available", lambda _model: False)
+    decision = RouteDecision(
+        chain=["dead-provider/model"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+
+    assert executor._chain(decision) == []
 
 
 # ── TICKET-1: schema-aware success analysis ─────────────────────────

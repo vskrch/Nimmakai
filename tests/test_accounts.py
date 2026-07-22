@@ -183,6 +183,37 @@ async def test_login_session_and_me():
 
 
 @pytest.mark.asyncio
+async def test_suspended_admin_session_loses_proxy_and_admin_access():
+    app, _settings = _make_app()
+    store: AccountStore = app.state.accounts
+    admin = store.create_user(
+        "suspended-admin@example.com",
+        "password123",
+        role="admin",
+        status="active",
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        login = await client.post(
+            "/auth/login",
+            json={"email": "suspended-admin@example.com", "password": "password123"},
+        )
+        assert login.status_code == 200
+        assert (await client.get("/stats")).status_code == 200
+        assert (await client.get("/admin/users")).status_code == 200
+
+        store.set_status(admin["id"], "suspended")
+
+        proxy = await client.get("/stats")
+        assert proxy.status_code == 403
+        assert proxy.json()["error"]["code"] == "account_not_active"
+        admin_api = await client.get("/admin/users")
+        assert admin_api.status_code == 403
+        assert admin_api.json()["error"]["code"] == "account_not_active"
+
+
+@pytest.mark.asyncio
 async def test_analytics_scoped_to_user():
     app, _ = _make_app()
     store: AccountStore = app.state.accounts

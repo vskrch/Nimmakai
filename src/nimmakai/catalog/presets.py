@@ -267,6 +267,15 @@ ENV_PROVIDER_BOOTSTRAP: list[tuple[str, str]] = [
     ("HYPERBOLIC_API_KEYS", "hyperbolic"),
 ]
 
+# Extra env names accepted by resolved_keys() per provider id
+_PROVIDER_ENV_ALIASES: dict[str, tuple[str, ...]] = {
+    "zen": ("OPENCODE_ZEN_API_KEYS", "OPENCODE_API_KEYS", "ZEN_API_KEYS"),
+}
+
+
+def env_aliases_for_provider(provider_id: str) -> tuple[str, ...]:
+    return _PROVIDER_ENV_ALIASES.get(provider_id.strip().lower(), ())
+
 # Free OpenCode Zen coding model ids (bare, before namespacing)
 ZEN_FREE_CODING_MODELS: tuple[str, ...] = (
     "mimo-v2.5-free",

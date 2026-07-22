@@ -112,8 +112,8 @@ if [[ "${NONINTERACTIVE:-0}" != "1" ]]; then
   echo
   echo "Provider API keys (Enter to skip any)."
   prompt_secret NIM_API_KEYS "NIM_API_KEYS"
+  echo "  (OpenCode Zen key from https://opencode.ai/auth — one key is enough)"
   prompt_secret OPENCODE_ZEN_API_KEYS "OPENCODE_ZEN_API_KEYS"
-  prompt_secret OPENCODE_API_KEYS "OPENCODE_API_KEYS"
   prompt_secret GROQ_API_KEYS "GROQ_API_KEYS"
   prompt_secret CEREBRAS_API_KEYS "CEREBRAS_API_KEYS"
   prompt_secret OPENROUTER_API_KEYS "OPENROUTER_API_KEYS"
@@ -177,15 +177,17 @@ cat >"$OUT_FILE" <<EOF
 # Nimmakai Droplet bootstrap — generated $(date -u +%Y-%m-%dT%H:%MZ)
 # Paste into DigitalOcean → Create Droplet → Advanced → User data
 # Image: Docker on Ubuntu  |  Size: s-1vcpu-1gb  |  Firewall: 22,80
-set -euxo pipefail
+# Do not enable xtrace: this script contains base64-encoded credentials.
+set -euo pipefail
 exec > >(tee -a /var/log/nimmakai-bootstrap.log) 2>&1
 
 export DEBIAN_FRONTEND=noninteractive
 INSTALL_DIR=/opt/nimmakai
 READY_FILE=/root/NIMMAKAI-READY.txt
 
-echo "==> waiting for cloud-init / apt"
-cloud-init status --wait 2>/dev/null || true
+echo "==> waiting for apt locks"
+# User data runs inside cloud-final. Calling cloud-init status --wait here
+# deadlocks waiting for this very script to finish.
 for i in \$(seq 1 60); do
   if ! fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 \\
     && ! fuser /var/lib/apt/lists/lock >/dev/null 2>&1; then
@@ -234,6 +236,9 @@ if [[ -n "\$GIT_TOKEN" ]]; then
       ;;
   esac
   git clone --depth 1 --branch "\$BRANCH" "\$CLONE_URL" "\$INSTALL_DIR"
+  # git clone persists the credential-bearing URL as origin; scrub it.
+  git -C "\$INSTALL_DIR" remote set-url origin "\$REPO_URL"
+  unset CLONE_URL GIT_TOKEN
 else
   git clone --depth 1 --branch "\$BRANCH" "\$REPO_URL" "\$INSTALL_DIR"
 fi
@@ -248,10 +253,10 @@ chmod 600 .env
 echo "==> docker compose up"
 docker compose -f docker-compose.do.yml up -d --build
 
-echo "==> wait for /health"
+echo "==> wait for /ready"
 ok=0
 for i in \$(seq 1 90); do
-  if curl -fsS http://127.0.0.1/health >/dev/null 2>&1; then
+  if curl -fsS http://127.0.0.1/ready >/dev/null 2>&1; then
     ok=1
     break
   fi
@@ -261,24 +266,25 @@ done
 IP=\$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address 2>/dev/null || true)
 IP=\${IP:-UNKNOWN}
 
-PROXY_KEY=\$(grep -E '^PROXY_API_KEYS=' .env | head -1 | cut -d= -f2- | cut -d, -f1)
+if [[ "\$ok" != "1" ]]; then
+  echo "ERROR: Nimmakai did not become ready" >&2
+  docker compose -f docker-compose.do.yml ps >&2 || true
+  docker compose -f docker-compose.do.yml logs --tail=200 >&2 || true
+  exit 1
+fi
 
 {
   echo "Nimmakai is live (bootstrap finished: \$(date -u +%Y-%m-%dT%H:%MZ))"
   echo
-  if [[ "\$ok" == "1" ]]; then
-    echo "Health: OK"
-  else
-    echo "Health: NOT READY YET — check: docker compose -f \$INSTALL_DIR/docker-compose.do.yml logs"
-  fi
+  echo "Readiness: OK"
   echo
   echo "Dashboard:  http://\${IP}/dashboard"
   echo "API base:   http://\${IP}/v1"
-  echo "Health:     http://\${IP}/health"
+  echo "Readiness:  http://\${IP}/ready"
   echo
   echo "Cursor / OpenAI-compatible clients:"
   echo "  Base URL:  http://\${IP}/v1"
-  echo "  API Key:   \${PROXY_KEY}"
+  echo "  API Key:   use the PROXY_API_KEYS value saved during generation"
   echo "  Model:     nimmakai/auto"
   echo
   echo "Logs:        /var/log/nimmakai-bootstrap.log"
@@ -286,7 +292,7 @@ PROXY_KEY=\$(grep -E '^PROXY_API_KEYS=' .env | head -1 | cut -d= -f2- | cut -d, 
   echo "Update later:"
   echo "  cd \$INSTALL_DIR && git pull && docker compose -f docker-compose.do.yml up -d --build"
 } | tee "\$READY_FILE"
-cp "\$READY_FILE" /etc/motd 2>/dev/null || true
+chmod 600 "\$READY_FILE"
 
 echo "==> bootstrap done"
 EOF

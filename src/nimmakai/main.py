@@ -14,6 +14,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from nimmakai import __version__
 from nimmakai.balancer import KeyPool
@@ -29,6 +30,15 @@ from nimmakai.safety import AccountGuard
 from nimmakai.upstream import UpstreamClient
 
 logger = logging.getLogger("nimmakai")
+
+
+def _mount_vite_assets(app: FastAPI, dist_path: Path) -> bool:
+    """Mount Vite assets only when the complete asset directory exists."""
+    assets_path = dist_path / "assets"
+    if not assets_path.is_dir():
+        return False
+    app.mount("/assets", StaticFiles(directory=str(assets_path)), name="vite-assets")
+    return True
 
 
 def _init_accounts(app: FastAPI, settings: Settings) -> None:
@@ -491,12 +501,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers.setdefault("X-Request-Id", rid)
         return response
 
-    from fastapi.staticfiles import StaticFiles
-
     # Serve Vite build assets (dist/) with aggressive caching
     dist_path = Path(__file__).parent / "static" / "dist"
-    if dist_path.is_dir():
-        app.mount("/assets", StaticFiles(directory=str(dist_path / "assets")), name="vite-assets")
+    _mount_vite_assets(app, dist_path)
 
     app.include_router(accounts.router)
     app.include_router(admin.router)

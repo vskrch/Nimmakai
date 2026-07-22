@@ -121,7 +121,10 @@ def resolve_auth(request: Request, settings: Settings) -> AuthContext:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={
                 "error": {
-                    "message": "Missing API key or session. Sign in or set Authorization: Bearer <key>.",
+                    "message": (
+                        "Missing API key or session. Sign in or set "
+                        "Authorization: Bearer <key>."
+                    ),
                     "type": "invalid_request_error",
                     "code": "missing_api_key",
                 }
@@ -235,7 +238,36 @@ def require_proxy_auth(request: Request, settings: Settings) -> str:
     """
     ctx = resolve_auth(request, settings)
     request.state.auth = ctx
+    _require_account_active(ctx)
     return ctx.token or ""
+
+
+def _require_account_active(ctx: AuthContext) -> None:
+    """Reject suspended/pending/rejected account sessions and API keys.
+
+    Legacy PROXY_API_KEYS callers have no account status and are unaffected.
+    """
+    if ctx.via == "legacy_proxy":
+        return
+    if ctx.user_id is None:
+        return
+    if ctx.status == "active":
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "error": {
+                "message": (
+                    "Account is not active. Verify email and wait for admin approval."
+                    if ctx.status in {None, "unverified", "pending_approval"}
+                    else f"Account status '{ctx.status}' cannot access this API."
+                ),
+                "type": "invalid_request_error",
+                "code": "account_not_active",
+                "status": ctx.status,
+            }
+        },
+    )
 
 
 def require_admin(request: Request, settings: Settings) -> AuthContext:
@@ -252,6 +284,7 @@ def require_admin(request: Request, settings: Settings) -> AuthContext:
                 }
             },
         )
+    _require_account_active(ctx)
     return ctx
 
 
@@ -259,6 +292,7 @@ def require_active_user(request: Request, settings: Settings) -> AuthContext:
     ctx = resolve_auth(request, settings)
     request.state.auth = ctx
     if ctx.is_admin:
+        _require_account_active(ctx)
         return ctx
     if ctx.status != "active" or not ctx.user_id:
         raise HTTPException(

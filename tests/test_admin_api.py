@@ -14,7 +14,6 @@ from nimmakai.main import create_app
 from nimmakai.routing import RoutingStats
 from nimmakai.safety import AccountGuard
 
-
 _temp_dirs = []
 
 
@@ -341,3 +340,78 @@ async def test_provider_partial_update():
         # Verify base_url and key_count were preserved
         assert body["provider"]["base_url"] == "https://api.groq.com/openai/v1"
         assert body["provider"]["key_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_seeded_zen_keys_auto_enable():
+    """Free presets are seeded disabled; adding keys via dashboard must enable them."""
+    import tempfile
+    from pathlib import Path
+
+    td = tempfile.TemporaryDirectory()
+    _temp_dirs.append(td)
+    settings = Settings(
+        proxy_api_keys=[],
+        allow_insecure_auth=True,
+        nim_api_keys=["test-key-1"],
+        nim_base_url="https://integrate.api.nvidia.com/v1",
+        nim_rpm_limit=40,
+        nim_rpd_limit=2000,
+        nim_max_in_flight_per_key=3,
+        providers_overlay_path=str(Path(td.name) / "providers.json"),
+        catalog_snapshot_path=str(Path(td.name) / "catalog_snapshot.json"),
+        sqlite_path=str(Path(td.name) / "nimmakai.db"),
+        sqlite_seed_free_presets=True,
+    )
+    app = create_app(settings)
+    app.state.settings = settings
+    pool = KeyPool(
+        api_keys=["test-key-1"],
+        rpm_limit=settings.effective_rpm,
+        rpd_limit=settings.nim_rpd_limit,
+        max_in_flight_per_key=settings.nim_max_in_flight_per_key,
+    )
+    app.state.pool = pool
+    store = ProviderStore.load(
+        settings.providers_config_path,
+        settings.providers_overlay_path,
+        nim_base_url=settings.nim_base_url,
+        nim_api_keys=list(settings.nim_api_keys),
+        nim_rpm=settings.nim_rpm_limit,
+        nim_rpd=settings.nim_rpd_limit,
+        nim_max_in_flight=settings.nim_max_in_flight_per_key,
+        sqlite_path=settings.sqlite_path,
+        seed_free_presets=True,
+    )
+    assert "zen" in store.providers
+    assert store.providers["zen"].enabled is False
+    hub = ProviderHub(store, settings)
+    app.state.hub = hub
+    app.state.upstream = None
+    app.state.registry = None
+    app.state.selector = None
+    app.state.fallback = None
+    app.state.guard = AccountGuard(settings, pool)
+    app.state.routing_stats = RoutingStats()
+    app.state.preferences = UserPreferences()
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        # Dashboard-style body: keys only, no explicit enabled (regression)
+        r = await c.post(
+            "/admin/providers",
+            headers=AUTH,
+            json={
+                "id": "zen",
+                "name": "OpenCode Zen",
+                "base_url": "https://opencode.ai/zen/v1",
+                "api_keys": ["oc-zen-test-key"],
+            },
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["ok"] is True
+        assert body["provider"]["enabled"] is True
+        assert body["provider"]["key_count"] == 1
+        assert hub.has_runtime("zen") is True
