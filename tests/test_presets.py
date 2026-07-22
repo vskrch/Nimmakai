@@ -18,16 +18,22 @@ def test_list_presets_includes_free_openai_compatible() -> None:
     assert "groq" in ids
     assert "cerebras" in ids
     assert "openrouter" in ids
+    assert "deepseek" in ids
     assert "custom" in ids
     groq = get_preset("groq")
     assert groq is not None
     assert groq["base_url"].endswith("/v1") or "/openai/v1" in groq["base_url"]
     assert groq["free_tier"] is True
+    deepseek = get_preset("deepseek")
+    assert deepseek is not None
+    assert deepseek["base_url"].startswith("https://api.deepseek.com")
+    assert deepseek["free_tier"] is True
 
 
 def test_speed_priors_favor_ultra_fast_free_backends() -> None:
     assert speed_prior_for_provider("cerebras") > speed_prior_for_provider("nim")
     assert speed_prior_for_provider("groq") > 1.0
+    assert speed_prior_for_provider("deepseek") > 1.0
     assert speed_prior_for_provider("unknown-xyz") == 1.0
 
 

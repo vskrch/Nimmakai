@@ -108,8 +108,8 @@ def _mask_key(k: str) -> str:
 
 def namespace_model(provider_id: str, upstream_model_id: str) -> str:
     pid = provider_id.strip().lower()
-    mid = upstream_model_id.strip()
-    if mid.lower().startswith(f"{pid}/"):
+    mid = upstream_model_id.strip().lower()
+    if mid.startswith(f"{pid}/"):
         return mid
     return f"{pid}/{mid}"
 

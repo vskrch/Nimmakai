@@ -128,6 +128,23 @@ PROVIDER_PRESETS: list[dict[str, Any]] = [
         "tags": ["free", "fast", "openai-compatible"],
     },
     {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "api_keys_env": "DEEPSEEK_API_KEYS",
+        "rpm_limit": 60,
+        "rpd_limit": 10000,
+        "max_in_flight_per_key": 4,
+        "free_tier": True,
+        "speed_tier": "fast",
+        "signup_url": "https://platform.deepseek.com/",
+        "description": (
+            "DeepSeek V3 / R1 and newer models via OpenAI-compatible API "
+            "(free credits on signup)."
+        ),
+        "tags": ["free-credits", "coding", "reasoning", "openai-compatible"],
+    },
+    {
         "id": "deepinfra",
         "name": "DeepInfra",
         "base_url": "https://api.deepinfra.com/v1/openai",
@@ -237,6 +254,7 @@ PROVIDER_SPEED_PRIOR: dict[str, float] = {
     "groq": 1.35,
     "cerebras": 1.40,
     "sambanova": 1.30,
+    "deepseek": 1.25,
     "fireworks": 1.20,
     "together": 1.15,
     "deepinfra": 1.12,
@@ -261,6 +279,7 @@ ENV_PROVIDER_BOOTSTRAP: list[tuple[str, str]] = [
     ("TOGETHER_API_KEYS", "together"),
     ("FIREWORKS_API_KEYS", "fireworks"),
     ("SAMBANOVA_API_KEYS", "sambanova"),
+    ("DEEPSEEK_API_KEYS", "deepseek"),
     ("DEEPINFRA_API_KEYS", "deepinfra"),
     ("GITHUB_MODELS_API_KEYS", "github"),
     ("MISTRAL_API_KEYS", "mistral"),

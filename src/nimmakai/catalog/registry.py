@@ -174,7 +174,7 @@ class ModelRegistry:
         data = load_snapshot(self.snapshot_path)
         if not data:
             return
-        self.live_ids = set(data.get("live_ids") or [])
+        self.live_ids = {str(x).strip().lower() for x in (data.get("live_ids") or [])}
         raw_ctx = data.get("context_by_model") or {}
         if isinstance(raw_ctx, dict):
             self.context_by_model = {
@@ -384,13 +384,27 @@ class ModelRegistry:
         mid = normalize_model_name(model_id)
         return bool(mid) and mid in self.live_ids and mid not in self.disabled_models
 
-    def set_model_enabled(self, model_id: str, enabled: bool) -> dict[str, Any]:
-        """Enable/disable a discovered model in the routing pool (persisted)."""
+    def _canonical_live_id(self, model_id: str) -> str | None:
+        """Return the live id matching ``model_id`` ignoring case, or None."""
         mid = normalize_model_name(model_id)
         if not mid:
-            raise ValueError("model_id is required")
-        if mid not in self.live_ids:
-            raise ValueError(f"Unknown model '{mid}' — refresh catalog first")
+            return None
+        # Fast path: exact normalized match
+        if mid in self.live_ids:
+            return mid
+        # Case-insensitive scan for providers that return mixed-case ids
+        # (e.g. SambaNova). This is O(n) but only used on admin mutations.
+        for live in self.live_ids:
+            if live.lower() == mid:
+                return live
+        return None
+
+    def set_model_enabled(self, model_id: str, enabled: bool) -> dict[str, Any]:
+        """Enable/disable a discovered model in the routing pool (persisted)."""
+        canonical = self._canonical_live_id(model_id)
+        if canonical is None:
+            raise ValueError(f"Unknown model '{model_id}' — refresh catalog first")
+        mid = canonical
         previous = set(self.disabled_models)
         if enabled:
             self.disabled_models.discard(mid)
@@ -418,15 +432,15 @@ class ModelRegistry:
         previous = set(self.disabled_models)
         changed: list[str] = []
         for mid in enable or []:
-            m = normalize_model_name(mid)
-            if m and m in self.live_ids and m in self.disabled_models:
-                self.disabled_models.discard(m)
-                changed.append(m)
+            canonical = self._canonical_live_id(mid)
+            if canonical and canonical in self.disabled_models:
+                self.disabled_models.discard(canonical)
+                changed.append(canonical)
         for mid in disable or []:
-            m = normalize_model_name(mid)
-            if m and m in self.live_ids and m not in self.disabled_models:
-                self.disabled_models.add(m)
-                changed.append(m)
+            canonical = self._canonical_live_id(mid)
+            if canonical and canonical not in self.disabled_models:
+                self.disabled_models.add(canonical)
+                changed.append(canonical)
         if changed:
             try:
                 self._persist_disabled_models(require_ok=True)
@@ -740,7 +754,7 @@ class ModelRegistry:
                     self._ingest_context_from_api_items(data)
                     for item in data:
                         if isinstance(item, dict) and item.get("id"):
-                            ids.add(str(item["id"]))
+                            ids.add(str(item["id"]).strip().lower())
                 if ids:
                     self.live_ids = ids
                     api_ok = True

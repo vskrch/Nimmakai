@@ -91,6 +91,25 @@ def test_set_model_enabled_filters_active_pool():
     assert "zen/mimo-v2.5-free" in registry.active_live_ids()
 
 
+def test_set_model_enabled_handles_mixed_case_live_ids():
+    """SambaNova-style providers return ids with uppercase letters.
+
+    The UI sends the exact id from /catalog, but registry.set_model_enabled
+    normalizes the input to lowercase. It must still match the live id.
+    """
+    _app, registry, _settings = _app_with_live_models(
+        ["sambanova/Meta-Llama-3.1-8B-Instruct"]
+    )
+    assert "sambanova/Meta-Llama-3.1-8B-Instruct" in registry.live_ids
+    # Frontend sends the exact mixed-case id shown in the model picker
+    result = registry.set_model_enabled(
+        "sambanova/Meta-Llama-3.1-8B-Instruct", False
+    )
+    assert result["enabled"] is False
+    assert "sambanova/Meta-Llama-3.1-8B-Instruct" not in registry.active_live_ids()
+    assert "sambanova/Meta-Llama-3.1-8B-Instruct" in registry.disabled_models
+
+
 def test_filter_available_never_fail_opens_disabled():
     _app, registry, _ = _app_with_live_models(
         ["zen/mimo-v2.5-free", "zen/big-pickle"]
@@ -124,8 +143,8 @@ def test_disabled_not_known_for_routing():
 def test_executor_chain_strips_disabled_passthrough():
     """Even a hand-built decision must not execute disabled models."""
     from nimmakai.routing.fallback import FallbackExecutor
-    from nimmakai.routing.selector import RouteDecision
     from nimmakai.routing.intents import Intent
+    from nimmakai.routing.selector import RouteDecision
 
     _app, registry, settings = _app_with_live_models(
         ["zen/mimo-v2.5-free", "zen/big-pickle"]
