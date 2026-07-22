@@ -137,6 +137,23 @@ def _is_retryable_model_error(status: int, body: Any) -> bool:
         msg = str((body.get("error") or {}).get("message") or "").lower()
         if "tool" in msg and ("not support" in msg or "unsupported" in msg):
             return True
+        # Providers that wrap server errors in 400 responses
+        _retryable_phrases = (
+            "upstream request failed",
+            "error from provider",
+            "internal error",
+            "service unavailable",
+            "request failed",
+            "bad gateway",
+            "gateway timeout",
+        )
+        if any(phrase in msg for phrase in _retryable_phrases):
+            logger.info(
+                "retryable 400 detected: status=%s msg=%s",
+                status,
+                msg[:200],
+            )
+            return True
     return status in {400, 413} and _is_context_overflow_message(_body_message(body))
 
 
@@ -374,7 +391,7 @@ class FallbackExecutor:
             logger.exception("provider availability check failed for model %s", model)
             return False
 
-    def _chain(self, decision: RouteDecision) -> list[str]:
+    def _chain(self, decision: RouteDecision, *, had_tools: bool = False) -> list[str]:
         max_n = int(getattr(self.settings, "max_model_fallbacks", 10) or 10)
         if decision.intent.value == "coding_agentic":
             max_n = max(
@@ -393,6 +410,18 @@ class FallbackExecutor:
                 )
                 not in disabled
             ]
+        # Pre-filter: skip models confirmed to not support tools when tools are present
+        if had_tools and hasattr(self.registry, "ladder"):
+            caps = getattr(self.registry.ladder, "capabilities", {})
+            filtered = []
+            for m in raw:
+                cap = caps.get(m) or {}
+                if cap.get("supports_tools") is False:
+                    logger.debug("pre-filter: skipping %s (tools not supported)", m)
+                    continue
+                filtered.append(m)
+            if filtered:
+                raw = filtered
         # Drop models whose provider has no active keys/runtime (production safety)
         available = [m for m in raw if self._provider_available(m)]
         if not available:
@@ -551,7 +580,11 @@ class FallbackExecutor:
         forward_headers: dict[str, str] | None = None,
         fallback_on_pool_exhaust: bool | None = None,
     ) -> UpstreamResult:
-        chain = self._chain(decision)
+        had_tools = bool(
+            (body.get("tools") or body.get("functions"))
+            or body.get("tool_choice") not in (None, "none", "None")
+        )
+        chain = self._chain(decision, had_tools=had_tools)
         if not chain:
             return UpstreamResult(
                 status_code=503,
@@ -625,6 +658,28 @@ class FallbackExecutor:
             attempt_body = {**body, "model": upstream_mid}
             t_attempt = time.perf_counter()
             pid = self._provider_id_for(model)
+            # Apply per-model recommendations (temperature, max_tokens)
+            if hasattr(self.registry, "ladder"):
+                rec = self.registry.ladder.model_recommendations(model)
+                if rec:
+                    # Cap max_tokens to model limit if client didn't set it
+                    max_limit = rec.get("max_tokens_limit")
+                    if max_limit and not attempt_body.get("max_tokens"):
+                        attempt_body["max_tokens"] = max_limit
+                    elif max_limit and attempt_body.get("max_tokens"):
+                        attempt_body["max_tokens"] = min(
+                            attempt_body["max_tokens"], max_limit
+                        )
+            # Log large payloads for debugging agentic loop context overflow
+            import sys
+            body_size = sys.getsizeof(str(attempt_body))
+            if body_size > 100_000:  # >100KB
+                logger.info(
+                    "large request body: model=%s size=%dKB messages=%d",
+                    model,
+                    body_size // 1024,
+                    len(attempt_body.get("messages") or []),
+                )
             try:
                 status, resp_body, headers, key = await client.request_json(
                     "POST",
@@ -900,7 +955,11 @@ class FallbackExecutor:
         """
         Try models until a stream opens successfully. Never switch mid-stream.
         """
-        chain = self._chain(decision)
+        had_tools = bool(
+            (body.get("tools") or body.get("functions"))
+            or body.get("tool_choice") not in (None, "none", "None")
+        )
+        chain = self._chain(decision, had_tools=had_tools)
         if not chain:
             payload = (
                 b'{"error":{"message":"No models available in routing chain. '
@@ -1200,6 +1259,24 @@ class FallbackExecutor:
                 ) -> AsyncIterator[bytes]:
                     nonlocal stream_failed
                     total_tokens = 0
+                    # Bounded queue for backpressure — blocks upstream when client is slow
+                    _BP_QUEUE_SIZE = 32
+                    _bp_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=_BP_QUEUE_SIZE)
+                    _upstream_done = False
+                    _upstream_error: Exception | None = None
+
+                    async def _producer() -> None:
+                        """Read from upstream and put into bounded queue."""
+                        nonlocal _upstream_done, _upstream_error, total_tokens
+                        try:
+                            async for chunk in rest:
+                                _scan_for_tokens(chunk)
+                                await _bp_queue.put(chunk)
+                        except Exception as e:
+                            _upstream_error = e
+                        finally:
+                            _upstream_done = True
+                            await _bp_queue.put(None)  # sentinel
 
                     def _scan_for_tokens(c: bytes) -> None:
                         nonlocal total_tokens
@@ -1215,14 +1292,16 @@ class FallbackExecutor:
                                 usage["completion_tokens"] = ct_i
                                 self.stats.record_tokens(mid, kid, pt_i, ct_i)
 
-                    if first:
-                        _scan_for_tokens(first)
-                        yield first
+                    # Start producer task
+                    producer_task = asyncio.create_task(_producer())
                     try:
+                        if first:
+                            _scan_for_tokens(first)
+                            yield first
                         while True:
                             try:
                                 chunk = await asyncio.wait_for(
-                                    anext(rest), timeout=idle_s
+                                    _bp_queue.get(), timeout=idle_s
                                 )
                             except TimeoutError:
                                 logger.warning(
@@ -1242,9 +1321,14 @@ class FallbackExecutor:
                                 )
                                 yield b"data: [DONE]\n\n"
                                 return
-                            _scan_for_tokens(chunk)
+                            if chunk is None:  # sentinel from producer
+                                break
                             yield chunk
-                    except StopAsyncIteration:
+                        # Producer done — check for errors
+                        if _upstream_error and not isinstance(
+                            _upstream_error, StopAsyncIteration
+                        ):
+                            raise _upstream_error
                         # Full stream done — update speed with total time + tokens
                         elapsed = max(0.01, time.monotonic() - t0)
                         if total_tokens > 0:
@@ -1258,8 +1342,10 @@ class FallbackExecutor:
                             )
                         return
                     except (asyncio.CancelledError, GeneratorExit):
+                        producer_task.cancel()
                         raise
                     except Exception as e:
+                        producer_task.cancel()
                         logger.warning(
                             "Stream ended early on %s: %s — closing SSE with error",
                             mid,

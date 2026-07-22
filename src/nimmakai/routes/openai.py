@@ -302,6 +302,7 @@ async def _prepare_routed(
             preferred_model=preferred_model,
         )
         # Rough token estimate for context-length filtering (T13)
+        # For multi-turn sessions, use cumulative context from previous turns
         try:
             msgs = body.get("messages") or body.get("input") or body.get("prompt") or ""
             char_n = (
@@ -310,7 +311,14 @@ async def _prepare_routed(
                 else len(str(msgs))
             )
             max_tok = int(body.get("max_tokens") or body.get("max_completion_tokens") or 0)
-            decision.estimated_tokens = int(char_n / 3.5) + max_tok + 512
+            base_estimate = int(char_n / 3.5) + max_tok + 512
+            # If we have session context, use the actual token count from previous turns
+            session_ctx = guard.sticky.get_session_context(ctx.session_id)
+            if session_ctx and session_ctx.turn_count > 0:
+                # Use actual tokens from previous turns + current request estimate
+                decision.estimated_tokens = session_ctx.total_prompt_tokens + base_estimate
+            else:
+                decision.estimated_tokens = base_estimate
         except Exception:
             decision.estimated_tokens = None
     except BaseException:
@@ -726,6 +734,15 @@ async def _chat_like(
                             success=ok and not err,
                             pin_model=pin_model,
                         )
+                        # Update session context for multi-turn agentic tracking
+                        usage = getattr(result, "usage", None) or {}
+                        if ctx.session_id and ok and not err:
+                            guard.sticky.update_session_context(
+                                ctx.session_id,
+                                prompt_tokens=int(usage.get("prompt_tokens") or result.prompt_tokens or 0),
+                                completion_tokens=int(usage.get("completion_tokens") or result.completion_tokens or 0),
+                                model_id=result.model,
+                            )
                         status_final = result.status_code if not err else 499
                         _finish_log(
                             entry,
@@ -803,6 +820,14 @@ async def _chat_like(
                 success=200 <= result_j.status_code < 300,
                 pin_model=pin_model,
             )
+            # Update session context for multi-turn agentic tracking
+            if ctx.session_id and 200 <= result_j.status_code < 300:
+                guard.sticky.update_session_context(
+                    ctx.session_id,
+                    prompt_tokens=result_j.prompt_tokens,
+                    completion_tokens=result_j.completion_tokens,
+                    model_id=result_j.model,
+                )
             body_out = normalize_completion_json(
                 result_j.body, routed_model=result_j.model or None
             )

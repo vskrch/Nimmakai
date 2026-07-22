@@ -16,6 +16,17 @@ class StickyBinding:
     expires: float = 0.0
 
 
+@dataclass
+class SessionContext:
+    """Tracks cumulative token usage across a multi-turn agentic session."""
+    total_prompt_tokens: int = 0
+    total_completion_tokens: int = 0
+    turn_count: int = 0
+    last_prompt_tokens: int = 0
+    last_completion_tokens: int = 0
+    last_model: str | None = None
+
+
 class StickySessionStore:
     """
     Soft affinity for multi-turn chats.
@@ -28,6 +39,7 @@ class StickySessionStore:
         self.ttl_seconds = ttl_seconds
         self.max_size = max_size
         self._map: OrderedDict[str, StickyBinding] = OrderedDict()
+        self._context_map: OrderedDict[str, SessionContext] = OrderedDict()
 
     def _get_binding(self, session_id: str | None) -> StickyBinding | None:
         if not session_id:
@@ -176,3 +188,42 @@ class StickySessionStore:
                 return "fp:" + hashlib.sha256(basis.encode()).hexdigest()[:28]
 
         return None
+
+    def get_session_context(self, session_id: str | None) -> SessionContext | None:
+        """Return cumulative context for a session, or None if unknown/expired."""
+        if not session_id:
+            return None
+        ctx = self._context_map.get(session_id)
+        if ctx is None:
+            return None
+        # Check if session is still alive (reuse binding expiry)
+        binding = self._map.get(session_id)
+        if binding is None or time.monotonic() > binding.expires:
+            self._context_map.pop(session_id, None)
+            return None
+        return ctx
+
+    def update_session_context(
+        self,
+        session_id: str | None,
+        *,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        model_id: str | None = None,
+    ) -> None:
+        """Accumulate token usage after a successful request."""
+        if not session_id:
+            return
+        ctx = self._context_map.get(session_id)
+        if ctx is None:
+            ctx = SessionContext()
+            self._context_map[session_id] = ctx
+        ctx.total_prompt_tokens += max(0, prompt_tokens)
+        ctx.total_completion_tokens += max(0, completion_tokens)
+        ctx.turn_count += 1
+        ctx.last_prompt_tokens = prompt_tokens
+        ctx.last_completion_tokens = completion_tokens
+        ctx.last_model = model_id
+        self._context_map.move_to_end(session_id)
+        while len(self._context_map) > self.max_size:
+            self._context_map.popitem(last=False)

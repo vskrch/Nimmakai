@@ -17,6 +17,7 @@ import math
 import random
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 from nimmakai.catalog.docs_fetcher import DocModel
 from nimmakai.catalog.families import (
@@ -440,7 +441,10 @@ class LadderService:
             "live_ids": sorted(self.live_ids),
             "ladders": ladders,
             "best_coding": list(
-                (self._ladders.get(("coding_agentic", "default")) or LadderSnapshot("", [], {}, 0)).ladder[:12]
+                (
+                    self._ladders.get(("coding_agentic", "default"))
+                    or LadderSnapshot("", [], {}, 0)
+                ).ladder[:12]
             ),
             "best_chat": list(
                 (self._ladders.get(("chat_fast", "default")) or LadderSnapshot("", [], {}, 0)).ladder[:8]
@@ -719,7 +723,45 @@ class LadderService:
             if caps.get("supports_vision") is False:
                 return 0.0
 
+        if intent == "reasoning":
+            if caps.get("supports_reasoning") is True:
+                return 1.20  # reasoning models get a bonus for reasoning tasks
+            if caps.get("supports_reasoning") is False:
+                return 0.8
+
         return 1.0
+
+    def model_recommendations(self, model_id: str) -> dict[str, Any]:
+        """Return per-model recommendations for temperature, max_tokens, etc."""
+        caps = self.capabilities.get(model_id) or {}
+        mid = model_id.lower()
+        rec: dict[str, Any] = {}
+
+        # Temperature recommendations based on model type
+        if caps.get("supports_reasoning") or any(
+            k in mid for k in ("o1", "o3", "r1", "deepseek-r1")
+        ):
+            rec["temperature"] = 1.0  # reasoning models default to 1
+        elif any(k in mid for k in ("coder", "code", "coding")):
+            rec["temperature"] = 0.0  # coding models work best with 0
+        # Max tokens limits based on known model capabilities
+        if caps.get("max_output_tokens"):
+            rec["max_tokens_limit"] = caps["max_output_tokens"]
+        elif any(k in mid for k in ("gpt-4o", "gpt-4.1")):
+            rec["max_tokens_limit"] = 16384
+        elif any(k in mid for k in ("claude",)):
+            rec["max_tokens_limit"] = 8192
+        elif any(k in mid for k in ("deepseek",)):
+            rec["max_tokens_limit"] = 8192
+        # Structured outputs support
+        if caps.get("supports_structured_outputs") is True:
+            rec["supports_structured_outputs"] = True
+        elif any(
+            k in mid
+            for k in ("gpt-4o", "gpt-4.1", "gpt-4o-mini", "claude", "gemini")
+        ):
+            rec["supports_structured_outputs"] = True
+        return rec
 
     def _cost_multiplier(self, mid_lower: str) -> float:
         """
