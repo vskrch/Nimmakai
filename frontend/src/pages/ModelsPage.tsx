@@ -72,7 +72,7 @@ export default function ModelsPage() {
     setBusy('refresh')
     const r = await ap('/admin/catalog/refresh', {})
     setBusy(null)
-    if (r && (r as Record<string, unknown>).ok !== false) {
+    if (r && (r as Record<string, unknown>).ok) {
       setMsg({ text: 'Catalog refreshed', ok: true })
       reloadCatalog()
     } else {

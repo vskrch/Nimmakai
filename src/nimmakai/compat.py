@@ -235,7 +235,8 @@ def _rewrite_model_bytes(chunk: bytes, routed_model: str) -> bytes:
     replacement = b'"model":' + json.dumps(routed_model, ensure_ascii=False).encode(
         "utf-8"
     )
-    return _MODEL_FIELD_RE.sub(replacement, chunk, count=1)
+    # Use lambda to avoid re.sub interpreting backslash escapes in the replacement
+    return _MODEL_FIELD_RE.sub(lambda _: replacement, chunk, count=1)
 
 
 async def normalize_sse_stream(

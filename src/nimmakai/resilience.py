@@ -103,10 +103,13 @@ async def heal_and_refresh(
 def emergency_coding_chain(registry: Any, *, max_n: int = 10) -> list[str]:
     """
     Last-resort chain when ladder is empty: score live models for coding_agentic.
+
+    Does NOT rebuild the frozen ladder (too expensive on request path).
+    Returns active models sorted by ladder scoring or alphabetically as fallback.
     """
     if registry is None or not getattr(registry, "live_ids", None):
         return []
-    active = (
+    active = sorted(
         registry.active_live_ids()
         if hasattr(registry, "active_live_ids")
         else set(registry.live_ids)
@@ -115,17 +118,15 @@ def emergency_coding_chain(registry: Any, *, max_n: int = 10) -> list[str]:
         chain = registry.ladder.ladder_for("coding_agentic", max_n=max_n)
         if chain:
             return registry.health_reorder(chain)
-        # Cold ladder: rebuild then retry (respect admin-disabled models)
-        registry.ladder.rebuild(set(active))
-        chain = registry.ladder.ladder_for("coding_agentic", max_n=max_n)
-        if not chain:
+        # Cold ladder: return active models (fallback executor handles ranking)
+        if not active:
             _alert(
                 "nimmakai.all_chains_empty",
                 intent="coding_agentic",
-                live_models=len(active),
-                cause="ladder_empty_after_rebuild",
+                live_models=0,
+                cause="no_live_models",
             )
-        return registry.health_reorder(chain) if chain else sorted(active)[:max_n]
+        return active[:max_n]
     except Exception:
         logger.exception("emergency_coding_chain failed")
         _alert(
@@ -134,4 +135,4 @@ def emergency_coding_chain(registry: Any, *, max_n: int = 10) -> list[str]:
             live_models=len(active),
             cause="emergency_chain_failed",
         )
-        return sorted(active)[:max_n]
+        return active[:max_n]

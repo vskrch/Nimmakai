@@ -133,6 +133,13 @@ class TraceWriter:
                             logger.exception("analytics on_flush hook failed")
                 except Exception:
                     logger.exception("analytics batch write failed (n=%s)", len(batch))
+                    # Re-enqueue on transient error so traces aren't silently lost.
+                    # If queue is full, count as dropped.
+                    for trace in batch:
+                        try:
+                            self._queue.put_nowait(trace)
+                        except asyncio.QueueFull:
+                            self._dropped += 1
 
     def _drain(self, *, limit: int) -> list[TraceRecord]:
         out: list[TraceRecord] = []

@@ -64,6 +64,8 @@ class StreamResult:
             "cached_tokens": 0,
         }
     )
+    # True when robust_iter detected a mid-stream failure and emitted error events
+    stream_failed: bool = False
 
 
 @dataclass
@@ -351,10 +353,12 @@ class FallbackExecutor:
 
     def _client_for(self, model: str) -> tuple[Any, str]:
         """Return (upstream_client, upstream_model_id) for this namespaced model."""
+        # Use original-case id for upstream round-trip (case-sensitive providers)
+        original = self.registry.original_id(model)
         if self.hub is not None:
-            client, _pid, upstream_mid = self.hub.client_for_model(model)
+            client, _pid, upstream_mid = self.hub.client_for_model(original)
             return client, upstream_mid
-        return self.upstream, model
+        return self.upstream, original
 
     def _provider_available(self, model: str) -> bool:
         if self.hub is None:
@@ -1052,33 +1056,40 @@ class FallbackExecutor:
                 except StopAsyncIteration:
                     # Empty stream body — treat as soft-fail and try next model
                     first_chunk = b""
+                    self._circuit_fail(pid)
+                    self._emit_span(
+                        self._make_upstream_span(
+                            model=model,
+                            t0=t_attempt,
+                            status=502,
+                            success=False,
+                            error_message="empty_stream",
+                            span_type="fallback_advance"
+                            if idx < len(chain) - 1
+                            else "upstream",
+                        )
+                    )
+                    if hasattr(byte_iter, "aclose"):
+                        with suppress(Exception):
+                            await byte_iter.aclose()
+                    self.stats.fallback_advances += 1
+                    self.registry.record_outcome(
+                        model,
+                        key.key_id if key else None,
+                        success=False,
+                        status_code=502,
+                        intent=decision.intent.value,
+                    )
                     if idx < len(chain) - 1:
                         logger.warning(
                             "Empty stream body on %s; falling back", model
                         )
-                        self._circuit_fail(pid)
-                        self._emit_span(
-                            self._make_upstream_span(
-                                model=model,
-                                t0=t_attempt,
-                                status=502,
-                                success=False,
-                                error_message="empty_stream",
-                                span_type="fallback_advance",
-                            )
-                        )
-                        if hasattr(byte_iter, "aclose"):
-                            with suppress(Exception):
-                                await byte_iter.aclose()
-                        self.stats.fallback_advances += 1
-                        self.registry.record_outcome(
-                            model,
-                            key.key_id if key else None,
-                            success=False,
-                            status_code=502,
-                            intent=decision.intent.value,
-                        )
                         continue
+                    # Last model: empty stream → terminal error, not 200
+                    last_status, last_model, last_pid = 502, model, pid
+                    logger.warning(
+                        "Empty stream body on last model %s; returning 502", model
+                    )
                 except TimeoutError:
                     saw_ttft_stall = True
                     last_status = 504
@@ -1175,6 +1186,7 @@ class FallbackExecutor:
                     "completion_tokens": 0,
                     "cached_tokens": 0,
                 }
+                stream_failed = False
 
                 async def robust_iter(
                     first: bytes,
@@ -1186,6 +1198,7 @@ class FallbackExecutor:
                     t0: float = bound_t0,
                     usage: dict[str, int] = usage_bag,
                 ) -> AsyncIterator[bytes]:
+                    nonlocal stream_failed
                     total_tokens = 0
 
                     def _scan_for_tokens(c: bytes) -> None:
@@ -1252,6 +1265,7 @@ class FallbackExecutor:
                             mid,
                             e,
                         )
+                        stream_failed = True
                         # finish_reason=error chunk + error event before [DONE] (F-06/T6)
                         err_msg = str(e)[:500]
                         finish = {
@@ -1300,6 +1314,7 @@ class FallbackExecutor:
                     completion_tokens=usage_bag["completion_tokens"],
                     cached_tokens=usage_bag["cached_tokens"],
                     provider_id=pid,
+                    stream_failed=stream_failed,
                 )
 
             # Failed stream open — advance on same retryable set as JSON path

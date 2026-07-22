@@ -150,6 +150,20 @@ async def verify_email(request: Request, token: str = "") -> Response:
             status_code=404,
         )
 
+    # mark_verified only transitions STATUS_UNVERIFIED → STATUS_PENDING.
+    # If the user was already verified, rejected, or suspended, the UPDATE
+    # matched zero rows and the status is unchanged — reject the re-click.
+    if user["status"] != STATUS_PENDING:
+        return JSONResponse(
+            {
+                "error": {
+                    "message": "Account is not pending verification",
+                    "code": "already_verified",
+                }
+            },
+            status_code=409,
+        )
+
     # Admin emails auto-approve after verify
     issued_key = None
     if user.get("role") == "admin":

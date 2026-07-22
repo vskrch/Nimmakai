@@ -204,12 +204,12 @@ class ProviderHub:
         if rt is not None and rt.config.enabled and rt.config.resolved_keys():
             return rt.upstream, pid, upstream_mid
 
+        # Config states — don't trip the circuit breaker (only HTTP/transport
+        # failures should do that). FallbackExecutor will advance to next model.
         if rt is None or not rt.config.enabled:
-            self.circuit_breaker.fail(pid)
             raise RuntimeError(
                 f"provider '{pid}' is not available for model '{model_id}'"
             )
-        self.circuit_breaker.fail(pid)
         raise RuntimeError(
             f"provider '{pid}' has no API keys for model '{model_id}'"
         )

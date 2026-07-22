@@ -476,7 +476,7 @@ class LadderService:
         cached_live = data.get("live_ids") or []
         if isinstance(cached_live, list) and cached_live:
             # Keep union so offline models drop via filter; new live ids still known
-            self.live_ids = set(self.live_ids) | {str(x) for x in cached_live}
+            self.live_ids = set(self.live_ids) | {str(x).lower() for x in cached_live}
         self.computed_at = float(data.get("computed_at") or data.get("_updated_at") or 0)
         self.frozen = freeze
         logger.info(

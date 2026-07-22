@@ -108,8 +108,8 @@ def _mask_key(k: str) -> str:
 
 def namespace_model(provider_id: str, upstream_model_id: str) -> str:
     pid = provider_id.strip().lower()
-    mid = upstream_model_id.strip().lower()
-    if mid.startswith(f"{pid}/"):
+    mid = upstream_model_id.strip()
+    if mid.lower().startswith(f"{pid}/"):
         return mid
     return f"{pid}/{mid}"
 
@@ -417,36 +417,49 @@ class ProviderStore:
             # Single-row upsert for the common case is covered by full rewrite
             # to keep remove/disable consistent with in-memory map.
             self._persist_all()
-        # Keep JSON as a human-readable backup / export
+        # Keep JSON as a human-readable backup / export (non-blocking)
         try:
-            self.overlay_path.parent.mkdir(parents=True, exist_ok=True)
-            payload = {
-                "providers": [
-                    {
-                        "id": p.id,
-                        "name": p.name,
-                        "base_url": p.base_url,
-                        "api_keys": p.api_keys,
-                        "api_keys_env": p.api_keys_env,
-                        "enabled": p.enabled,
-                        "rpm_limit": p.rpm_limit,
-                        "rpd_limit": p.rpd_limit,
-                        "max_in_flight_per_key": p.max_in_flight_per_key,
-                        "api_style": p.api_style,
-                        "builtin": p.builtin,
-                        "model_whitelist": list(p.model_whitelist),
-                        "model_blacklist": list(p.model_blacklist),
-                    }
-                    for p in self.providers.values()
-                ],
-                "backend": "sqlite" if self._db is not None else "json",
-                "sqlite_path": str(self.db_path) if self.db_path else None,
-            }
-            tmp = self.overlay_path.with_suffix(".tmp")
-            tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-            tmp.replace(self.overlay_path)
-        except Exception:
-            logger.exception("failed to write providers.json backup")
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        def _write_json() -> None:
+            try:
+                self.overlay_path.parent.mkdir(parents=True, exist_ok=True)
+                payload = {
+                    "providers": [
+                        {
+                            "id": p.id,
+                            "name": p.name,
+                            "base_url": p.base_url,
+                            "api_keys": p.api_keys,
+                            "api_keys_env": p.api_keys_env,
+                            "enabled": p.enabled,
+                            "rpm_limit": p.rpm_limit,
+                            "rpd_limit": p.rpd_limit,
+                            "max_in_flight_per_key": p.max_in_flight_per_key,
+                            "api_style": p.api_style,
+                            "builtin": p.builtin,
+                            "model_whitelist": list(p.model_whitelist),
+                            "model_blacklist": list(p.model_blacklist),
+                        }
+                        for p in self.providers.values()
+                    ],
+                    "backend": "sqlite" if self._db is not None else "json",
+                    "sqlite_path": str(self.db_path) if self.db_path else None,
+                }
+                tmp = self.overlay_path.with_suffix(".tmp")
+                tmp.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                tmp.replace(self.overlay_path)
+            except Exception:
+                logger.exception("failed to write providers.json backup")
+
+        if loop is not None:
+            loop.create_task(asyncio.to_thread(_write_json))
+        else:
+            _write_json()
 
     def list_masked(self) -> list[dict[str, Any]]:
         return [p.mask() for p in sorted(self.providers.values(), key=lambda x: x.id)]

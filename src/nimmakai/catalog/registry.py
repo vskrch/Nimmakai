@@ -59,6 +59,8 @@ class ModelRegistry:
         self.live_ids: set[str] = set()
         # Admin model-pool customization: discovered models opted out of routing
         self.disabled_models: set[str] = set()
+        # Lowercase namespaced id → original-case namespaced id (for upstream round-trip)
+        self._original_ids: dict[str, str] = {}
         self.context_by_model: dict[str, int] = {}
         self.probed_ok: set[str] = set()
         self.doc_models: list[DocModel] = []
@@ -193,16 +195,25 @@ class ModelRegistry:
         )
 
     def _persist_snapshot(self) -> None:
-        save_snapshot(
-            self.snapshot_path,
-            {
-                "live_ids": sorted(self.live_ids),
-                "context_by_model": dict(sorted(self.context_by_model.items())),
-                "probed_ok": sorted(self.probed_ok),
-                "dynamic_chains": self.dynamic_chains,
-                "saved_at": time.time(),
-            },
-        )
+        """Save catalog snapshot to disk. Non-blocking when called from async context."""
+        try:
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        payload = {
+            "live_ids": sorted(self.live_ids),
+            "context_by_model": dict(sorted(self.context_by_model.items())),
+            "probed_ok": sorted(self.probed_ok),
+            "dynamic_chains": self.dynamic_chains,
+            "saved_at": time.time(),
+        }
+        if loop is not None:
+            # Fire-and-forget: don't block the event loop on disk I/O
+            loop.create_task(asyncio.to_thread(save_snapshot, self.snapshot_path, payload))
+        else:
+            save_snapshot(self.snapshot_path, payload)
 
     def auto_tokens(self) -> set[str]:
         from nimmakai.routing.auto_router import all_auto_router_ids, is_auto_router_id
@@ -389,15 +400,18 @@ class ModelRegistry:
         mid = normalize_model_name(model_id)
         if not mid:
             return None
-        # Fast path: exact normalized match
         if mid in self.live_ids:
             return mid
-        # Case-insensitive scan for providers that return mixed-case ids
-        # (e.g. SambaNova). This is O(n) but only used on admin mutations.
-        for live in self.live_ids:
-            if live.lower() == mid:
-                return live
         return None
+
+    def original_id(self, model_id: str) -> str:
+        """Return the original-case namespaced id for upstream requests.
+
+        Falls back to the input when the model is not in the live pool
+        (e.g. passthrough for unknown ids).
+        """
+        mid = normalize_model_name(model_id)
+        return self._original_ids.get(mid, model_id)
 
     def set_model_enabled(self, model_id: str, enabled: bool) -> dict[str, Any]:
         """Enable/disable a discovered model in the routing pool (persisted)."""
@@ -523,7 +537,11 @@ class ModelRegistry:
         # Keep live_ids from catalog snapshot if newer set is empty
         cached_live = data.get("live_ids") or []
         if isinstance(cached_live, list) and cached_live and not self.live_ids:
-            self.live_ids = {str(x) for x in cached_live}
+            # Lowercase for membership; preserve original case for upstream round-trip
+            for x in cached_live:
+                s = str(x)
+                self._original_ids[s.lower()] = s
+            self.live_ids = {str(x).lower() for x in cached_live}
             self.ladder.live_ids = set(self.active_live_ids())
         self._sync_chains_from_ladder()
         return True
@@ -754,7 +772,9 @@ class ModelRegistry:
                     self._ingest_context_from_api_items(data)
                     for item in data:
                         if isinstance(item, dict) and item.get("id"):
-                            ids.add(str(item["id"]).strip().lower())
+                            original = str(item["id"]).strip()
+                            ids.add(original.lower())
+                            self._original_ids[original.lower()] = original
                 if ids:
                     self.live_ids = ids
                     api_ok = True
@@ -849,7 +869,16 @@ class ModelRegistry:
                 new_ids.add(ns)
                 namespaced_items.append({**item, "id": ns})
             self._ingest_context_from_api_items(namespaced_items)
-            self.live_ids |= new_ids
+            # Lowercase for membership; preserve original case for upstream round-trip
+            new_ids_lower: set[str] = set()
+            for ns in new_ids:
+                self._original_ids[ns.lower()] = ns
+                new_ids_lower.add(ns.lower())
+            self.live_ids |= new_ids_lower
+            # Sync ladder provider ids so scoring/split uses the new provider
+            self.ladder.provider_ids = set(
+                m.split("/", 1)[0] for m in self.live_ids
+            )
             logger.info(
                 "provider %s imported %s model(s) into live pool (total=%s)",
                 pid, len(new_ids), len(self.live_ids),
@@ -883,9 +912,11 @@ class ModelRegistry:
 
         self.ladder.provider_ids = set(hub.provider_ids)
         merged: set[str] = set()
+        failed_pids: set[str] = set()
         any_ok = False
 
-        for pid, rt in hub.runtimes.items():
+        # Snapshot runtimes to avoid RuntimeError on concurrent admin mutations
+        for pid, rt in list(hub.runtimes.items()):
             if not rt.config.enabled:
                 continue
             if not rt.config.resolved_keys():
@@ -926,8 +957,22 @@ class ModelRegistry:
                 )
             except Exception:
                 logger.exception("provider %s catalog refresh failed", pid)
+                failed_pids.add(pid)
 
         if merged:
+            # Lowercase for O(1) membership; preserve original case for upstream round-trip
+            self._original_ids = {m.lower(): m for m in merged}
+            # Retain models from providers that failed this refresh (avoid eviction)
+            if failed_pids:
+                retained = {
+                    m for m in self.live_ids
+                    if m.split("/", 1)[0] in failed_pids
+                }
+                merged_lower = {m.lower() for m in merged}
+                for m in retained:
+                    if m.lower() not in merged_lower:
+                        self._original_ids[m.lower()] = m
+                merged = {m.lower() for m in merged} | retained
             self.live_ids = merged
         elif not self.live_ids:
             self.last_refresh_ok = False

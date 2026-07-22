@@ -99,7 +99,7 @@ def test_plugins_allowed_models_and_tradeoff() -> None:
     assert opts.allowed_models == ["zen/*", "qwen/*"]
     assert opts.cost_quality_tradeoff == 2
     assert opts.tier == "frontier"  # tradeoff 2 → quality
-    assert tradeoff_to_tier(9) == "efficient"
+    assert tradeoff_to_tier(9) == "free"  # tradeoff 8–10 → cheapest tier
 
     s = _selector()
     d = s.resolve("openrouter/auto", _intent(), auto_opts=opts)

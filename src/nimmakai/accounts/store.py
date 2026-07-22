@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any
@@ -18,6 +19,8 @@ from nimmakai.accounts.crypto import (
 
 if TYPE_CHECKING:
     from nimmakai.catalog.db import NimmakaiDB
+
+logger = logging.getLogger(__name__)
 
 STATUS_UNVERIFIED = "unverified"
 STATUS_PENDING = "pending_approval"
@@ -283,7 +286,6 @@ class AccountStore:
         if not raw or not raw.startswith("sk-nk-"):
             return None
         kh = hash_token(raw)
-        now = time.time()
         with self._db._lock:
             row = self._db._conn.execute(
                 """
@@ -299,11 +301,49 @@ class AccountStore:
                 return None
             if row["status"] != STATUS_ACTIVE:
                 return None
-            self._db._conn.execute(
-                "UPDATE api_keys SET last_used_at = ? WHERE id = ?",
-                (now, row["key_id"]),
-            )
+            # Write-behind: batch last_used_at updates to avoid blocking the
+            # event loop on every authenticated request. Flush every 60s.
+            self._dirty_keys.add(row["key_id"])
+            if not getattr(self, "_flush_scheduled", False):
+                self._schedule_flush()
             return dict(row)
+
+    _dirty_keys: set[str] = set()
+    _flush_scheduled: bool = False
+
+    def _schedule_flush(self) -> None:
+        try:
+            import asyncio
+
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self._flush_dirty_keys()
+            return
+        self._flush_scheduled = True
+
+        async def _flush_bg() -> None:
+            try:
+                await asyncio.to_thread(self._flush_dirty_keys)
+            finally:
+                self._flush_scheduled = False
+
+        loop.create_task(_flush_bg())
+
+    def _flush_dirty_keys(self) -> None:
+        if not self._dirty_keys:
+            return
+        now = time.time()
+        keys = set(self._dirty_keys)
+        self._dirty_keys.clear()
+        with self._db._lock:
+            for key_id in keys:
+                try:
+                    self._db._conn.execute(
+                        "UPDATE api_keys SET last_used_at = ? WHERE id = ?",
+                        (now, key_id),
+                    )
+                except Exception:
+                    logger.debug("failed to update last_used_at for %s", key_id)
 
     def list_keys_for_user(self, user_id: str) -> list[dict[str, Any]]:
         with self._db._lock:

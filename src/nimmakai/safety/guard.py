@@ -79,7 +79,7 @@ class AccountGuard:
                 preferred_key_id=preferred,
                 preferred_model=preferred_model,
             )
-        except Exception:
+        except BaseException:
             await self.gate.release()
             raise
 

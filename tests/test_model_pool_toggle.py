@@ -61,8 +61,9 @@ def _app_with_live_models(model_ids: list[str]):
     hub = ProviderHub(store, settings)
     registry = ModelRegistry.from_settings(settings)
     registry.bind_db(store._db)
-    registry.live_ids = set(model_ids)
-    registry.ladder.provider_ids = {m.split("/", 1)[0] for m in model_ids}
+    registry._original_ids = {m.lower(): m for m in model_ids}
+    registry.live_ids = {m.lower() for m in model_ids}
+    registry.ladder.provider_ids = {m.split("/", 1)[0].lower() for m in model_ids}
     registry.recompute_rankings(persist=True)
     app.state.hub = hub
     app.state.registry = registry
@@ -100,14 +101,16 @@ def test_set_model_enabled_handles_mixed_case_live_ids():
     _app, registry, _settings = _app_with_live_models(
         ["sambanova/Meta-Llama-3.1-8B-Instruct"]
     )
-    assert "sambanova/Meta-Llama-3.1-8B-Instruct" in registry.live_ids
+    assert "sambanova/meta-llama-3.1-8b-instruct" in registry.live_ids
     # Frontend sends the exact mixed-case id shown in the model picker
     result = registry.set_model_enabled(
         "sambanova/Meta-Llama-3.1-8B-Instruct", False
     )
     assert result["enabled"] is False
-    assert "sambanova/Meta-Llama-3.1-8B-Instruct" not in registry.active_live_ids()
-    assert "sambanova/Meta-Llama-3.1-8B-Instruct" in registry.disabled_models
+    assert "sambanova/meta-llama-3.1-8b-instruct" not in registry.active_live_ids()
+    assert "sambanova/meta-llama-3.1-8b-instruct" in registry.disabled_models
+    # Original-case id preserved for upstream round-trip
+    assert registry.original_id("sambanova/meta-llama-3.1-8b-instruct") == "sambanova/Meta-Llama-3.1-8B-Instruct"
 
 
 def test_filter_available_never_fail_opens_disabled():

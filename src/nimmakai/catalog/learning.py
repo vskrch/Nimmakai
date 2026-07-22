@@ -70,6 +70,9 @@ class LearningStore:
     _intent_totals: dict[str, int] = field(default_factory=dict)
     _dirty: bool = False
     _last_save_at: float = 0.0
+    # Epoch counter: bumped on every record(); save clears only if epoch matches
+    _epoch: int = 0
+    _save_scheduled: bool = False
 
     def _key(self, intent: str, model_id: str) -> tuple[str, str]:
         return intent, model_id
@@ -118,6 +121,7 @@ class LearningStore:
             s.failures += 1
             s.ewma_quality = 0.7 * s.ewma_quality + 0.3 * (-1.0)
         self._dirty = True
+        self._epoch += 1
         self.save_if_due()
 
     # ------------------------------------------------------------------
@@ -218,9 +222,15 @@ class LearningStore:
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        # Snapshot epoch before writing; if record() bumps it during write,
+        # _dirty stays True and the next save will pick up the new data.
+        epoch_at_start = self._epoch
+        # Shallow-copy mutable dicts to avoid mutation during iteration
+        data_snapshot = dict(self._data)
+        totals_snapshot = dict(self._intent_totals)
         payload = {
             "saved_at": time.time(),
-            "intent_totals": dict(self._intent_totals),
+            "intent_totals": totals_snapshot,
             "intents": {
                 intent: {
                     mid: {
@@ -239,13 +249,15 @@ class LearningStore:
                     }
                     for mid, st in models.items()
                 }
-                for intent, models in self._data.items()
+                for intent, models in data_snapshot.items()
             },
         }
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
         tmp.replace(self.path)
-        self._dirty = False
+        # Only clear dirty if no new records arrived during the write
+        if self._epoch == epoch_at_start:
+            self._dirty = False
         self._last_save_at = time.time()
 
     def snapshot(self) -> dict:

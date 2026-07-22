@@ -294,24 +294,29 @@ async def _prepare_routed(
     # Auto-router session model pin (OpenRouter sticky model selection)
     preferred_model = getattr(ctx, "preferred_model", None)
     t_route = time.perf_counter()
-    decision = selector.resolve(
-        body.get("model"),
-        intent,
-        auto_opts=auto_opts,
-        preferred_model=preferred_model,
-    )
-    # Rough token estimate for context-length filtering (T13)
     try:
-        msgs = body.get("messages") or body.get("input") or body.get("prompt") or ""
-        char_n = (
-            sum(len(str(m)) for m in msgs)
-            if isinstance(msgs, list)
-            else len(str(msgs))
+        decision = selector.resolve(
+            body.get("model"),
+            intent,
+            auto_opts=auto_opts,
+            preferred_model=preferred_model,
         )
-        max_tok = int(body.get("max_tokens") or body.get("max_completion_tokens") or 0)
-        decision.estimated_tokens = int(char_n / 3.5) + max_tok + 512
-    except Exception:
-        decision.estimated_tokens = None
+        # Rough token estimate for context-length filtering (T13)
+        try:
+            msgs = body.get("messages") or body.get("input") or body.get("prompt") or ""
+            char_n = (
+                sum(len(str(m)) for m in msgs)
+                if isinstance(msgs, list)
+                else len(str(msgs))
+            )
+            max_tok = int(body.get("max_tokens") or body.get("max_completion_tokens") or 0)
+            decision.estimated_tokens = int(char_n / 3.5) + max_tok + 512
+        except Exception:
+            decision.estimated_tokens = None
+    except BaseException:
+        # Gate was acquired above — release it before propagating the error
+        await guard.after_request(ctx, success=False)
+        raise
     route_ms = (time.perf_counter() - t_route) * 1000
     timing["route_ms"] = route_ms
     collect_span(
@@ -711,6 +716,9 @@ async def _chat_like(
                         with suppress(Exception):
                             yield b"data: [DONE]\n\n"
                     finally:
+                        # Check if robust_iter detected a mid-stream failure
+                        if result.stream_failed and not err:
+                            err = "mid_stream_failure"
                         await guard.after_request(
                             ctx,
                             key_id=key_id,
@@ -1005,6 +1013,27 @@ async def embeddings(request: Request) -> JSONResponse:
                 content=guard.pool_exhausted_error(),
                 status_code=503,
                 headers={"Retry-After": "5"},
+            )
+        raise
+    except ValueError as exc:
+        if str(exc) == "model_disabled":
+            return JSONResponse(
+                content=openai_error(
+                    "The requested model is disabled in the model pool.",
+                    code="model_disabled",
+                    type_="invalid_request_error",
+                    param="model",
+                ),
+                status_code=400,
+            )
+        if str(exc) == "no_vision_model":
+            return JSONResponse(
+                content=openai_error(
+                    "No vision-capable model is currently available.",
+                    code="no_vision_model",
+                    type_="invalid_request_error",
+                ),
+                status_code=400,
             )
         raise
     preferred = ctx.preferred_key_id

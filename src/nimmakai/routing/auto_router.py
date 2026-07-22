@@ -101,7 +101,7 @@ def tradeoff_to_tier(tradeoff: int) -> AutoTier:
         return "balanced"
     if t <= 7:
         return "efficient"
-    return "efficient"
+    return "free"
 
 
 def tier_to_variant(tier: AutoTier) -> str:

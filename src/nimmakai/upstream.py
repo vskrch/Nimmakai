@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
@@ -129,6 +130,7 @@ class UpstreamClient:
         last_error: Exception | None = None
         for attempt in range(max_retries):
             key = await self.pool.acquire(preferred_key_id=preferred_key_id)
+            released = False
             started = time.monotonic()
             try:
                 resp = await self.client.request(
@@ -150,6 +152,7 @@ class UpstreamClient:
                     status_code=resp.status_code,
                     retry_after_seconds=retry_after,
                 )
+                released = True
 
                 if rate_limited and attempt < max_retries - 1:
                     delay = await sleep_backoff(
@@ -207,8 +210,12 @@ class UpstreamClient:
                     continue
 
                 return resp.status_code, body, self._filter_headers(resp.headers), key
-            except Exception as exc:
-                await self.pool.release(key, success=False, latency=None)
+            except BaseException as exc:
+                # Cancel-safe: release key even on cancellation/task abort
+                if not released:
+                    await self.pool.release(key, success=False, latency=None)
+                if isinstance(exc, (asyncio.CancelledError, GeneratorExit)):
+                    raise
                 last_error = exc
                 logger.exception("upstream error on %s: %s", key.key_id, exc)
                 if attempt >= max_retries - 1:
@@ -242,6 +249,7 @@ class UpstreamClient:
         last_error: Exception | None = None
         for attempt in range(max_retries):
             key = await self.pool.acquire(preferred_key_id=preferred_key_id)
+            released = False
             started = time.monotonic()
             try:
                 req = self.client.build_request(
@@ -264,6 +272,7 @@ class UpstreamClient:
                         status_code=429,
                         retry_after_seconds=retry_after,
                     )
+                    released = True
                     if attempt < max_retries - 1:
                         delay = await sleep_backoff(
                             attempt,
@@ -297,6 +306,7 @@ class UpstreamClient:
                     await self.pool.release(
                         key, success=False, status_code=resp.status_code
                     )
+                    released = True
                     if attempt < max_retries - 1:
                         continue
 
@@ -320,6 +330,7 @@ class UpstreamClient:
                     await self.pool.release(
                         key, success=False, status_code=resp.status_code
                     )
+                    released = True
                     delay = await sleep_backoff(
                         attempt,
                         base=self.retry_backoff_base,
@@ -351,7 +362,8 @@ class UpstreamClient:
                     try:
                         async for chunk in resp.aiter_bytes():
                             yield chunk
-                    except Exception:
+                    except BaseException:
+                        # Cancel-safe: mark failure on cancellation/generator close
                         success = False
                         raise
                     finally:
@@ -365,9 +377,14 @@ class UpstreamClient:
                             status_code=status,
                         )
 
+                released = True  # key release is now the byte_iter's responsibility
                 return status_code, byte_iter(), out_headers, key
-            except Exception as exc:
-                await self.pool.release(key, success=False)
+            except BaseException as exc:
+                # Cancel-safe: release key even on cancellation/task abort
+                if not released:
+                    await self.pool.release(key, success=False)
+                if isinstance(exc, (asyncio.CancelledError, GeneratorExit)):
+                    raise
                 last_error = exc
                 logger.exception("upstream stream error on %s: %s", key.key_id, exc)
                 if attempt >= max_retries - 1:

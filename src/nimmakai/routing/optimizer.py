@@ -51,7 +51,7 @@ def _quality_prior(
     if raw is None:
         return 0.70
     raw = float(raw)
-    if raw <= 0:
+    if raw <= 0 or raw != raw:  # NaN guard: NaN != NaN
         return 0.50
     max_score = max(ladder_scores.values())
     if max_score <= 0:

@@ -18,6 +18,17 @@ from nimmakai.config import get_settings
 router = APIRouter(tags=["admin"])
 
 
+async def _safe_json(request: Request) -> dict[str, Any] | JSONResponse:
+    """Parse JSON body, returning 400 OpenAI envelope on malformed input."""
+    try:
+        return await request.json()
+    except Exception:
+        return JSONResponse(
+            {"error": {"message": "Invalid JSON body", "code": "invalid_json"}},
+            status_code=400,
+        )
+
+
 @router.get("/admin/storage")
 async def storage_info(request: Request) -> JSONResponse:
     """Where providers / prefs are persisted (sqlite path, counts)."""
@@ -464,7 +475,10 @@ async def test_provider(request: Request) -> JSONResponse:
     """
     settings = getattr(request.app.state, "settings", None) or get_settings()
     require_admin(request, settings)
-    body: dict[str, Any] = await request.json()
+    body_or_err = await _safe_json(request)
+    if isinstance(body_or_err, JSONResponse):
+        return body_or_err
+    body: dict[str, Any] = body_or_err
     hub = getattr(request.app.state, "hub", None)
 
     base_url = str(body.get("base_url") or "").strip().rstrip("/")
@@ -596,7 +610,10 @@ async def upsert_provider(request: Request) -> JSONResponse:
             {"error": {"message": "Provider hub not ready", "code": "nimmakai_no_hub"}},
             status_code=503,
         )
-    raw_body: dict[str, Any] = await request.json()
+    body_or_err = await _safe_json(request)
+    if isinstance(body_or_err, JSONResponse):
+        return body_or_err
+    raw_body: dict[str, Any] = body_or_err
     body: dict[str, Any] = dict(raw_body)
 
     # Expand from free-provider preset when requested
@@ -762,7 +779,10 @@ async def register_models(request: Request) -> JSONResponse:
             {"error": {"message": "Catalog not ready", "code": "nimmakai_not_ready"}},
             status_code=503,
         )
-    body: dict[str, Any] = await request.json()
+    body_or_err = await _safe_json(request)
+    if isinstance(body_or_err, JSONResponse):
+        return body_or_err
+    body: dict[str, Any] = body_or_err
     provider_id = str(body.get("provider_id") or "").strip().lower()
     models = body.get("models") if isinstance(body.get("models"), list) else []
     if not provider_id or not models:
@@ -822,7 +842,10 @@ async def set_model_enabled(request: Request) -> JSONResponse:
             {"error": {"message": "Catalog not ready", "code": "nimmakai_not_ready"}},
             status_code=503,
         )
-    body: dict[str, Any] = await request.json()
+    body_or_err = await _safe_json(request)
+    if isinstance(body_or_err, JSONResponse):
+        return body_or_err
+    body: dict[str, Any] = body_or_err
     model_id = str(body.get("model_id") or "").strip()
     if "enabled" not in body:
         return JSONResponse(
@@ -870,7 +893,10 @@ async def bulk_models_enabled(request: Request) -> JSONResponse:
             {"error": {"message": "Catalog not ready", "code": "nimmakai_not_ready"}},
             status_code=503,
         )
-    body: dict[str, Any] = await request.json()
+    body_or_err = await _safe_json(request)
+    if isinstance(body_or_err, JSONResponse):
+        return body_or_err
+    body: dict[str, Any] = body_or_err
     enable = body.get("enable") if isinstance(body.get("enable"), list) else []
     disable = body.get("disable") if isinstance(body.get("disable"), list) else []
     provider_id = str(body.get("provider_id") or "").strip().lower()
@@ -979,7 +1005,10 @@ async def set_preference(request: Request) -> JSONResponse:
             {"error": {"message": "Preferences not ready", "code": "nimmakai_no_prefs"}},
             status_code=503,
         )
-    body: dict[str, Any] = await request.json()
+    body_or_err = await _safe_json(request)
+    if isinstance(body_or_err, JSONResponse):
+        return body_or_err
+    body: dict[str, Any] = body_or_err
     intent = str(body.get("intent") or "")
     chain = body.get("chain") if isinstance(body.get("chain"), list) else None
     if not intent or chain is None:
