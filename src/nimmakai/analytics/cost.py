@@ -1,11 +1,18 @@
-"""Per-model cost estimation (USD per 1M tokens)."""
+"""Per-model cost estimation (USD per 1M tokens).
+
+Uses models.dev as the primary source for pricing data, with a hardcoded
+fallback for offline/error scenarios.
+"""
 
 from __future__ import annotations
 
 import re
 from typing import Any
 
-# (input_cost_per_M, output_cost_per_M)
+from nimmakai.analytics.models_cost import all_dynamic_rates, lookup_dynamic
+
+# Hardcoded fallback rates (input_cost_per_M, output_cost_per_M).
+# Used when models.dev is unreachable or a model isn't listed there.
 MODEL_COST_PER_M: dict[str, tuple[float, float]] = {
     "gpt-4o": (2.50, 10.00),
     "gpt-4o-mini": (0.15, 0.60),
@@ -47,7 +54,15 @@ def lookup_rates(
     model_id: str,
     overrides: dict[str, tuple[float, float]] | None = None,
 ) -> tuple[float, float]:
-    """Return (input_per_M, output_per_M) for a model."""
+    """Return (input_per_M, output_per_M) for a model.
+
+    Resolution order:
+    1. Explicit overrides (from admin API or config)
+    2. Free-tier patterns (groq, cerebras, etc.)
+    3. Dynamic pricing from models.dev (exact namespaced ID match)
+    4. Hardcoded fallback rates (exact then fuzzy match)
+    5. (0.0, 0.0) for unknown models
+    """
     if overrides and model_id in overrides:
         return overrides[model_id]
     raw = (model_id or "").strip().lower()
@@ -58,6 +73,12 @@ def lookup_rates(
         if pat.search(raw):
             return (0.0, 0.0)
 
+    # Try dynamic pricing from models.dev (uses full namespaced ID)
+    dyn = lookup_dynamic(raw)
+    if dyn is not None:
+        return dyn
+
+    # Fallback to hardcoded rates
     mid = _normalize_model(raw)
     if mid in MODEL_COST_PER_M:
         return MODEL_COST_PER_M[mid]
@@ -91,7 +112,11 @@ def estimate_cost(
 
 
 def list_default_rates() -> list[dict[str, Any]]:
+    """Return combined rates: dynamic (models.dev) merged with hardcoded fallback."""
+    dyn = all_dynamic_rates()
+    combined: dict[str, tuple[float, float]] = dict(MODEL_COST_PER_M)
+    combined.update(dyn)
     return [
         {"model_id": k, "input_per_m": v[0], "output_per_m": v[1]}
-        for k, v in sorted(MODEL_COST_PER_M.items())
+        for k, v in sorted(combined.items())
     ]

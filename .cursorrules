@@ -1,7 +1,15 @@
 # Scratchpad
 
 ## Current task
-Second whole-repo adversarial hardening pass — COMPLETE (+ audit follow-ups)
+Add dynamic cost calculation for all models using models.dev API — COMPLETE
+
+## Plan
+- [X] Explore current cost system in analytics/cost.py
+- [X] Research models.dev API structure (api.json has cost.input/cost.output per model)
+- [X] Implement models_cost.py fetcher with caching
+- [X] Update cost.py to use dynamic data as primary, hardcoded as fallback
+- [X] Add tests for new functionality
+- [X] Run tests and lint
 
 ## Plan
 - [X] Baseline full tests, Ruff, TypeScript build, shell syntax
@@ -49,3 +57,6 @@ Second whole-repo adversarial hardening pass — COMPLETE (+ audit follow-ups)
 - KeyPool exposes `__len__`, not `.size`
 - `esc()` does not make data safe inside JS string literals — use data attributes + addEventListener
 - SQLite `isolation_level=None` needs explicit `BEGIN IMMEDIATE` for atomic multi-statement approves
+- After launching a background subagent: end the turn — do not poll AwaitShell/tail on its transcript (anti-loop kills parent)
+- models.dev model_id often already contains `/` (lab/model); index both `provider/mid` and bare/lab forms for Nimmakai gateway namespaces
+- models.dev API uses `{provider_id}/{model_id}` as key; Nimmakai may use un-prefixed names (e.g. `deepseek-chat`) — both appear in `list_default_rates`

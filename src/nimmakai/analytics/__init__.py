@@ -5,6 +5,7 @@ from __future__ import annotations
 from nimmakai.analytics.cost import estimate_cost, list_default_rates, lookup_rates
 from nimmakai.analytics.events import EventBus
 from nimmakai.analytics.models import TraceRecord, TraceSpan
+from nimmakai.analytics.models_cost import all_dynamic_rates, lookup_dynamic
 from nimmakai.analytics.retention import RetentionManager
 from nimmakai.analytics.schema import migrate_analytics
 from nimmakai.analytics.store import AnalyticsStore
@@ -17,8 +18,10 @@ __all__ = [
     "TraceRecord",
     "TraceSpan",
     "TraceWriter",
+    "all_dynamic_rates",
     "estimate_cost",
     "list_default_rates",
+    "lookup_dynamic",
     "lookup_rates",
     "migrate_analytics",
 ]
