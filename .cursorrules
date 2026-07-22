@@ -1,7 +1,7 @@
 # Scratchpad
 
 ## Current task
-Add dynamic cost calculation for all models using models.dev API — COMPLETE
+Hot-deploy compose for code updates without Docker rebuild — COMPLETE
 
 ## Plan
 - [X] Explore current cost system in analytics/cost.py
@@ -60,3 +60,4 @@ Add dynamic cost calculation for all models using models.dev API — COMPLETE
 - After launching a background subagent: end the turn — do not poll AwaitShell/tail on its transcript (anti-loop kills parent)
 - models.dev model_id often already contains `/` (lab/model); index both `provider/mid` and bare/lab forms for Nimmakai gateway namespaces
 - models.dev API uses `{provider_id}/{model_id}` as key; Nimmakai may use un-prefixed names (e.g. `deepseek-chat`) — both appear in `list_default_rates`
+- `docker-compose.hotdeploy.yml` mounts `src/nimmakai` into site-packages + `uvicorn --reload` for instant code updates without Docker rebuild — only for dev/staging, not production

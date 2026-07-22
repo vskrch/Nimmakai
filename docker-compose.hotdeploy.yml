@@ -1,0 +1,39 @@
+# Hot-deploy: mount source code so git pull = instant updates (no Docker rebuild).
+# First time only: docker compose -f docker-compose.hotdeploy.yml up -d --build
+# After that: just git pull on the host -- uvicorn --reload picks up changes.
+#
+# NOTE: Only use on dev/staging Droplets. For production, use docker-compose.do.yml.
+
+services:
+  nimmakai:
+    build: .
+    image: nimmakai:latest
+    ports:
+      - "80:8080"
+    env_file:
+      - .env
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8080"
+      SQLITE_PATH: /data/nimmakai.db
+      CATALOG_SNAPSHOT_PATH: /data/catalog_snapshot.json
+      PROVIDERS_OVERLAY_PATH: /data/providers.json
+      SQLITE_SEED_FREE_PRESETS: "true"
+      ALLOW_INSECURE_AUTH: "false"
+    volumes:
+      - nimmakai-data:/data
+      # Mount source code over installed package for live reload
+      - ./src/nimmakai:/usr/local/lib/python3.12/site-packages/nimmakai
+    # Override CMD: uvicorn with --reload watches the mounted src
+    command: >
+      sh -c "exec uvicorn nimmakai.main:app --host 0.0.0.0 --port ${PORT:-8080} --reload --reload-dir /usr/local/lib/python3.12/site-packages/nimmakai"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  nimmakai-data:
