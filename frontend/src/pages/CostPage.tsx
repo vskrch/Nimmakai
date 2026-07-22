@@ -16,6 +16,7 @@ export default function CostPage() {
   const [inp, setInp] = useState('0')
   const [out, setOut] = useState('0')
   const [saving, setSaving] = useState(false)
+  const [importing, setImporting] = useState(false)
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
   async function saveOverride() {
@@ -32,6 +33,23 @@ export default function CostPage() {
       reloadSummary()
     } else {
       setMsg({ text: errMsg(r, 'Failed to save rate'), ok: false })
+    }
+  }
+
+  async function bulkImport(overwrite: boolean) {
+    setImporting(true)
+    const r = await api('/analytics/cost/rates/import', {
+      method: 'POST',
+      body: JSON.stringify({ overwrite }),
+    })
+    setImporting(false)
+    if (okBody(r)) {
+      const d = r as Record<string, unknown>
+      setMsg({ text: `Imported ${d.imported} rates (${d.skipped} skipped)`, ok: true })
+      reloadRates()
+      reloadSummary()
+    } else {
+      setMsg({ text: errMsg(r, 'Import failed'), ok: false })
     }
   }
 
@@ -96,6 +114,15 @@ export default function CostPage() {
             <Input placeholder="input $/M" value={inp} onChange={e => setInp(e.target.value)} className="max-w-[120px]" />
             <Input placeholder="output $/M" value={out} onChange={e => setOut(e.target.value)} className="max-w-[120px]" />
             <Button onClick={saveOverride} disabled={saving}>{saving ? 'Saving…' : 'Save override'}</Button>
+          </div>
+          <div className="flex gap-2 flex-wrap mb-4">
+            <Button size="sm" onClick={() => bulkImport(false)} disabled={importing}>
+              {importing ? 'Importing…' : 'Auto-fill from models.dev'}
+            </Button>
+            <Button size="sm" variant="danger" onClick={() => bulkImport(true)} disabled={importing}>
+              {importing ? 'Importing…' : 'Overwrite all from models.dev'}
+            </Button>
+            <span className="text-xs text-zinc-500 self-center">Import pricing for all live models</span>
           </div>
           {!rates ? <Spinner /> : (
             <div className="overflow-x-auto">

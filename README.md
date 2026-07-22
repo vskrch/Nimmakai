@@ -992,12 +992,58 @@ Model:     nimmakai/auto
 
 Compose file used on the droplet: [`docker-compose.do.yml`](docker-compose.do.yml) (host **80→8080**, volume `nimmakai-data`).
 
-Updates later:
+Updates later (with rebuild):
 
 ```bash
 ssh root@YOUR_DROPLET_IP
 cd /opt/nimmakai && git pull && docker compose -f docker-compose.do.yml up -d --build
 ```
+
+### Hot Deploy (No Docker Rebuild)
+
+For **Python-only code changes** (routes, routing, analytics, etc.), you can skip the Docker rebuild entirely. The `docker-compose.hotdeploy.yml` mounts your source code directly into the container and uses `uvicorn --reload` for instant updates.
+
+**How it works:**
+- `src/nimmakai` is volume-mounted over the installed package in site-packages
+- `uvicorn --reload` watches the mounted directory and restarts automatically on file changes
+- Data (SQLite, providers, analytics) persists in the `nimmakai-data` volume — unaffected
+
+**First-time setup (on the Droplet):**
+
+```bash
+ssh root@YOUR_DROPLET_IP
+cd /opt/nimmakai
+git pull
+docker compose -f docker-compose.hotdeploy.yml up -d --build
+```
+
+The `--build` is only needed the **first time** — it builds the image with all dependencies.
+
+**After that — instant updates, no rebuild:**
+
+```bash
+ssh root@YOUR_DROPLET_IP
+cd /opt/nimmakai
+git pull
+docker compose -f docker-compose.hotdeploy.yml restart
+```
+
+That's it. `git pull` brings in your latest code, `restart` picks it up (uvicorn `--reload` also auto-detects file changes within seconds).
+
+**From your local machine (one-liner):**
+
+```bash
+# First time only (builds image)
+ssh root@YOUR_DROPLET_IP "cd /opt/nimmakai && git pull && docker compose -f docker-compose.hotdeploy.yml up -d --build"
+
+# After that (no rebuild)
+ssh root@YOUR_DROPLET_IP "cd /opt/nimmakai && git pull && docker compose -f docker-compose.hotdeploy.yml restart"
+```
+
+**Caveats:**
+- **Frontend changes** still require a rebuild (`--build`) since they're compiled at image build time
+- **Python-only** code changes (routes, routing, analytics, etc.) are instant
+- Use `docker-compose.do.yml` for production — hotdeploy is best for dev/staging
 
 ⚠ User data embeds secrets (visible via DO API/metadata). Keep the generated file out of git (already gitignored). Rotate keys if it leaks.
 

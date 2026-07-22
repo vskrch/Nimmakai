@@ -345,6 +345,55 @@ async def delete_cost_rate(model_id: str, request: Request) -> JSONResponse:
     return JSONResponse({"ok": ok, "model_id": model_id})
 
 
+@router.post("/cost/rates/import")
+async def import_cost_rates(request: Request) -> JSONResponse:
+    """Bulk-import cost rates for all live models from models.dev.
+
+    Body: { "overwrite": false } — skip models that already have overrides.
+    """
+    from nimmakai.analytics.cost import lookup_rates
+    from nimmakai.auth import require_admin
+
+    store, err = _require_analytics(request)
+    if err:
+        return err
+    require_admin(request, _settings(request))
+    assert store is not None
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    overwrite = bool(body.get("overwrite"))
+
+    registry = getattr(request.app.state, "registry", None)
+    if registry is None:
+        return JSONResponse(
+            {"error": {"message": "Catalog not ready", "code": "nimmakai_not_ready"}},
+            status_code=503,
+        )
+
+    existing = store.cost_overrides_map()
+    imported = 0
+    skipped = 0
+    for mid in sorted(registry.active_live_ids()):
+        if mid in existing and not overwrite:
+            skipped += 1
+            continue
+        inp, out = lookup_rates(mid)
+        if inp == 0.0 and out == 0.0:
+            skipped += 1
+            continue
+        store.set_cost_override(mid, inp, out)
+        imported += 1
+
+    return JSONResponse({
+        "ok": True,
+        "imported": imported,
+        "skipped": skipped,
+        "total_live": len(registry.active_live_ids()),
+    })
+
+
 # ── export ──────────────────────────────────────────────────────────
 
 

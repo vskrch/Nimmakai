@@ -509,6 +509,9 @@ class AnalyticsStore:
 
     # ── cost overrides ──────────────────────────────────────────────
 
+    _cost_cache: dict[str, tuple[float, float]] | None = None
+    _cost_cache_at: float = 0.0
+
     def list_cost_overrides(self) -> list[dict[str, Any]]:
         with self._db._lock:
             rows = self._db._conn.execute(
@@ -532,19 +535,38 @@ class AnalyticsStore:
                 """,
                 (model_id, float(input_per_m), float(output_per_m), time.time()),
             )
+        self.invalidate_cost_cache()
 
     def delete_cost_override(self, model_id: str) -> bool:
         with self._db._lock:
             cur = self._db._conn.execute(
                 "DELETE FROM cost_overrides WHERE model_id = ?", (model_id,)
             )
-            return cur.rowcount > 0
+            deleted = cur.rowcount > 0
+        if deleted:
+            self.invalidate_cost_cache()
+        return deleted
 
     def cost_overrides_map(self) -> dict[str, tuple[float, float]]:
-        return {
+        """Cached cost overrides — avoids SQLite read on every request."""
+        import time
+
+        now = time.monotonic()
+        if self._cost_cache is not None and now - self._cost_cache_at < 60.0:
+            return self._cost_cache
+        raw = self.list_cost_overrides()
+        cache = {
             r["model_id"]: (float(r["input_per_m"]), float(r["output_per_m"]))
-            for r in self.list_cost_overrides()
+            for r in raw
         }
+        self._cost_cache = cache
+        self._cost_cache_at = now
+        return cache
+
+    def invalidate_cost_cache(self) -> None:
+        """Force reload on next cost_overrides_map() call."""
+        self._cost_cache = None
+        self._cost_cache_at = 0.0
 
     # ── export ──────────────────────────────────────────────────────
 
