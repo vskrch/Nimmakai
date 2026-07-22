@@ -168,6 +168,7 @@ class TraceRecord:
             "estimated_cost_usd": self.estimated_cost_usd,
             "error_message": self.error_message,
             "is_stream": self.is_stream,
+            "user_id": self.user_id,
         }
 
     def to_dict(self) -> dict[str, Any]:

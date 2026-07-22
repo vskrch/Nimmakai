@@ -94,6 +94,20 @@ async def test_health_endpoint():
 
 
 @pytest.mark.asyncio
+async def test_ready_requires_live_models():
+    app = _make_app()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        r = await c.get("/ready")
+        # Test app has no hub runtimes / live models → not ready
+        assert r.status_code == 503
+        body = r.json()
+        assert body["ready"] is False
+        assert "no_live_models" in body["readiness_failures"]
+
+
+@pytest.mark.asyncio
 async def test_admin_logs_endpoint():
     app = _make_app()
     async with AsyncClient(

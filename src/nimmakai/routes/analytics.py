@@ -11,7 +11,12 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from nimmakai.analytics.cost import list_default_rates
-from nimmakai.auth import auth_from_request, extract_bearer, require_proxy_auth, validate_proxy_token
+from nimmakai.auth import (
+    auth_from_request,
+    extract_bearer,
+    require_proxy_auth,
+    validate_proxy_token,
+)
 from nimmakai.config import get_settings
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -417,15 +422,68 @@ async def export_traces(request: Request) -> StreamingResponse | JSONResponse:
 
 @router.get("/events", response_model=None)
 async def analytics_events(request: Request) -> StreamingResponse | JSONResponse:
+    """SSE live feed. Admins see all traces; users only their own."""
+    import hmac
+
+    from nimmakai.auth import AuthContext, resolve_auth
+
     settings = _settings(request)
-    # EventSource cannot set Authorization headers — allow ?token= or session cookie
     cookie = getattr(settings, "session_cookie_name", "nk_session") or "nk_session"
+    store = getattr(request.app.state, "accounts", None)
+    token = request.query_params.get("token") or extract_bearer(request)
+
     if request.cookies.get(cookie):
+        auth = resolve_auth(request, settings)
         require_proxy_auth(request, settings)
+    elif token:
+        validate_proxy_token(token, settings, accounts=store)
+        # Build AuthContext from query/header token (EventSource cannot set Authorization)
+        if store is not None and token.startswith("sk-nk-"):
+            user = store.resolve_api_key(token)
+            if not user:
+                return JSONResponse(
+                    {"error": {"message": "Invalid API key", "code": "invalid_api_key"}},
+                    status_code=401,
+                )
+            is_admin = user.get("role") == "admin"
+            auth = AuthContext(
+                token=token,
+                user_id=user["id"],
+                email=user.get("email"),
+                role="admin" if is_admin else "user",
+                status=user.get("status"),
+                is_admin=is_admin,
+                via="api_key",
+            )
+            if auth.status != "active":
+                return JSONResponse(
+                    {
+                        "error": {
+                            "message": "Account is not active",
+                            "code": "account_not_active",
+                        }
+                    },
+                    status_code=403,
+                )
+        elif settings.accept_any_proxy_key or any(
+            hmac.compare_digest(token, k) for k in (settings.proxy_api_keys or [])
+        ):
+            auth = AuthContext(
+                token=token,
+                role="legacy_admin",
+                status="active",
+                is_admin=True,
+                via="legacy_proxy",
+            )
+        else:
+            return JSONResponse(
+                {"error": {"message": "Invalid API key", "code": "invalid_api_key"}},
+                status_code=401,
+            )
     else:
-        token = request.query_params.get("token") or extract_bearer(request)
-        validate_proxy_token(
-            token, settings, accounts=getattr(request.app.state, "accounts", None)
+        return JSONResponse(
+            {"error": {"message": "Authentication required", "code": "unauthorized"}},
+            status_code=401,
         )
 
     if not getattr(settings, "analytics_enabled", True):
@@ -441,8 +499,11 @@ async def analytics_events(request: Request) -> StreamingResponse | JSONResponse
             status_code=503,
         )
 
+    see_all = bool(auth.is_admin)
+    uid = auth.user_id
+
     async def _generate():
-        async for event in bus.subscribe():
+        async for event in bus.subscribe(user_id=uid, see_all=see_all):
             if await request.is_disconnected():
                 break
             yield event
@@ -465,6 +526,9 @@ async def analytics_events(request: Request) -> StreamingResponse | JSONResponse
 async def run_retention(request: Request) -> JSONResponse:
     import asyncio
 
+    from nimmakai.auth import require_admin
+
+    require_admin(request, _settings(request))
     store, err = _require_analytics(request)
     if err:
         return err

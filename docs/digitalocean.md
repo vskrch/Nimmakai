@@ -41,7 +41,7 @@ git push -u origin main
 3. Instance size: **1 vCPU / 1 GiB fixed** (~$10/mo). Region: closest to you.
 4. Add **encrypted** runtime env vars (see table below).
 5. Create Resources → create app. Wait for first build (~3–6 min).
-6. Open the `*.ondigitalocean.app` URL → `/health` should return JSON → `/dashboard` for UI.
+6. Open the `*.ondigitalocean.app` URL → `/ready` should return JSON `{"ready": true}` once keys and models are live → `/dashboard` for UI. Use `/health` for liveness only.
 
 Auto-deploy is on by default for GitHub apps: **every push to `main` redeploys**.
 
@@ -50,7 +50,9 @@ Auto-deploy is on by default for GitHub apps: **every push to `main` redeploys**
 Edit `.do/app.yaml`:
 
 - Set `github.repo` to `your-user/Nimmakai`
-- Replace `PROXY_API_KEYS` placeholder (or leave and set secrets in UI)
+- Leave `PROXY_API_KEYS` empty in the spec, then set a **strong random** encrypted secret in the UI (never ship a placeholder like `REPLACE_ME`)
+- Spec uses `deploy_on_push: false` — promote via CI after tests (or flip to `true` only if you accept push-to-prod without gates)
+- Health check path is `/ready` (fails until proxy auth + live models exist)
 
 ```bash
 doctl apps create --spec .do/app.yaml
@@ -320,7 +322,7 @@ docker run --rm -p 8080:8080 \
 | Symptom | Fix |
 |---------|-----|
 | Build fails on `npm ci` | Ensure `frontend/package-lock.json` is committed |
-| App unhealthy | Check `/health`; raise `initial_delay_seconds`; watch Runtime Logs |
+| App unhealthy | Check `/ready` (readiness) and `/health` (liveness); raise `initial_delay_seconds`; watch Runtime Logs |
 | 401 on dashboard | Set `PROXY_API_KEYS` and use that key in the Auth modal |
 | Providers empty after deploy | Set provider `*_API_KEYS` env vars (App Platform wipes SQLite; Droplet keeps volume) |
 | OOM / restarts | Bump to `apps-s-1vcpu-1gb` ($12) or Droplet `s-1vcpu-2gb` |

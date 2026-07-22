@@ -173,6 +173,20 @@ class UpstreamClient:
                 else:
                     body = resp.text
 
+                # Auth failures: rotate key and retry (stale/revoked key)
+                if (
+                    resp.status_code in {401, 403}
+                    and attempt < max_retries - 1
+                    and len(self.pool) > 1
+                ):
+                    logger.info(
+                        "upstream HTTP %s on %s; rotating key (attempt %s)",
+                        resp.status_code,
+                        key.key_id,
+                        attempt + 1,
+                    )
+                    continue
+
                 # 5xx: backoff + key rotate before giving up to caller
                 if (
                     resp.status_code in {500, 502, 503, 504}

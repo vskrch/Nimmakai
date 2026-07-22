@@ -53,28 +53,11 @@ def _legacy_proxy_ok(token: str, settings: Settings) -> bool:
 def resolve_auth(request: Request, settings: Settings) -> AuthContext:
     """
     Resolution order:
-      1. Session cookie (dashboard)
-      2. Bearer sk-nk-* user API key
-      3. Legacy PROXY_API_KEYS / ALLOW_INSECURE_AUTH
+      1. Explicit Bearer / API-key headers (break-glass overrides cookie)
+      2. Session cookie (dashboard)
+      3. ALLOW_INSECURE_AUTH fallback
     """
     store = _accounts(request)
-    cookie_name = getattr(settings, "session_cookie_name", "nk_session") or "nk_session"
-    session_raw = request.cookies.get(cookie_name)
-
-    if store is not None and session_raw:
-        user = store.resolve_session(session_raw)
-        if user:
-            is_admin = user.get("role") == "admin"
-            return AuthContext(
-                token=None,
-                user_id=user["id"],
-                email=user["email"],
-                role="admin" if is_admin else "user",
-                status=user["status"],
-                is_admin=is_admin,
-                via="session",
-            )
-
     bearer = extract_bearer(request)
 
     if store is not None and bearer and bearer.startswith("sk-nk-"):
@@ -111,6 +94,23 @@ def resolve_auth(request: Request, settings: Settings) -> AuthContext:
             is_admin=True,
             via="legacy_proxy",
         )
+
+    cookie_name = getattr(settings, "session_cookie_name", "nk_session") or "nk_session"
+    session_raw = request.cookies.get(cookie_name)
+
+    if store is not None and session_raw:
+        user = store.resolve_session(session_raw)
+        if user:
+            is_admin = user.get("role") == "admin"
+            return AuthContext(
+                token=None,
+                user_id=user["id"],
+                email=user["email"],
+                role="admin" if is_admin else "user",
+                status=user["status"],
+                is_admin=is_admin,
+                via="session",
+            )
 
     if not bearer:
         # No credentials

@@ -19,17 +19,21 @@ export default function ProvidersPage() {
   async function handleAdd() {
     if (!form.id || !form.base_url) { setMsg({ text: 'ID and Base URL required', ok: false }); return }
     const keys = form.api_keys ? form.api_keys.split(',').map(s => s.trim()).filter(Boolean) : []
-    if (keys.length === 0) {
+    const isEdit = providers.some(p => p.id === form.id)
+    if (!isEdit && keys.length === 0) {
       setMsg({ text: 'Paste at least one API key (OpenCode Zen uses the key from opencode.ai/auth)', ok: false })
       return
     }
     setSaving(true)
-    const r = await ap('/admin/providers', {
+    const payload: Record<string, unknown> = {
       ...form,
       api_keys: keys,
-      // Seeded free presets start disabled — enable when keys are saved
-      enabled: true,
-    })
+    }
+    // Only force-enable when new keys are supplied (or creating)
+    if (keys.length > 0 || !isEdit) {
+      payload.enabled = true
+    }
+    const r = await ap('/admin/providers', payload)
     setSaving(false)
     if (r && (r as Record<string, unknown>).ok) {
       setMsg({ text: (r as Record<string, unknown>).message as string || 'Saved', ok: true })

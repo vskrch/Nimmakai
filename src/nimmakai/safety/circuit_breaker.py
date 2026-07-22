@@ -44,6 +44,11 @@ class ProviderCircuitBreaker:
         if state == BreakerState.CLOSED:
             return True
         if state == BreakerState.HALF_OPEN:
+            # Only one in-flight probe at a time
+            last = self._last_probe.get(pid, 0.0)
+            if time.monotonic() - last < self.recovery_timeout:
+                return False
+            self._last_probe[pid] = time.monotonic()
             return True
         # OPEN: check if cooldown has elapsed → transition to half-open
         until = self._open_until.get(pid, 0)

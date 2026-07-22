@@ -17,10 +17,14 @@ class EventBus:
 
     Slow consumers drop events (queue full) rather than blocking producers.
     Heartbeats are emitted by the subscribe loop every ``heartbeat_seconds``.
+
+    Non-admin subscribers pass ``user_id`` and only receive traces that match
+    that user. Admins pass ``see_all=True``.
     """
 
     def __init__(self, *, max_queue: int = 100, heartbeat_seconds: float = 15.0) -> None:
-        self._subscribers: set[asyncio.Queue[str]] = set()
+        # queue → (see_all, user_id)
+        self._subscribers: dict[asyncio.Queue[str], tuple[bool, str | None]] = {}
         self._max_queue = max_queue
         self._heartbeat = heartbeat_seconds
         self._lock = asyncio.Lock()
@@ -29,10 +33,12 @@ class EventBus:
     def subscriber_count(self) -> int:
         return len(self._subscribers)
 
-    async def subscribe(self) -> AsyncIterator[str]:
+    async def subscribe(
+        self, *, user_id: str | None = None, see_all: bool = False
+    ) -> AsyncIterator[str]:
         q: asyncio.Queue[str] = asyncio.Queue(maxsize=self._max_queue)
         async with self._lock:
-            self._subscribers.add(q)
+            self._subscribers[q] = (see_all, user_id)
         try:
             while True:
                 try:
@@ -42,13 +48,22 @@ class EventBus:
                     yield ": heartbeat\n\n"
         finally:
             async with self._lock:
-                self._subscribers.discard(q)
+                self._subscribers.pop(q, None)
 
     def publish(self, event_type: str, data: dict[str, Any] | None = None) -> None:
-        """Fire-and-forget publish to all subscribers."""
-        payload = json.dumps({"type": event_type, **(data or {})}, default=str)
+        """Fire-and-forget publish to matching subscribers."""
+        payload_data = dict(data or {})
+        payload = json.dumps({"type": event_type, **payload_data}, default=str)
+        event_uid = payload_data.get("user_id")
         dead: list[asyncio.Queue[str]] = []
-        for q in list(self._subscribers):
+        for q, (see_all, filter_uid) in list(self._subscribers.items()):
+            if not see_all:
+                if (
+                    filter_uid is None
+                    or not event_uid
+                    or str(event_uid) != str(filter_uid)
+                ):
+                    continue
             try:
                 q.put_nowait(payload)
             except asyncio.QueueFull:
@@ -56,4 +71,4 @@ class EventBus:
             except Exception:
                 dead.append(q)
         for q in dead:
-            self._subscribers.discard(q)
+            self._subscribers.pop(q, None)

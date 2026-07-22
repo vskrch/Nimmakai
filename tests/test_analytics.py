@@ -369,7 +369,7 @@ async def test_event_bus_publish_subscribe():
     received: list[str] = []
 
     async def _consume():
-        async for ev in bus.subscribe():
+        async for ev in bus.subscribe(see_all=True):
             received.append(ev)
             if len(received) >= 2:
                 break
@@ -396,7 +396,7 @@ async def test_analytics_sse_endpoint():
         received: list[str] = []
 
         async def _consume():
-            async for ev in bus.subscribe():
+            async for ev in bus.subscribe(see_all=True):
                 received.append(ev)
                 if "sse-live" in ev:
                     break

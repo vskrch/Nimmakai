@@ -90,6 +90,27 @@ def test_analyze_chat_empty_still_empty() -> None:
     assert empty is True
 
 
+def test_analyze_embeddings_empty_and_ok() -> None:
+    empty, _ = _analyze_success_body(
+        {"data": []},
+        had_tools=False,
+        path="/embeddings",
+    )
+    assert empty is True
+    empty, _ = _analyze_success_body(
+        {"data": [{"embedding": [0.1, 0.2, 0.3]}]},
+        had_tools=False,
+        path="/v1/embeddings",
+    )
+    assert empty is False
+    empty, _ = _analyze_success_body(
+        {"data": [{"embedding": []}]},
+        had_tools=False,
+        path="/embeddings",
+    )
+    assert empty is True
+
+
 @pytest.mark.asyncio
 async def test_completions_path_does_not_fanout_on_text_success() -> None:
     settings = Settings(nim_api_keys=["k"], max_model_fallbacks=3)

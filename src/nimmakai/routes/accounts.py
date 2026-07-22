@@ -101,7 +101,10 @@ async def signup(request: Request) -> JSONResponse:
     user = store.create_user(email, password, role=role)
     token = store.create_verify_token(user["id"])
     verify_url = f"{_base_url(request, settings)}/auth/verify?token={token}"
-    sender = get_email_sender(getattr(settings, "email_backend", "stub") or "stub")
+    sender = get_email_sender(
+        getattr(settings, "email_backend", "stub") or "stub",
+        settings=settings,
+    )
     result = sender.send(
         OutboundEmail(
             to=email,
@@ -370,7 +373,10 @@ async def admin_approve_user(user_id: str, request: Request) -> JSONResponse:
     issued = store.issue_api_key(user_id)
     # Notify via stub email
     if user and user.get("email"):
-        sender = get_email_sender(getattr(settings, "email_backend", "stub") or "stub")
+        sender = get_email_sender(
+        getattr(settings, "email_backend", "stub") or "stub",
+        settings=settings,
+    )
         sender.send(
             OutboundEmail(
                 to=user["email"],
@@ -408,6 +414,7 @@ async def admin_reject_user(user_id: str, request: Request) -> JSONResponse:
         return JSONResponse(
             {"error": {"message": "Not found"}}, status_code=404
         )
+    store.delete_sessions_for_user(user_id)
     return JSONResponse({"ok": True, "user": store.public_user(user)})
 
 
@@ -425,4 +432,5 @@ async def admin_suspend_user(user_id: str, request: Request) -> JSONResponse:
         return JSONResponse(
             {"error": {"message": "Not found"}}, status_code=404
         )
+    store.delete_sessions_for_user(user_id)
     return JSONResponse({"ok": True, "user": store.public_user(user)})

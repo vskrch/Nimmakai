@@ -232,16 +232,12 @@ def filter_chain(
     allowed_models: list[str] | None = None,
     free_only: bool = False,
 ) -> list[str]:
+    """Hard-filter the chain. Empty result means no eligible models (caller → 503)."""
     out = list(chain)
     if free_only:
-        free = [m for m in out if is_free_model(m)]
-        # If nothing looks free, keep original (better than empty 503)
-        if free:
-            out = free
+        out = [m for m in out if is_free_model(m)]
     if allowed_models:
-        filtered = [m for m in out if match_allowed(m, allowed_models)]
-        if filtered:
-            out = filtered
+        out = [m for m in out if match_allowed(m, allowed_models)]
     return out
 
 

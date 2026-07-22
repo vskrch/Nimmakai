@@ -241,6 +241,14 @@ class AccountStore:
                 "DELETE FROM sessions WHERE token_hash = ?", (th,)
             )
 
+    def delete_sessions_for_user(self, user_id: str) -> int:
+        """Revoke all dashboard sessions for a user (e.g. on suspend/reject)."""
+        with self._db._lock:
+            cur = self._db._conn.execute(
+                "DELETE FROM sessions WHERE user_id = ?", (user_id,)
+            )
+            return int(cur.rowcount or 0)
+
     def issue_api_key(self, user_id: str, *, name: str = "default") -> dict[str, Any]:
         raw, prefix, kh = new_api_key()
         kid = new_id("key")

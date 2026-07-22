@@ -44,7 +44,17 @@ export function useAuth() {
       }
       setReady(true)
     })()
-    return () => { cancelled = true }
+    const onExpired = () => {
+      clearAuthKey()
+      setSession(null)
+      setAuthed(false)
+      setShowAuth(true)
+    }
+    window.addEventListener('nk:auth-expired', onExpired)
+    return () => {
+      cancelled = true
+      window.removeEventListener('nk:auth-expired', onExpired)
+    }
   }, [applySession])
 
   const logout = useCallback(async () => {
@@ -144,23 +154,34 @@ export function useSSE() {
   const [event, setEvent] = useState<SSEHealthEvent | null>(null)
 
   useEffect(() => {
-    const key = localStorage.getItem('nk') || ''
-    const url = key ? `/admin/events?token=${encodeURIComponent(key)}` : '/admin/events'
-    const es = new EventSource(url)
-    es.addEventListener('health', (e) => {
-      try { setEvent(JSON.parse(e.data)) } catch { /* ignore */ }
-    })
-    es.onerror = () => {
-      setTimeout(() => {
-        if (ref.current === es) {
-          const k = localStorage.getItem('nk') || ''
-          const u = k ? `/admin/events?token=${encodeURIComponent(k)}` : '/admin/events'
-          ref.current = new EventSource(u)
+    let cancelled = false
+    let retryTimer: ReturnType<typeof setTimeout> | null = null
+
+    const connect = () => {
+      if (cancelled) return
+      const key = localStorage.getItem('nk') || ''
+      const url = key ? `/admin/events?token=${encodeURIComponent(key)}` : '/admin/events'
+      const es = new EventSource(url)
+      es.addEventListener('health', (e) => {
+        try { setEvent(JSON.parse((e as MessageEvent).data)) } catch { /* ignore */ }
+      })
+      es.onerror = () => {
+        es.close()
+        if (ref.current === es) ref.current = null
+        if (!cancelled) {
+          retryTimer = setTimeout(connect, 5000)
         }
-      }, 5000)
+      }
+      ref.current = es
     }
-    ref.current = es
-    return () => { es.close(); ref.current = null }
+
+    connect()
+    return () => {
+      cancelled = true
+      if (retryTimer) clearTimeout(retryTimer)
+      ref.current?.close()
+      ref.current = null
+    }
   }, [])
 
   return event

@@ -1,6 +1,6 @@
 import { Card, CardHeader, CardBody, Badge, Button, Spinner } from '../components/ui'
 import { useRankings, usePreferences } from '../hooks/useApi'
-import { ap, errMsg } from '../lib/api'
+import { ap, ad, errMsg } from '../lib/api'
 import { useState } from 'react'
 
 const INTENTS: Record<string, { label: string; desc: string }> = {
@@ -26,7 +26,7 @@ export default function RoutingPage() {
   }
 
   async function handleClearPref(intent: string) {
-    await ap(`/preferences/${intent}`, undefined)
+    await ad(`/preferences/${intent}`)
     reloadPrefs()
   }
 

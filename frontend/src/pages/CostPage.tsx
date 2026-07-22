@@ -4,7 +4,7 @@ import { HorizontalBars } from '../components/charts'
 import { useBreakdown, useCostRates, useAnalyticsSummary } from '../hooks/useAnalytics'
 import { RangePicker } from '../components/RangePicker'
 import { fmtUsd, fmtTokens } from '../lib/format'
-import { api } from '../lib/api'
+import { api, errMsg, okBody } from '../lib/api'
 
 export default function CostPage() {
   const [range, setRange] = useState('24h')
@@ -16,17 +16,23 @@ export default function CostPage() {
   const [inp, setInp] = useState('0')
   const [out, setOut] = useState('0')
   const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
   async function saveOverride() {
     if (!modelId.trim()) return
     setSaving(true)
-    await api(`/analytics/cost/rates/${encodeURIComponent(modelId.trim())}`, {
+    const r = await api(`/analytics/cost/rates/${encodeURIComponent(modelId.trim())}`, {
       method: 'PUT',
       body: JSON.stringify({ input_per_m: Number(inp), output_per_m: Number(out) }),
     })
     setSaving(false)
-    reloadRates()
-    reloadSummary()
+    if (okBody(r)) {
+      setMsg({ text: 'Rate saved', ok: true })
+      reloadRates()
+      reloadSummary()
+    } else {
+      setMsg({ text: errMsg(r, 'Failed to save rate'), ok: false })
+    }
   }
 
   const costItems = models
@@ -39,6 +45,13 @@ export default function CostPage() {
         <h2 className="text-xl font-semibold">Cost Center</h2>
         <RangePicker value={range} onChange={setRange} />
       </div>
+
+      {msg && (
+        <div className={`mb-4 p-3 rounded-lg text-[13px] ${msg.ok ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
+          {msg.text}
+          <button className="ml-3 text-xs opacity-60" onClick={() => setMsg(null)}>dismiss</button>
+        </div>
+      )}
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4 mb-8">
         <StatBox label="Estimated spend" value={fmtUsd(summary?.estimated_cost_usd)} sub={range} />

@@ -182,7 +182,8 @@ def _analyze_success_body(
     Returns (empty_reply, tool_ok).
     tool_ok is None when tools were not requested.
 
-    Schema-aware: chat (message), text completions (text), responses (output).
+    Schema-aware: chat (message), text completions (text), responses (output),
+    embeddings (data[].embedding).
     """
     if not isinstance(body, dict):
         return False, None if not had_tools else False
@@ -190,6 +191,20 @@ def _analyze_success_body(
     path_l = (path or "").lower()
     is_completions = path_l.endswith("/completions") and "chat" not in path_l
     is_responses = "/responses" in path_l
+    is_embeddings = "/embeddings" in path_l
+
+    # Embeddings: data[].embedding must be a non-empty vector
+    if is_embeddings:
+        data = body.get("data")
+        if not isinstance(data, list) or not data:
+            return True, None
+        for item in data:
+            if not isinstance(item, dict):
+                return True, None
+            emb = item.get("embedding")
+            if not isinstance(emb, list) or len(emb) == 0:
+                return True, None
+        return False, None
 
     # Text completions: choices[0].text
     if is_completions:
@@ -1005,7 +1020,35 @@ class FallbackExecutor:
                 try:
                     first_chunk = await asyncio.wait_for(anext(byte_iter), timeout=ttft)
                 except StopAsyncIteration:
+                    # Empty stream body — treat as soft-fail and try next model
                     first_chunk = b""
+                    if idx < len(chain) - 1:
+                        logger.warning(
+                            "Empty stream body on %s; falling back", model
+                        )
+                        self._circuit_fail(pid)
+                        self._emit_span(
+                            self._make_upstream_span(
+                                model=model,
+                                t0=t_attempt,
+                                status=502,
+                                success=False,
+                                error_message="empty_stream",
+                                span_type="fallback_advance",
+                            )
+                        )
+                        if hasattr(byte_iter, "aclose"):
+                            with suppress(Exception):
+                                await byte_iter.aclose()
+                        self.stats.fallback_advances += 1
+                        self.registry.record_outcome(
+                            model,
+                            key.key_id if key else None,
+                            success=False,
+                            status_code=502,
+                            intent=decision.intent.value,
+                        )
+                        continue
                 except TimeoutError:
                     saw_ttft_stall = True
                     last_status = 504

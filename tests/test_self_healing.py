@@ -19,7 +19,7 @@ def test_circuit_breaker_opens_after_failures():
 
 
 def test_circuit_breaker_half_open_after_timeout():
-    """After recovery timeout, circuit should half-open."""
+    """After recovery timeout, circuit should half-open — one probe only."""
     cb = ProviderCircuitBreaker(failure_threshold=2, recovery_timeout=0.1)
     cb.fail("groq")
     cb.fail("groq")
@@ -27,6 +27,8 @@ def test_circuit_breaker_half_open_after_timeout():
     time.sleep(0.15)
     assert cb.allow("groq") is True
     assert cb.state("groq") == BreakerState.HALF_OPEN
+    # Concurrent probes blocked until recovery_timeout elapses again
+    assert cb.allow("groq") is False
 
 
 def test_circuit_breaker_closes_on_success():
@@ -35,7 +37,7 @@ def test_circuit_breaker_closes_on_success():
     cb.fail("groq")
     cb.fail("groq")
     time.sleep(0.1)
-    cb.allow("groq")
+    assert cb.allow("groq") is True
     cb.succeed("groq")
     assert cb.state("groq") == BreakerState.CLOSED
 

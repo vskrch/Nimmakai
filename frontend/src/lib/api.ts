@@ -34,6 +34,10 @@ export async function api<T = unknown>(path: string, opts?: RequestInit): Promis
     }
     if (res.status === 401) {
       clearAuthKey()
+      // Notify auth hooks to drop session cookie UI state
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('nk:auth-expired'))
+      }
       return null
     }
     if (!res.ok) {

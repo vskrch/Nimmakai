@@ -153,9 +153,13 @@ def test_filter_free_and_allowed() -> None:
         "qwen/qwen3.5-122b-a10b",
     ]
     free = filter_chain(chain, free_only=True)
-    assert all(is_free_model(m) or m.startswith("zen/") for m in free)
+    assert free == ["zen/mimo-v2.5-free"]
+    assert all(is_free_model(m) for m in free)
     allowed = filter_chain(chain, allowed_models=["qwen/*"])
     assert allowed == ["qwen/qwen3.5-122b-a10b"]
+    # Hard empty: no match → [] (caller returns 503), never fail-open
+    assert filter_chain(chain, allowed_models=["nonexistent/*"]) == []
+    assert filter_chain(["paid/only-model"], free_only=True) == []
 
 
 def test_session_id_from_body() -> None:

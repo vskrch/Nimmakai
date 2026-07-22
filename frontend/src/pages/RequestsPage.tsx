@@ -67,13 +67,24 @@ export default function RequestsPage() {
   async function exportCsv() {
     const key = localStorage.getItem('nk') || ''
     const url = `/analytics/export/traces${qs({ format: 'csv', since: rangeSince(range), limit: 5000 })}`
-    const res = await fetch(url, { headers: key ? { Authorization: `Bearer ${key}` } : {} })
-    if (!res.ok) return
-    const blob = await res.blob()
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(blob)
-    a.download = `traces-${Date.now()}.csv`
-    a.click()
+    try {
+      const res = await fetch(url, {
+        credentials: 'include',
+        headers: key ? { Authorization: `Bearer ${key}` } : {},
+      })
+      if (!res.ok) {
+        console.error('CSV export failed', res.status)
+        return
+      }
+      const blob = await res.blob()
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(blob)
+      a.download = `traces-${Date.now()}.csv`
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      console.error('CSV export error', e)
+    }
   }
 
   return (

@@ -958,7 +958,7 @@ async def refresh_provider(provider_id: str, request: Request) -> JSONResponse:
 async def list_preferences(request: Request) -> JSONResponse:
     """List all user intent preferences."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     prefs = getattr(request.app.state, "preferences", None)
     if prefs is None:
         return JSONResponse({"preferences": []})
@@ -972,7 +972,7 @@ async def set_preference(request: Request) -> JSONResponse:
     Body: {intent, chain[], strict?, note?}
     """
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     prefs = getattr(request.app.state, "preferences", None)
     if prefs is None:
         return JSONResponse(
@@ -1015,7 +1015,7 @@ async def set_preference(request: Request) -> JSONResponse:
 async def delete_preference(intent: str, request: Request) -> JSONResponse:
     """Remove a user intent preference (reverts to intelligent routing)."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
-    require_proxy_auth(request, settings)
+    require_admin(request, settings)
     prefs = getattr(request.app.state, "preferences", None)
     if prefs is None:
         return JSONResponse(

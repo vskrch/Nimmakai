@@ -1,25 +1,28 @@
 # Scratchpad
 
 ## Current task
-Second whole-repo adversarial hardening pass — IN PROGRESS
+Second whole-repo adversarial hardening pass — COMPLETE
 
 ## Plan
 - [X] Baseline full tests, Ruff, TypeScript build, shell syntax
 - [X] Independent audits: auth/persistence, routing/upstream, frontend/deploy
-- [ ] Reproduce and fix evidence-backed Critical/High/Medium failures
-- [ ] Add regression tests for every behavior change
-- [ ] Re-run full verification and review the final diff
+- [X] Reproduce and fix evidence-backed Critical/High/Medium failures
+- [X] Add regression tests for every behavior change
+- [X] Re-run full verification and review the final diff
 
-## Second-pass findings
-- Deploy: default admin placeholder, cloud-init self-deadlock, xtrace/MOTD leaks, false success
-- Auth: global preference/retention authz, cross-user SSE, stale sessions, bearer precedence
-- Routing: disabled bypass, embeddings fanout, JSON auth-key rotation, empty streams, hard filters
-- Frontend: wrong DELETE, auth expiry, fragmented SSE, reconnect leaks, legacy auth/XSS
+## Second-pass findings (fixed)
+- Deploy: `/ready` health, no placeholder secret, cloud-init deadlock removed, MOTD scrubbed, false-success bootstrap fixed; docs aligned
+- Auth: preferences/retention require admin; bearer before cookie; suspend/reject revokes sessions; accounts migration fail-closed; SMTP settings passed; analytics SSE scoped by user_id
+- Routing: embeddings empty detection; 401/403 key rotate; empty-stream fallback; hard empty allowed/free filters; circuit half-open single probe
+- Frontend: Routing Clear → DELETE; auth-expired event; SSE reconnect without leak; provider edit without new keys; Cost/CSV error surfacing
 
 ## Design decisions
 - Disabled models = unknown for routing/`is_known`; `include_disabled=True` for admin introspection
 - Auto-enable providers only when request supplies keys/preset (not on every edit)
 - Persist disabled_models failures raise → 500 to admin API
+- Explicit Bearer/API-key headers beat session cookie (break-glass)
+- `filter_chain` hard-empty (never fail-open past allowed/free constraints)
+- Analytics SSE: admins `see_all`; users only own `user_id` traces
 
 ## Lessons
 - .cursorrules can be overwritten by concurrent agent sessions — re-read before editing, merge don't clobber
@@ -39,3 +42,5 @@ Second whole-repo adversarial hardening pass — IN PROGRESS
 - `_filter_available` must never fail-open to disabled models (empty → [])
 - Seeded `api_keys_env` can block env aliases — `resolved_keys` must check alias envs
 - Session auth must gate on account status the same as API keys
+- EventBus subscriber filter: store `(see_all, user_id)` — `user_id=None` alone must not mean see-all
+- KeyPool exposes `__len__`, not `.size`

@@ -214,6 +214,80 @@ async def test_suspended_admin_session_loses_proxy_and_admin_access():
 
 
 @pytest.mark.asyncio
+async def test_suspend_endpoint_revokes_sessions():
+    app, _settings = _make_app()
+    store: AccountStore = app.state.accounts
+    admin = store.create_user(
+        "revoker@example.com",
+        "password123",
+        role="admin",
+        status="active",
+    )
+    victim = store.create_user(
+        "victim@example.com",
+        "password123",
+        role="user",
+        status="active",
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as admin_c:
+        login = await admin_c.post(
+            "/auth/login",
+            json={"email": "revoker@example.com", "password": "password123"},
+        )
+        assert login.status_code == 200
+
+        async with AsyncClient(transport=transport, base_url="http://test") as victim_c:
+            vlogin = await victim_c.post(
+                "/auth/login",
+                json={"email": "victim@example.com", "password": "password123"},
+            )
+            assert vlogin.status_code == 200
+            assert (await victim_c.get("/auth/me")).json()["authenticated"] is True
+
+            sus = await admin_c.post(f"/admin/users/{victim['id']}/suspend")
+            assert sus.status_code == 200
+
+            me = await victim_c.get("/auth/me")
+            # Session cookie revoked → unauthenticated
+            assert me.json().get("authenticated") is not True
+
+
+@pytest.mark.asyncio
+async def test_bearer_api_key_overrides_stale_session_cookie():
+    """Explicit Bearer wins over cookie so break-glass keys work in the browser."""
+    app, _settings = _make_app()
+    store: AccountStore = app.state.accounts
+    admin = store.create_user(
+        "bearer-admin@example.com",
+        "password123",
+        role="admin",
+        status="active",
+    )
+    issued = store.issue_api_key(admin["id"])["api_key"]
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Establish a session for a different suspended user
+        other = store.create_user(
+            "stale@example.com", "password123", role="user", status="active"
+        )
+        await client.post(
+            "/auth/login",
+            json={"email": "stale@example.com", "password": "password123"},
+        )
+        store.set_status(other["id"], "suspended")
+
+        # Cookie alone would be 403; Bearer admin key must succeed
+        r = await client.get(
+            "/stats",
+            headers={"Authorization": f"Bearer {issued}"},
+        )
+        assert r.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_analytics_scoped_to_user():
     app, _ = _make_app()
     store: AccountStore = app.state.accounts
