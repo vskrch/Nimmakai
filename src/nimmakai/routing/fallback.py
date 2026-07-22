@@ -378,18 +378,41 @@ class FallbackExecutor:
                 int(getattr(self.settings, "coding_max_fallbacks", 12) or 12),
             )
         raw = list(decision.chain)
+        # Never execute admin-disabled models (covers passthrough / emergency paths)
+        disabled = getattr(self.registry, "disabled_models", None) or set()
+        if disabled:
+            raw = [
+                m
+                for m in raw
+                if (
+                    self.registry.resolve_live_id(m, include_disabled=True) or m
+                )
+                not in disabled
+            ]
         # Drop models whose provider has no active keys/runtime (production safety)
         available = [m for m in raw if self._provider_available(m)]
         if not available:
             # Self-heal: rebuild emergency chain from live catalog
             try:
                 from nimmakai.resilience import emergency_coding_chain
+                from nimmakai.routing.auto_router import filter_chain
 
                 available = [
                     m
                     for m in emergency_coding_chain(self.registry, max_n=max_n)
                     if self._provider_available(m)
+                    and (
+                        self.registry.resolve_live_id(m, include_disabled=True) or m
+                    )
+                    not in disabled
                 ]
+                # Re-apply caller hard constraints after emergency rebuild
+                allowed = list(getattr(decision, "allowed_models", None) or [])
+                free_only = str(getattr(decision, "auto_tier", "") or "").lower() == "free"
+                if allowed or free_only:
+                    available = filter_chain(
+                        available, allowed_models=allowed or None, free_only=free_only
+                    )
                 if available:
                     logger.warning(
                         "empty chain healed with %s emergency models", len(available)
@@ -415,6 +438,13 @@ class FallbackExecutor:
         pinned = getattr(decision, "pinned_head", None) or getattr(
             decision, "sticky_model", None
         )
+        # Drop pin if it was admin-disabled
+        if pinned and disabled:
+            pin_live = (
+                self.registry.resolve_live_id(pinned, include_disabled=True) or pinned
+            )
+            if pin_live in disabled:
+                pinned = None
         # Re-rank, but keep pinned head first unless unhealthy (F-08)
         if available:
             from nimmakai.routing.optimizer import optimize_chain

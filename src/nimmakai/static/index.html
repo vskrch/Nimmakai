@@ -470,15 +470,20 @@ function hd(extra) {
   if (ak()) h.Authorization = 'Bearer ' + ak();
   return h;
 }
-async function doAuth() {
+async def doAuth() {
   let k = $('akey').value.trim();
   if (!k) { toast('Enter your PROXY_API_KEYS value', true); return; }
   sk(k);
-  // Validate against an authed endpoint
+  // Validate against an authed endpoint — require 2xx only
   try {
     let r = await fetch('/stats', { headers: hd() });
-    if (r.status === 401) {
-      toast('Invalid API key — check PROXY_API_KEYS', true);
+    if (!r.ok) {
+      toast(
+        r.status === 401
+          ? 'Invalid API key — check PROXY_API_KEYS'
+          : ('Auth failed (HTTP ' + r.status + ')'),
+        true
+      );
       localStorage.removeItem('nk');
       return;
     }
@@ -487,6 +492,7 @@ async function doAuth() {
     await boot();
   } catch (e) {
     toast('Cannot reach gateway: ' + e.message, true);
+    localStorage.removeItem('nk');
   }
 }
 if (!ak()) modal('auth');
@@ -1137,8 +1143,13 @@ function renderM(ms) {
       let ctxStr = typeof ctx === 'number' ? ctx.toLocaleString() : esc(ctx);
       let qScore = m.quality_score || '';
       return `<tr><td><strong>${esc(mod)}</strong><div style="font-size:11px;color:var(--muted)">${esc(m.id)}</div></td><td><span class="badge accent">${esc(prov)}</span></td><td style="color:var(--dim)">${ctxStr}</td>
-        <td><div style="display:flex;align-items:center;gap:6px"><input class="input" style="width:60px;padding:4px 6px;font-size:11px;height:28px" type="number" min="0" max="100" value="${qScore}" onchange="setQuality('${esc(m.id)}',this.value)" placeholder="—"><span style="font-size:11px;color:var(--muted)">0-100</span></div></td></tr>`;
+        <td><div style="display:flex;align-items:center;gap:6px"><input class="input q-input" style="width:60px;padding:4px 6px;font-size:11px;height:28px" type="number" min="0" max="100" value="${esc(qScore)}" data-model-id="${esc(m.id)}" placeholder="—"><span style="font-size:11px;color:var(--muted)">0-100</span></div></td></tr>`;
     }).join('') + '</tbody></table>';
+  $('mtable').querySelectorAll('input.q-input').forEach(inp => {
+    inp.addEventListener('change', () => {
+      setQuality(inp.getAttribute('data-model-id') || '', inp.value);
+    });
+  });
 }
 function filterM() { applyMFilter(); }
 async function refreshCat(silent) {

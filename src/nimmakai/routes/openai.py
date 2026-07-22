@@ -221,8 +221,14 @@ async def _prepare_routed(
     settings = _settings(request)
     proxy_token = require_active_user(request, settings).token or ""
     guard: AccountGuard = request.app.state.guard
+    registry: ModelRegistry | None = getattr(request.app.state, "registry", None)
 
     if _routing_disabled(request, settings):
+        mid = str(body.get("model") or settings.default_model or "").strip()
+        if mid and registry is not None:
+            disabled_hit = registry.resolve_live_id(mid, include_disabled=True)
+            if disabled_hit in getattr(registry, "disabled_models", set()):
+                raise ValueError("model_disabled")
         if not body.get("model") and settings.default_model:
             body = {**body, "model": settings.default_model}
         ctx = await guard.before_request(
@@ -232,7 +238,6 @@ async def _prepare_routed(
 
     classifier: IntentClassifier = request.app.state.classifier
     selector: ModelSelector | None = request.app.state.selector
-    registry: ModelRegistry | None = request.app.state.registry
 
     if selector is None or registry is None:
         if not body.get("model") and settings.default_model:

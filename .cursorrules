@@ -1,7 +1,7 @@
 # Scratchpad
 
 ## Current task
-Second whole-repo adversarial hardening pass — COMPLETE
+Second whole-repo adversarial hardening pass — COMPLETE (+ audit follow-ups)
 
 ## Plan
 - [X] Baseline full tests, Ruff, TypeScript build, shell syntax
@@ -9,12 +9,15 @@ Second whole-repo adversarial hardening pass — COMPLETE
 - [X] Reproduce and fix evidence-backed Critical/High/Medium failures
 - [X] Add regression tests for every behavior change
 - [X] Re-run full verification and review the final diff
+- [X] Audit follow-ups: disabled passthrough, embed pin, legacy auth/XSS, SSE buffer, atomic approve
 
-## Second-pass findings (fixed)
-- Deploy: `/ready` health, no placeholder secret, cloud-init deadlock removed, MOTD scrubbed, false-success bootstrap fixed; docs aligned
-- Auth: preferences/retention require admin; bearer before cookie; suspend/reject revokes sessions; accounts migration fail-closed; SMTP settings passed; analytics SSE scoped by user_id
-- Routing: embeddings empty detection; 401/403 key rotate; empty-stream fallback; hard empty allowed/free filters; circuit half-open single probe
-- Frontend: Routing Clear → DELETE; auth-expired event; SSE reconnect without leak; provider edit without new keys; Cost/CSV error surfacing
+## Remaining (deferred / medium)
+- CSRF tokens for cookie mutations
+- Row-level provider upsert (stale full rewrite)
+- Request deadline wrapping each upstream attempt
+- Mid-stream idle → error event (not clean [DONE])
+- Frontend Vitest + CI build gate
+- Commit lockfile for reproducible Docker builds
 
 ## Design decisions
 - Disabled models = unknown for routing/`is_known`; `include_disabled=True` for admin introspection
@@ -23,6 +26,8 @@ Second whole-repo adversarial hardening pass — COMPLETE
 - Explicit Bearer/API-key headers beat session cookie (break-glass)
 - `filter_chain` hard-empty (never fail-open past allowed/free constraints)
 - Analytics SSE: admins `see_all`; users only own `user_id` traces
+- Executor `_chain` always strips disabled + re-applies allowed/free after emergency heal
+- Concurrent approve uses `BEGIN IMMEDIATE` + conditional UPDATE
 
 ## Lessons
 - .cursorrules can be overwritten by concurrent agent sessions — re-read before editing, merge don't clobber
@@ -35,8 +40,6 @@ Second whole-repo adversarial hardening pass — COMPLETE
 - Helpers existing ≠ wired — always verify call sites
 - EventSource cannot send Authorization — use ?token= or session cookie for SSE
 - CORS allow_credentials cannot pair with allow_origins=*
-- Global agent skills live in 4 dirs: ~/.claude/skills, ~/.agents/skills, ~/.config/opencode/skills, ~/.cursor/skills — keep copies in sync (verify with shasum). supercoder rewritten to v5 (98 lines, evidence-based verification, anti-rationalization table)
-- Explicit-model tests previously encoded buggy "best coder leads" behavior — F-08 requires pinned head first; update tests with the fix
 - Droplet compose publishes host port 80 (not 8080); data survives rebuilds via `nimmakai-data` volume
 - DO User data embeds secrets (visible via metadata/API) — gitignore generated scripts; warn to rotate
 - `_filter_available` must never fail-open to disabled models (empty → [])
@@ -44,3 +47,5 @@ Second whole-repo adversarial hardening pass — COMPLETE
 - Session auth must gate on account status the same as API keys
 - EventBus subscriber filter: store `(see_all, user_id)` — `user_id=None` alone must not mean see-all
 - KeyPool exposes `__len__`, not `.size`
+- `esc()` does not make data safe inside JS string literals — use data attributes + addEventListener
+- SQLite `isolation_level=None` needs explicit `BEGIN IMMEDIATE` for atomic multi-statement approves

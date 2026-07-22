@@ -369,3 +369,34 @@ def test_account_store_password_and_key_roundtrip():
     raw = store.create_verify_token(u["id"])
     assert store.consume_verify_token(raw) == u["id"]
     assert store.consume_verify_token(raw) is None  # one-time
+
+
+def test_concurrent_approve_issues_one_key():
+    """Two approve_and_issue_key calls must not leave two valid plaintext keys."""
+    import concurrent.futures
+
+    td = tempfile.TemporaryDirectory()
+    _temp_dirs.append(td)
+    db = get_db(Path(td.name) / "approve.db")
+    store = AccountStore(db)
+    u = store.create_user("race@ex.com", "password123", status="pending_approval")
+
+    results: list[dict] = []
+
+    def _approve():
+        results.append(
+            store.approve_and_issue_key(u["id"], approved_by="admin-a")
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        futs = [pool.submit(_approve) for _ in range(2)]
+        for f in futs:
+            f.result()
+
+    winners = [r for r in results if r.get("ok") and r.get("api_key")]
+    assert len(winners) == 1, results
+    # Exactly one non-revoked key in DB
+    keys = [k for k in store.list_keys_for_user(u["id"]) if not k.get("revoked_at")]
+    assert len(keys) == 1
+    user = store.get_user(u["id"])
+    assert user and user["status"] == "active"

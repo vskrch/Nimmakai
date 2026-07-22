@@ -151,11 +151,29 @@ class ModelSelector:
 
         if intent == Intent.EMBEDDINGS:
             chain = self.registry.chain_for_intent("embeddings", variant=variant)
-            if not chain and raw and looks_like_nim_id(raw):
+            # Explicit enabled embedding model must lead (not be swallowed by chain head)
+            if raw and not self.registry.is_auto(raw):
+                resolved = self.registry.resolve_live_id(raw)
+                if resolved:
+                    chain = [resolved] + [m for m in chain if m != resolved]
+                elif not chain and looks_like_nim_id(raw):
+                    # Unknown passthrough only when not admin-disabled
+                    disabled_hit = self.registry.resolve_live_id(
+                        raw, include_disabled=True
+                    )
+                    if disabled_hit in self.registry.disabled_models:
+                        raise ValueError("model_disabled")
+                    chain = [raw]
+            elif not chain and raw and looks_like_nim_id(raw):
                 chain = [raw]
             chain = self.registry.health_reorder(
                 chain, intent=intent_key, variant=variant
             )
+            # Keep explicit pin first after health reorder
+            if raw and not self.registry.is_auto(raw):
+                resolved = self.registry.resolve_live_id(raw)
+                if resolved:
+                    chain = pin_model_first(chain, resolved)
             return RouteDecision(
                 chain=chain,
                 mode="auto"
@@ -166,6 +184,7 @@ class ModelSelector:
                 requested_model=model_field,
                 auto_tier=tier,
                 variant=variant,
+                pinned_head=self.registry.resolve_live_id(raw) if raw else None,
             )
 
         if intent == Intent.VISION:
@@ -290,49 +309,72 @@ class ModelSelector:
             )
 
         if self.registry.is_known(raw) or looks_like_nim_id(raw):
-            resolved = self.registry.resolve_live_id(raw) or raw
-            if self.settings.enable_fallback_on_explicit:
-                siblings = self.registry.chain_for_intent(intent_key, variant=variant)
-                bare = resolved.split("/")[-1] if "/" in resolved else resolved
-                horizontals = [
-                    m
-                    for m in siblings
-                    if (m.split("/")[-1] if "/" in m else m) == bare and m != resolved
-                ]
-                rest = [m for m in siblings if m != resolved and m not in horizontals]
-                rest_opt = self.registry.health_reorder(
-                    rest, intent=intent_key, variant=variant
+            resolved = self.registry.resolve_live_id(raw)
+            if resolved is None:
+                # Disabled or unknown: reject disabled explicitly; unknown NIM ids
+                # may still passthrough if they are not in the disabled set.
+                disabled_hit = self.registry.resolve_live_id(
+                    raw, include_disabled=True
                 )
-                chain = (
-                    [resolved]
-                    + [m for m in horizontals if m != resolved]
-                    + [m for m in rest_opt if m != resolved and m not in horizontals]
+                if disabled_hit in self.registry.disabled_models:
+                    raise ValueError("model_disabled")
+                if not looks_like_nim_id(raw):
+                    # Fall through to auto below
+                    resolved = None
+                else:
+                    resolved = raw
+            if resolved is not None:
+                if self.settings.enable_fallback_on_explicit:
+                    siblings = self.registry.chain_for_intent(
+                        intent_key, variant=variant
+                    )
+                    bare = resolved.split("/")[-1] if "/" in resolved else resolved
+                    horizontals = [
+                        m
+                        for m in siblings
+                        if (m.split("/")[-1] if "/" in m else m) == bare
+                        and m != resolved
+                    ]
+                    rest = [
+                        m for m in siblings if m != resolved and m not in horizontals
+                    ]
+                    rest_opt = self.registry.health_reorder(
+                        rest, intent=intent_key, variant=variant
+                    )
+                    chain = (
+                        [resolved]
+                        + [m for m in horizontals if m != resolved]
+                        + [
+                            m
+                            for m in rest_opt
+                            if m != resolved and m not in horizontals
+                        ]
+                    )
+                    mode: RouteMode = "passthrough_with_fallback"
+                else:
+                    chain = [resolved]
+                    mode = "passthrough"
+                # For coding, rank candidates but keep the requested model pinned
+                # so _chain / sticky affinity is not silently discarded (F-08).
+                if intent_key == "coding_agentic":
+                    seen = set(chain)
+                    for m in self.registry.coding_candidates():
+                        if m not in seen:
+                            chain.append(m)
+                            seen.add(m)
+                    chain = self.registry.health_reorder(
+                        chain, intent=intent_key, variant=variant
+                    )
+                    chain = pin_model_first(chain, resolved)
+                return RouteDecision(
+                    chain=chain,
+                    mode=mode,
+                    intent=intent,
+                    rule_id=intent_result.rule_id,
+                    requested_model=model_field,
+                    variant=variant,
+                    pinned_head=resolved,
                 )
-                mode: RouteMode = "passthrough_with_fallback"
-            else:
-                chain = [resolved]
-                mode = "passthrough"
-            # For coding, rank candidates but keep the requested model pinned
-            # so _chain / sticky affinity is not silently discarded (F-08).
-            if intent_key == "coding_agentic":
-                seen = set(chain)
-                for m in self.registry.coding_candidates():
-                    if m not in seen:
-                        chain.append(m)
-                        seen.add(m)
-                chain = self.registry.health_reorder(
-                    chain, intent=intent_key, variant=variant
-                )
-                chain = pin_model_first(chain, resolved)
-            return RouteDecision(
-                chain=chain,
-                mode=mode,
-                intent=intent,
-                rule_id=intent_result.rule_id,
-                requested_model=model_field,
-                variant=variant,
-                pinned_head=resolved,
-            )
 
         # Unknown non-NIM string → treat as auto (Cursor defaults, etc.)
         chain = self.registry.chain_for_intent(intent_key, variant=variant)

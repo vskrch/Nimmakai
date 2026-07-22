@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from contextlib import suppress
 from typing import TYPE_CHECKING, Any
 
 from nimmakai.accounts.crypto import (
@@ -314,3 +315,129 @@ class AccountStore:
                 (user_id,),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def approve_and_issue_key(
+        self,
+        user_id: str,
+        *,
+        approved_by: str | None = None,
+        name: str = "default",
+    ) -> dict[str, Any]:
+        """
+        Atomically activate a pending/rejected/suspended user and issue one API key.
+
+        Concurrent approvers: only the first UPDATE wins; losers get
+        ``already_active=True`` without a newly issued plaintext key.
+        """
+        now = time.time()
+        with self._db._lock:
+            self._db._conn.execute("BEGIN IMMEDIATE")
+            try:
+                row = self._db._conn.execute(
+                    "SELECT * FROM users WHERE id = ?", (user_id,)
+                ).fetchone()
+                if not row:
+                    self._db._conn.execute("ROLLBACK")
+                    return {"ok": False, "error": "not_found"}
+                user = dict(row)
+                status = user["status"]
+                if status == STATUS_ACTIVE:
+                    keys = self._db._conn.execute(
+                        """
+                        SELECT id, key_prefix, name, created_at, revoked_at
+                        FROM api_keys
+                        WHERE user_id = ? AND revoked_at IS NULL
+                        ORDER BY created_at DESC
+                        """,
+                        (user_id,),
+                    ).fetchall()
+                    self._db._conn.execute("COMMIT")
+                    return {
+                        "ok": True,
+                        "already_active": True,
+                        "user": user,
+                        "keys": [dict(k) for k in keys],
+                        "api_key": None,
+                    }
+                if status not in {
+                    STATUS_PENDING,
+                    STATUS_REJECTED,
+                    STATUS_SUSPENDED,
+                }:
+                    self._db._conn.execute("ROLLBACK")
+                    return {
+                        "ok": False,
+                        "error": "invalid_status",
+                        "status": status,
+                    }
+                cur = self._db._conn.execute(
+                    """
+                    UPDATE users SET status = ?, approved_at = ?, approved_by = ?
+                    WHERE id = ? AND status IN (?, ?, ?)
+                    """,
+                    (
+                        STATUS_ACTIVE,
+                        now,
+                        approved_by,
+                        user_id,
+                        STATUS_PENDING,
+                        STATUS_REJECTED,
+                        STATUS_SUSPENDED,
+                    ),
+                )
+                if cur.rowcount != 1:
+                    # Lost the race — another approver won
+                    keys = self._db._conn.execute(
+                        """
+                        SELECT id, key_prefix, name, created_at, revoked_at
+                        FROM api_keys
+                        WHERE user_id = ? AND revoked_at IS NULL
+                        ORDER BY created_at DESC
+                        """,
+                        (user_id,),
+                    ).fetchall()
+                    user2 = self._db._conn.execute(
+                        "SELECT * FROM users WHERE id = ?", (user_id,)
+                    ).fetchone()
+                    self._db._conn.execute("COMMIT")
+                    return {
+                        "ok": True,
+                        "already_active": True,
+                        "user": dict(user2) if user2 else user,
+                        "keys": [dict(k) for k in keys],
+                        "api_key": None,
+                    }
+                # Issue key inside same transaction
+                raw, prefix, kh = new_api_key()
+                kid = new_id("key")
+                self._db._conn.execute(
+                    """
+                    UPDATE api_keys SET revoked_at = ?
+                    WHERE user_id = ? AND revoked_at IS NULL
+                    """,
+                    (now, user_id),
+                )
+                self._db._conn.execute(
+                    """
+                    INSERT INTO api_keys
+                        (id, user_id, key_prefix, key_hash, name, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (kid, user_id, prefix, kh, name, now),
+                )
+                user_out = self._db._conn.execute(
+                    "SELECT * FROM users WHERE id = ?", (user_id,)
+                ).fetchone()
+                self._db._conn.execute("COMMIT")
+                return {
+                    "ok": True,
+                    "already_active": False,
+                    "user": dict(user_out) if user_out else user,
+                    "api_key": raw,
+                    "key_prefix": prefix,
+                    "key_id": kid,
+                }
+            except Exception:
+                with suppress(Exception):
+                    self._db._conn.execute("ROLLBACK")
+                raise

@@ -62,14 +62,17 @@ export default function PlaygroundPage() {
       const reader = res.body?.getReader()
       const decoder = new TextDecoder()
       let assistantContent = ''
+      let lineBuf = ''
       setMessages([...newMsgs, { role: 'assistant', content: '' }])
 
       if (reader) {
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
-          const chunk = decoder.decode(value, { stream: true })
-          for (const line of chunk.split('\n')) {
+          lineBuf += decoder.decode(value, { stream: true })
+          const lines = lineBuf.split('\n')
+          lineBuf = lines.pop() || ''
+          for (const line of lines) {
             if (!line.startsWith('data: ')) continue
             const data = line.slice(6).trim()
             if (data === '[DONE]') continue

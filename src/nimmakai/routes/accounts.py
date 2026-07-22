@@ -347,43 +347,50 @@ async def admin_approve_user(user_id: str, request: Request) -> JSONResponse:
         return JSONResponse(
             {"error": {"message": "Accounts not initialized"}}, status_code=503
         )
-    user = store.get_user(user_id)
-    if not user:
-        return JSONResponse(
-            {"error": {"message": "Not found", "code": "not_found"}}, status_code=404
-        )
-    if user["status"] not in {STATUS_PENDING, STATUS_REJECTED, STATUS_SUSPENDED}:
-        if user["status"] == STATUS_ACTIVE:
-            keys = store.list_keys_for_user(user_id)
+    result = store.approve_and_issue_key(
+        user_id,
+        approved_by=admin.email or admin.user_id or "admin",
+    )
+    if not result.get("ok"):
+        err = result.get("error")
+        if err == "not_found":
             return JSONResponse(
-                {"ok": True, "user": store.public_user(user), "already_active": True, "keys": keys}
+                {"error": {"message": "Not found", "code": "not_found"}},
+                status_code=404,
             )
         return JSONResponse(
             {
                 "error": {
-                    "message": f"Cannot approve user in status={user['status']}",
+                    "message": f"Cannot approve user in status={result.get('status')}",
                     "code": "invalid_status",
                 }
             },
             status_code=400,
         )
-    user = store.set_status(
-        user_id, STATUS_ACTIVE, approved_by=admin.email or admin.user_id or "admin"
-    )
-    issued = store.issue_api_key(user_id)
-    # Notify via stub email
-    if user and user.get("email"):
+    user = result["user"]
+    if result.get("already_active"):
+        return JSONResponse(
+            {
+                "ok": True,
+                "user": store.public_user(user),
+                "already_active": True,
+                "keys": result.get("keys") or [],
+            }
+        )
+    issued_key = result["api_key"]
+    # Notify via email (stub or SMTP)
+    if user and user.get("email") and issued_key:
         sender = get_email_sender(
-        getattr(settings, "email_backend", "stub") or "stub",
-        settings=settings,
-    )
+            getattr(settings, "email_backend", "stub") or "stub",
+            settings=settings,
+        )
         sender.send(
             OutboundEmail(
                 to=user["email"],
                 subject="Your Nimmakai account was approved",
                 text=(
                     "Your account is active.\n\n"
-                    f"API key (save now):\n{issued['api_key']}\n\n"
+                    f"API key (save now):\n{issued_key}\n\n"
                     "Use it as Authorization: Bearer <key> with the gateway.\n"
                     f"Dashboard: {_base_url(request, settings)}/dashboard\n"
                 ),
@@ -393,8 +400,8 @@ async def admin_approve_user(user_id: str, request: Request) -> JSONResponse:
         {
             "ok": True,
             "user": store.public_user(user or {}),
-            "api_key": issued["api_key"],
-            "key_prefix": issued["key_prefix"],
+            "api_key": issued_key,
+            "key_prefix": result.get("key_prefix"),
             "message": "User approved. API key issued (also emailed via stub).",
         }
     )

@@ -121,6 +121,46 @@ def test_disabled_not_known_for_routing():
         selector.resolve("zen/mimo-v2.5-free", intent)
 
 
+def test_executor_chain_strips_disabled_passthrough():
+    """Even a hand-built decision must not execute disabled models."""
+    from nimmakai.routing.fallback import FallbackExecutor
+    from nimmakai.routing.selector import RouteDecision
+    from nimmakai.routing.intents import Intent
+
+    _app, registry, settings = _app_with_live_models(
+        ["zen/mimo-v2.5-free", "zen/big-pickle"]
+    )
+    registry.set_model_enabled("zen/mimo-v2.5-free", False)
+    executor = FallbackExecutor(
+        upstream=None,  # type: ignore[arg-type]
+        registry=registry,
+        settings=settings,
+        hub=None,
+    )
+    decision = RouteDecision(
+        chain=["zen/mimo-v2.5-free", "zen/big-pickle"],
+        mode="passthrough_with_fallback",
+        intent=Intent.CODING_AGENTIC,
+        rule_id="test",
+        requested_model="zen/mimo-v2.5-free",
+    )
+    chain = executor._chain(decision)
+    assert "zen/mimo-v2.5-free" not in chain
+    assert chain[0] == "zen/big-pickle"
+
+
+def test_explicit_embedding_model_leads_chain():
+    _app, registry, settings = _app_with_live_models(
+        ["nim/embed-a", "nim/embed-b"]
+    )
+    # Seed embeddings intent chain with A first
+    registry.dynamic_chains["embeddings"] = ["nim/embed-a", "nim/embed-b"]
+    selector = ModelSelector(registry, settings)
+    intent = IntentResult(intent=Intent.EMBEDDINGS, confidence=1.0, rule_id="test")
+    decision = selector.resolve("nim/embed-b", intent)
+    assert decision.chain[0] == "nim/embed-b"
+
+
 def test_disable_rolls_back_memory_when_sqlite_write_fails(monkeypatch):
     _app, registry, _ = _app_with_live_models(
         ["zen/mimo-v2.5-free", "zen/big-pickle"]
