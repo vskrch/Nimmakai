@@ -78,8 +78,15 @@ class TraceWriter:
         # Final drain
         batch = self._drain(limit=10_000)
         if batch:
-            await asyncio.to_thread(self._write_batch, batch)
-            self._publish_batch(batch)
+            try:
+                await asyncio.to_thread(self._write_batch, batch)
+                self._flushed += len(batch)
+                self._publish_batch(batch)
+            except Exception:
+                logger.exception(
+                    "analytics final drain failed (n=%s); dropping", len(batch)
+                )
+                self._dropped += len(batch)
         logger.info(
             "analytics writer stopped flushed=%s dropped=%s",
             self._flushed,
@@ -133,13 +140,15 @@ class TraceWriter:
                             logger.exception("analytics on_flush hook failed")
                 except Exception:
                     logger.exception("analytics batch write failed (n=%s)", len(batch))
-                    # Re-enqueue on transient error so traces aren't silently lost.
-                    # If queue is full, count as dropped.
+                    # Back off then re-enqueue once; permanent failures drop.
+                    await asyncio.sleep(min(2.0, self._flush_interval))
                     for trace in batch:
                         try:
                             self._queue.put_nowait(trace)
                         except asyncio.QueueFull:
                             self._dropped += 1
+                    # Avoid tight fail loops: wait a full interval before next drain
+                    await asyncio.sleep(self._flush_interval)
 
     def _drain(self, *, limit: int) -> list[TraceRecord]:
         out: list[TraceRecord] = []

@@ -124,7 +124,11 @@ export function Donut({
   items: { key: string; value: number; color?: string }[]
   size?: number
 }) {
-  const total = items.reduce((a, b) => a + b.value, 0) || 1
+  const filtered = items.filter(i => i.value > 0)
+  if (!filtered.length) {
+    return <div className="text-sm text-zinc-500 py-6 text-center">No data in range</div>
+  }
+  const total = filtered.reduce((a, b) => a + b.value, 0)
   const colors = ['#8b5cf6', '#22d3ee', '#34d399', '#fbbf24', '#f472b6', '#60a5fa', '#a3e635']
   let acc = 0
   const r = size / 2 - 8
@@ -133,7 +137,7 @@ export function Donut({
   return (
     <div className="flex items-center gap-6">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-        {items.map((it, i) => {
+        {filtered.map((it, i) => {
           const frac = it.value / total
           const dash = circ * frac
           const offset = circ * (1 - acc) + circ * 0.25
@@ -158,7 +162,7 @@ export function Donut({
         </text>
       </svg>
       <div className="flex flex-col gap-1.5 text-[12px]">
-        {items.slice(0, 6).map((it, i) => (
+        {filtered.slice(0, 6).map((it, i) => (
           <div key={it.key} className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full" style={{ background: it.color || colors[i % colors.length] }} />
             <span className="text-zinc-400 truncate max-w-[140px]">{it.key}</span>

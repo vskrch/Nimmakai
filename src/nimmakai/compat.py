@@ -257,3 +257,70 @@ async def normalize_sse_stream(
             yield transform_sse_bytes(line, routed_model=routed_model)
     if buffer:
         yield transform_sse_bytes(buffer, routed_model=routed_model)
+
+
+def frame_sse_error(
+    message: str,
+    *,
+    code: str = "upstream_error",
+    status: int = 502,
+    retry_after: str | None = None,
+) -> bytes:
+    """SSE-framed OpenAI error for StreamingResponse clients."""
+    meta = {"retry_after": retry_after} if retry_after else None
+    payload = openai_error(
+        message,
+        code=code,
+        type_="server_error" if status >= 500 or status == 429 else "invalid_request_error",
+        metadata=meta,
+    )
+    return b"data: " + json.dumps(payload).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
+
+
+def json_body_to_sse(body: Any, *, routed_model: str | None = None) -> bytes:
+    """Convert a non-streaming JSON completion into a one-shot SSE sequence (F-18)."""
+    if not isinstance(body, dict):
+        try:
+            body = json.loads(body) if isinstance(body, (bytes, str)) else {"raw": body}
+        except Exception:
+            body = {"error": {"message": "upstream returned non-JSON body"}}
+    if routed_model:
+        body = {**body, "model": routed_model}
+    choices = body.get("choices")
+    chunks: list[bytes] = []
+    if isinstance(choices, list) and choices:
+        ch0 = choices[0] if isinstance(choices[0], dict) else {}
+        msg = ch0.get("message") if isinstance(ch0.get("message"), dict) else {}
+        delta: dict[str, Any] = {}
+        if isinstance(msg, dict):
+            if msg.get("content") is not None:
+                delta["content"] = msg.get("content")
+            if msg.get("tool_calls") is not None:
+                delta["tool_calls"] = msg.get("tool_calls")
+            if msg.get("role"):
+                delta["role"] = msg.get("role")
+        elif ch0.get("text") is not None:
+            delta["content"] = ch0.get("text")
+        chunk = {
+            "id": body.get("id") or "nimmakai-json-stream",
+            "object": "chat.completion.chunk",
+            "model": body.get("model"),
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": delta,
+                    "finish_reason": ch0.get("finish_reason") or "stop",
+                }
+            ],
+        }
+        if isinstance(body.get("usage"), dict):
+            chunk["usage"] = body["usage"]
+        chunks.append(
+            b"data: " + json.dumps(chunk, ensure_ascii=False).encode("utf-8") + b"\n\n"
+        )
+    else:
+        chunks.append(
+            b"data: " + json.dumps(body, ensure_ascii=False).encode("utf-8") + b"\n\n"
+        )
+    chunks.append(b"data: [DONE]\n\n")
+    return b"".join(chunks)

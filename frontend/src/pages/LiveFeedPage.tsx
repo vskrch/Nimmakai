@@ -3,7 +3,7 @@ import { useAnalyticsSSE, useAnalyticsSummary } from '../hooks/useAnalytics'
 import { fmtMs, fmtTokens, fmtUsd, fmtTime, fmtPct } from '../lib/format'
 
 export default function LiveFeedPage() {
-  const { connected, events, paused, togglePause } = useAnalyticsSSE(true)
+  const { connected, events, paused, togglePause, authError } = useAnalyticsSSE(true)
   const { data: summary } = useAnalyticsSummary('1h')
 
   return (
@@ -18,6 +18,13 @@ export default function LiveFeedPage() {
         </div>
         <Button size="sm" onClick={togglePause}>{paused ? 'Resume' : 'Pause'}</Button>
       </div>
+
+      {authError && (
+        <div className="mb-4 text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+          Live feed disconnected after repeated failures. Check that the API is running,
+          then refresh. If using a session cookie, sign in again or set an API key.
+        </div>
+      )}
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3 mb-6">
         <StatBox label="RPM" value={(summary?.requests_per_minute ?? 0).toFixed(1)} />

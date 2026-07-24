@@ -7,11 +7,20 @@ import { fmtMs, fmtTokens, fmtUsd, fmtPct } from '../lib/format'
 
 export default function AnalyticsOverviewPage() {
   const [range, setRange] = useState('1h')
-  const { data: summary, loading, reload } = useAnalyticsSummary(range)
-  const { points } = useTimeseries('requests', range, range === '7d' ? '1h' : '5m')
-  const { items: models } = useBreakdown('models', range)
-  const { items: intents } = useBreakdown('intents', range)
-  const { items: providers } = useBreakdown('providers', range)
+  const { data: summary, loading, error, reload: reloadSummary } = useAnalyticsSummary(range)
+  const interval = range === '7d' ? '1h' : '5m'
+  const { points, reload: reloadTs } = useTimeseries('requests', range, interval)
+  const { items: models, reload: reloadModels } = useBreakdown('models', range)
+  const { items: intents, reload: reloadIntents } = useBreakdown('intents', range)
+  const { items: providers, reload: reloadProviders } = useBreakdown('providers', range)
+
+  function reloadAll() {
+    reloadSummary()
+    reloadTs()
+    reloadModels()
+    reloadIntents()
+    reloadProviders()
+  }
 
   if (loading && !summary) return <Spinner />
 
@@ -23,9 +32,19 @@ export default function AnalyticsOverviewPage() {
         <h2 className="text-xl font-semibold">Analytics Overview</h2>
         <div className="flex items-center gap-3">
           <RangePicker value={range} onChange={setRange} />
-          <Button size="sm" onClick={reload}>Refresh</Button>
+          <Button size="sm" onClick={reloadAll}>Refresh</Button>
         </div>
       </div>
+
+      {error && (
+        <div className="mb-4 text-sm text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+          {error}
+        </div>
+      )}
+
+      {loading && summary && (
+        <div className="mb-3 text-xs text-zinc-500">Updating…</div>
+      )}
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4 mb-8">
         <StatBox

@@ -11,7 +11,7 @@ export default function CostPage() {
   const { data: summary, reload: reloadSummary } = useAnalyticsSummary(range)
   const { items: models } = useBreakdown('models', range)
   const { items: keys } = useBreakdown('api_keys', range)
-  const { data: rates, reload: reloadRates } = useCostRates()
+  const { data: rates, loading: ratesLoading, error: ratesError, reload: reloadRates } = useCostRates()
   const [modelId, setModelId] = useState('')
   const [inp, setInp] = useState('0')
   const [out, setOut] = useState('0')
@@ -124,7 +124,12 @@ export default function CostPage() {
             </Button>
             <span className="text-xs text-zinc-500 self-center">Import pricing for all live models</span>
           </div>
-          {!rates ? <Spinner /> : (
+          {ratesError && (
+            <div className="mb-3 text-sm text-red-400">{ratesError}</div>
+          )}
+          {ratesLoading && !rates ? <Spinner /> : !rates ? (
+            <div className="text-sm text-zinc-500">No rate data</div>
+          ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-[13px]">
                 <thead>

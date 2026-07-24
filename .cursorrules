@@ -1,63 +1,43 @@
 # Scratchpad
 
 ## Current task
-Hot-deploy compose for code updates without Docker rebuild — COMPLETE
+10-pass deep-dive resiliency/robustness hardening — COMPLETE
 
-## Plan
-- [X] Explore current cost system in analytics/cost.py
-- [X] Research models.dev API structure (api.json has cost.input/cost.output per model)
-- [X] Implement models_cost.py fetcher with caching
-- [X] Update cost.py to use dynamic data as primary, hardcoded as fallback
-- [X] Add tests for new functionality
-- [X] Run tests and lint
-
-## Plan
-- [X] Baseline full tests, Ruff, TypeScript build, shell syntax
-- [X] Independent audits: auth/persistence, routing/upstream, frontend/deploy
-- [X] Reproduce and fix evidence-backed Critical/High/Medium failures
-- [X] Add regression tests for every behavior change
-- [X] Re-run full verification and review the final diff
-- [X] Audit follow-ups: disabled passthrough, embed pin, legacy auth/XSS, SSE buffer, atomic approve
+## Plan (10 passes)
+- [X] P1 Transport/failover: httpx catch (prior), 401/403 advance, Retry-After bodies, connect=5s (prior)
+- [X] P2 Stream envelope: terminal SSE framing, idle/error, empty last-model, JSON→SSE (F-18)
+- [X] P3 Deadlines: per-attempt wait_for + between-model; saw_deadline label; CancelledError gate release
+- [X] P4 Circuit mid-stream fail (prior holder); sticky via stream_failed
+- [X] P5 Auth: invalid Bearer no cookie fallthrough; SSE ?token= preferred over cookie
+- [X] P6 Analytics: zero-fill coarsen, cost cache gen, writer backoff/drain
+- [X] P7 Frontend: authError UX, prior refetch/spinner/Donut fixes
+- [X] P8 Inter-model backoff on transport/TTFT; wrap_upstream on stream/passthrough errors
+- [X] P9 Compat frame_sse_error + json_body_to_sse
+- [X] P10 Regression tests + full suite (257) + frontend build
 
 ## Remaining (deferred / medium)
 - CSRF tokens for cookie mutations
 - Row-level provider upsert (stale full rewrite)
-- Request deadline wrapping each upstream attempt
-- Mid-stream idle → error event (not clean [DONE])
 - Frontend Vitest + CI build gate
 - Commit lockfile for reproducible Docker builds
+- HALF_OPEN allow() before keys check (hub)
+- JSONDecodeError from upstream.json() outside FallbackExecutor catch set
 
 ## Design decisions
-- Disabled models = unknown for routing/`is_known`; `include_disabled=True` for admin introspection
-- Auto-enable providers only when request supplies keys/preset (not on every edit)
-- Persist disabled_models failures raise → 500 to admin API
-- Explicit Bearer/API-key headers beat session cookie (break-glass)
-- `filter_chain` hard-empty (never fail-open past allowed/free constraints)
-- Analytics SSE: admins `see_all`; users only own `user_id` traces
-- Executor `_chain` always strips disabled + re-applies allowed/free after emergency heal
-- Concurrent approve uses `BEGIN IMMEDIATE` + conditional UPDATE
+- Explicit Bearer beats cookie; invalid Bearer → 401 (no cookie fallthrough)
+- Analytics SSE prefers ?token=/Bearer over session cookie
+- Terminal stream errors always SSE-framed (`data:` + `[DONE]`) with text/event-stream
+- 401/403 advance to next model after in-provider key rotation exhausted
+- Per-attempt asyncio.wait_for budget = min(remaining, 120s)
 
 ## Lessons
 - .cursorrules can be overwritten by concurrent agent sessions — re-read before editing, merge don't clobber
-- App Platform does NOT support volumes — document ephemeral SQLite clearly
-- Hatch force-include of missing static/dist breaks local installs — copy dist post-pip in Docker instead
-- Colima must be started before docker build on this machine
 - Spokenly MCP may be unavailable; supercoder says NEVER ASK — proceed autonomously
-- FastAPI union StreamingResponse|JSONResponse needs response_model=None
 - Project venv is `.venv` (uv), not `venv`
-- Helpers existing ≠ wired — always verify call sites
 - EventSource cannot send Authorization — use ?token= or session cookie for SSE
-- CORS allow_credentials cannot pair with allow_origins=*
-- Droplet compose publishes host port 80 (not 8080); data survives rebuilds via `nimmakai-data` volume
-- DO User data embeds secrets (visible via metadata/API) — gitignore generated scripts; warn to rotate
-- `_filter_available` must never fail-open to disabled models (empty → [])
-- Seeded `api_keys_env` can block env aliases — `resolved_keys` must check alias envs
-- Session auth must gate on account status the same as API keys
-- EventBus subscriber filter: store `(see_all, user_id)` — `user_id=None` alone must not mean see-all
-- KeyPool exposes `__len__`, not `.size`
-- `esc()` does not make data safe inside JS string literals — use data attributes + addEventListener
-- SQLite `isolation_level=None` needs explicit `BEGIN IMMEDIATE` for atomic multi-statement approves
-- After launching a background subagent: end the turn — do not poll AwaitShell/tail on its transcript (anti-loop kills parent)
-- models.dev model_id often already contains `/` (lab/model); index both `provider/mid` and bare/lab forms for Nimmakai gateway namespaces
-- models.dev API uses `{provider_id}/{model_id}` as key; Nimmakai may use un-prefixed names (e.g. `deepseek-chat`) — both appear in `list_default_rates`
-- `docker-compose.hotdeploy.yml` mounts `src/nimmakai` into site-packages + `uvicorn --reload` for instant code updates without Docker rebuild — only for dev/staging, not production
+- Empty-stream last-model must continue — fall-through yields HTTP 200
+- stream_failed must mutate StreamResult via holder after construction
+- Awaiting cancelled Task re-raises CancelledError — catch explicitly
+- except BaseException before except Exception makes Exception unreachable
+- Broad monkeypatch of asyncio.wait_for also hits per-attempt deadlines — tests must accept request_deadline_exceeded
+- Zero-fill must coarsen step or fill from until — capping from since drops newest buckets

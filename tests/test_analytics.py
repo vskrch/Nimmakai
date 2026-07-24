@@ -457,3 +457,24 @@ def test_mask_api_key():
     # api_key is 6th field (index 5)
     assert "…" in row[5] or "***" in str(row[5])
     assert "ijklmnop"[-4:] in row[5]
+
+
+def test_timeseries_zero_fills_gaps():
+    td = tempfile.TemporaryDirectory()
+    _temp_dirs.append(td)
+    db = get_db(str(Path(td.name) / "zf.db"))
+    store = AnalyticsStore(db)
+    writer = TraceWriter(db, batch_size=100, flush_interval=1.0)
+    now = time.time()
+    # One request ~30 minutes ago — 1h window @ 5m should fill ~12 buckets
+    writer._write_batch([_make_trace("sparse", created_at=now - 1800)])
+    points = store.timeseries(
+        "requests", since=now - 3600, until=now, interval="5m"
+    )
+    assert len(points) >= 10
+    assert sum(1 for p in points if int(p.get("requests") or 0) > 0) == 1
+    assert all("ts" in p for p in points)
+    # Buckets are contiguous
+    step = 300
+    for a, b in zip(points, points[1:]):
+        assert int(b["ts"]) - int(a["ts"]) == step

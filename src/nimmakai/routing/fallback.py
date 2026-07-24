@@ -128,7 +128,7 @@ def _is_model_not_found(status: int, body: Any) -> bool:
 
 
 def _is_retryable_model_error(status: int, body: Any) -> bool:
-    if status in {500, 502, 503, 504}:
+    if status in {401, 403, 429, 500, 502, 503, 504}:
         return True
     if _is_model_not_found(status, body):
         return True
@@ -189,7 +189,10 @@ def _is_context_overflow_message(msg: str) -> bool:
 
 
 def _is_non_retryable_client_error(status: int, body: Any) -> bool:
-    if status in {400, 401, 403, 422}:
+    # 401/403 are retryable across providers (keys already rotated within the
+    # current provider by UpstreamClient); only treat 400/422 as hard-stop
+    # unless the body signals a model/context issue.
+    if status in {400, 422}:
         return not _is_retryable_model_error(status, body)
     return False
 
@@ -681,12 +684,57 @@ class FallbackExecutor:
                     len(attempt_body.get("messages") or []),
                 )
             try:
-                status, resp_body, headers, key = await client.request_json(
-                    "POST",
-                    path,
-                    json_body=attempt_body,
-                    forward_headers=forward_headers,
-                    preferred_key_id=preferred_key_id,
+                import asyncio as _aio
+
+                attempt_budget = max(1.0, min(remaining, 120.0))
+                status, resp_body, headers, key = await _aio.wait_for(
+                    client.request_json(
+                        "POST",
+                        path,
+                        json_body=attempt_body,
+                        forward_headers=forward_headers,
+                        preferred_key_id=preferred_key_id,
+                    ),
+                    timeout=attempt_budget,
+                )
+            except TimeoutError as exc:
+                self._circuit_fail(pid)
+                self._emit_span(
+                    self._make_upstream_span(
+                        model=model,
+                        t0=t_attempt,
+                        status=504,
+                        success=False,
+                        error_message="attempt_deadline_exceeded",
+                        span_type="fallback_advance"
+                        if idx < len(chain) - 1
+                        else "upstream",
+                    )
+                )
+                if idx < len(chain) - 1:
+                    self.stats.fallback_advances += 1
+                    await sleep_backoff(
+                        idx,
+                        base=self.settings.retry_backoff_base_seconds,
+                        cap=min(2.0, self.settings.retry_backoff_cap_seconds),
+                    )
+                    logger.info(
+                        "json attempt deadline on %s; falling back", model
+                    )
+                    continue
+                return UpstreamResult(
+                    status_code=504,
+                    body=openai_error(
+                        "Upstream attempt exceeded request deadline.",
+                        code="request_deadline_exceeded",
+                        type_="server_error",
+                    ),
+                    headers={},
+                    key=None,
+                    model=model,
+                    fallback_index=idx,
+                    decision=decision,
+                    provider_id=pid,
                 )
             except (RuntimeError, httpx.HTTPError, OSError) as exc:
                 msg = str(exc).lower()
@@ -716,6 +764,11 @@ class FallbackExecutor:
                 )
                 if retryable_pool and idx < len(chain) - 1:
                     self.stats.fallback_advances += 1
+                    await sleep_backoff(
+                        idx,
+                        base=self.settings.retry_backoff_base_seconds,
+                        cap=min(2.0, self.settings.retry_backoff_cap_seconds),
+                    )
                     logger.info(
                         "provider/transport unavailable on %s (%s); advancing model",
                         model,
@@ -884,7 +937,7 @@ class FallbackExecutor:
                 return last
 
             if _is_retryable_model_error(status, resp_body) and idx < len(chain) - 1:
-                if status in {429, 500, 502, 503, 504}:
+                if status in {401, 403, 429, 500, 502, 503, 504}:
                     ra = parse_retry_after(
                         headers.get("Retry-After") or headers.get("retry-after")
                     )
@@ -960,11 +1013,14 @@ class FallbackExecutor:
             or body.get("tool_choice") not in (None, "none", "None")
         )
         chain = self._chain(decision, had_tools=had_tools)
+        from nimmakai.compat import frame_sse_error, json_body_to_sse, openai_error, wrap_upstream_error
+
         if not chain:
-            payload = (
-                b'{"error":{"message":"No models available in routing chain. '
-                b'Add provider API keys and refresh the catalog.",'
-                b'"type":"server_error","code":"nimmakai_catalog_empty"}}'
+            payload = frame_sse_error(
+                "No models available in routing chain. "
+                "Add provider API keys and refresh the catalog.",
+                code="nimmakai_catalog_empty",
+                status=503,
             )
 
             async def empty() -> AsyncIterator[bytes]:
@@ -973,7 +1029,7 @@ class FallbackExecutor:
             return StreamResult(
                 status_code=503,
                 byte_iter=empty(),
-                headers={"content-type": "application/json"},
+                headers={"content-type": "text/event-stream"},
                 key=None,
                 model="",
                 fallback_index=0,
@@ -984,14 +1040,16 @@ class FallbackExecutor:
 
         import httpx
 
-        from nimmakai.compat import openai_error, wrap_upstream_error
-
         last_status = 503
         last_headers: dict[str, str] = {}
         last_key = None
         last_model = chain[0]
         last_pid: str | None = None
         saw_ttft_stall = False
+        saw_deadline = False
+        deadline = time.monotonic() + float(
+            getattr(self.settings, "request_deadline_seconds", 180.0) or 180.0
+        )
 
         def _error_bytes(
             message: str,
@@ -1000,21 +1058,21 @@ class FallbackExecutor:
             status: int = 502,
             retry_after: str | None = None,
         ) -> bytes:
-            meta = {"retry_after": retry_after} if retry_after else None
-            return _json.dumps(
-                openai_error(
-                    message,
-                    code=code,
-                    type_=(
-                        "server_error"
-                        if status >= 500 or status == 429
-                        else "invalid_request_error"
-                    ),
-                    metadata=meta,
-                )
-            ).encode("utf-8")
+            return frame_sse_error(
+                message, code=code, status=status, retry_after=retry_after
+            )
 
         for idx, model in enumerate(chain):
+            remaining = deadline - time.monotonic()
+            if remaining < 8.0 and idx > 0:
+                last_status, last_model = 504, model
+                saw_deadline = True
+                logger.warning(
+                    "stream request deadline exceeded before model %s (%.1fs left)",
+                    model,
+                    remaining,
+                )
+                break
             pid = self._provider_id_for(model)
             try:
                 client, upstream_mid = self._client_for(model)
@@ -1034,7 +1092,7 @@ class FallbackExecutor:
                 return StreamResult(
                     status_code=503,
                     byte_iter=fail_client(),
-                    headers={"content-type": "application/json"},
+                    headers={"content-type": "text/event-stream"},
                     key=None,
                     model=model,
                     fallback_index=idx,
@@ -1044,13 +1102,45 @@ class FallbackExecutor:
             attempt_body = {**body, "model": upstream_mid}
             t_attempt = time.perf_counter()
             try:
-                status, byte_iter, headers, key = await client.stream(
-                    "POST",
-                    path,
-                    json_body=attempt_body,
-                    forward_headers=forward_headers,
-                    preferred_key_id=preferred_key_id,
+                import asyncio as _aio
+
+                attempt_budget = max(1.0, min(remaining, 120.0))
+                status, byte_iter, headers, key = await _aio.wait_for(
+                    client.stream(
+                        "POST",
+                        path,
+                        json_body=attempt_body,
+                        forward_headers=forward_headers,
+                        preferred_key_id=preferred_key_id,
+                    ),
+                    timeout=attempt_budget,
                 )
+            except TimeoutError:
+                self._circuit_fail(pid)
+                self._emit_span(
+                    self._make_upstream_span(
+                        model=model,
+                        t0=t_attempt,
+                        status=504,
+                        success=False,
+                        error_message="attempt_deadline_exceeded",
+                        span_type="fallback_advance"
+                        if idx < len(chain) - 1
+                        else "upstream",
+                    )
+                )
+                if idx < len(chain) - 1:
+                    self.stats.fallback_advances += 1
+                    await sleep_backoff(
+                        idx,
+                        base=self.settings.retry_backoff_base_seconds,
+                        cap=min(2.0, self.settings.retry_backoff_cap_seconds),
+                    )
+                    logger.info("stream attempt deadline on %s; advancing", model)
+                    continue
+                last_status, last_model, last_pid = 504, model, pid
+                saw_deadline = True
+                break
             except (RuntimeError, httpx.HTTPError, OSError) as exc:
                 self._circuit_fail(pid)
                 self._emit_span(
@@ -1067,6 +1157,11 @@ class FallbackExecutor:
                 )
                 if idx < len(chain) - 1:
                     self.stats.fallback_advances += 1
+                    await sleep_backoff(
+                        idx,
+                        base=self.settings.retry_backoff_base_seconds,
+                        cap=min(2.0, self.settings.retry_backoff_cap_seconds),
+                    )
                     logger.info("stream pool/transport on %s: %s; advancing", model, exc)
                     continue
                 last_status, last_model, last_pid = 503, model, pid
@@ -1079,7 +1174,7 @@ class FallbackExecutor:
                 return StreamResult(
                     status_code=503,
                     byte_iter=fail_transport(),
-                    headers={"content-type": "application/json"},
+                    headers={"content-type": "text/event-stream"},
                     key=None,
                     model=model,
                     fallback_index=idx,
@@ -1097,6 +1192,43 @@ class FallbackExecutor:
 
             if 200 <= status < 300:
                 import asyncio
+
+                ct = (headers.get("content-type") or headers.get("Content-Type") or "").lower()
+                # Upstream ignored stream:true and returned JSON — convert to SSE (F-18)
+                if "application/json" in ct and "text/event-stream" not in ct:
+                    raw_parts: list[bytes] = []
+                    try:
+                        async for chunk in byte_iter:
+                            raw_parts.append(chunk)
+                            if sum(len(c) for c in raw_parts) > 2_000_000:
+                                break
+                    except Exception:
+                        pass
+                    if hasattr(byte_iter, "aclose"):
+                        with suppress(Exception):
+                            await byte_iter.aclose()
+                    raw = b"".join(raw_parts)
+                    try:
+                        parsed = _json.loads(raw.decode("utf-8", errors="replace"))
+                    except Exception:
+                        parsed = raw.decode("utf-8", errors="replace")
+                    sse_payload = json_body_to_sse(parsed, routed_model=model)
+                    self._circuit_succeed(pid)
+                    self.stats.record(decision.intent.value, model, advanced=idx > 0)
+
+                    async def json_as_sse(p: bytes = sse_payload) -> AsyncIterator[bytes]:
+                        yield p
+
+                    return StreamResult(
+                        status_code=200,
+                        byte_iter=json_as_sse(),
+                        headers={**headers, "content-type": "text/event-stream"},
+                        key=key,
+                        model=model,
+                        fallback_index=idx,
+                        decision=decision,
+                        provider_id=pid,
+                    )
 
                 ttft = float(
                     getattr(self.settings, "stream_ttft_timeout_seconds", 12.0) or 12.0
@@ -1144,11 +1276,13 @@ class FallbackExecutor:
                             "Empty stream body on %s; falling back", model
                         )
                         continue
-                    # Last model: empty stream → terminal error, not 200
+                    # Last model: empty stream → terminal error, not 200.
+                    # Must continue so we do not fall into the success path.
                     last_status, last_model, last_pid = 502, model, pid
                     logger.warning(
                         "Empty stream body on last model %s; returning 502", model
                     )
+                    continue
                 except TimeoutError:
                     saw_ttft_stall = True
                     last_status = 504
@@ -1181,6 +1315,11 @@ class FallbackExecutor:
                         status_code=504,
                         intent=decision.intent.value,
                     )
+                    await sleep_backoff(
+                        idx,
+                        base=self.settings.retry_backoff_base_seconds,
+                        cap=min(2.0, self.settings.retry_backoff_cap_seconds),
+                    )
                     continue
                 except Exception as exc:
                     last_status = 502
@@ -1208,6 +1347,11 @@ class FallbackExecutor:
                         success=False,
                         status_code=502,
                         intent=decision.intent.value,
+                    )
+                    await sleep_backoff(
+                        idx,
+                        base=self.settings.retry_backoff_base_seconds,
+                        cap=min(2.0, self.settings.retry_backoff_cap_seconds),
                     )
                     continue
 
@@ -1245,7 +1389,8 @@ class FallbackExecutor:
                     "completion_tokens": 0,
                     "cached_tokens": 0,
                 }
-                stream_failed = False
+                # Holder so robust_iter can flip stream_failed after StreamResult exists
+                result_holder: dict[str, StreamResult | None] = {"r": None}
 
                 async def robust_iter(
                     first: bytes,
@@ -1257,7 +1402,6 @@ class FallbackExecutor:
                     t0: float = bound_t0,
                     usage: dict[str, int] = usage_bag,
                 ) -> AsyncIterator[bytes]:
-                    nonlocal stream_failed
                     total_tokens = 0
                     # Bounded queue for backpressure — blocks upstream when client is slow
                     _BP_QUEUE_SIZE = 32
@@ -1276,7 +1420,8 @@ class FallbackExecutor:
                             _upstream_error = e
                         finally:
                             _upstream_done = True
-                            await _bp_queue.put(None)  # sentinel
+                            with suppress(Exception):
+                                await _bp_queue.put(None)  # sentinel
 
                     def _scan_for_tokens(c: bytes) -> None:
                         nonlocal total_tokens
@@ -1292,6 +1437,51 @@ class FallbackExecutor:
                                 usage["completion_tokens"] = ct_i
                                 self.stats.record_tokens(mid, kid, pt_i, ct_i)
 
+                    async def _emit_stream_error(err_msg: str, *, code: str) -> AsyncIterator[bytes]:
+                        finish = {
+                            "id": "nimmakai-stream-error",
+                            "object": "chat.completion.chunk",
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {},
+                                    "finish_reason": "error",
+                                }
+                            ],
+                        }
+                        err_evt = openai_error(
+                            err_msg,
+                            code=code,
+                            type_="server_error",
+                        )
+                        yield (
+                            b"data: "
+                            + _json.dumps(finish).encode("utf-8")
+                            + b"\n\n"
+                        )
+                        yield (
+                            b"data: "
+                            + _json.dumps(err_evt).encode("utf-8")
+                            + b"\n\n"
+                        )
+                        yield b"data: [DONE]\n\n"
+
+                    def _mark_failed() -> None:
+                        held = result_holder["r"]
+                        if held is not None:
+                            held.stream_failed = True
+                        self._circuit_fail(pid)
+
+                    def _cancel_producer() -> None:
+                        if not producer_task.done():
+                            producer_task.cancel()
+
+                    async def _await_producer() -> None:
+                        try:
+                            await producer_task
+                        except (asyncio.CancelledError, Exception):
+                            pass
+
                     # Start producer task
                     producer_task = asyncio.create_task(_producer())
                     try:
@@ -1305,21 +1495,30 @@ class FallbackExecutor:
                                 )
                             except TimeoutError:
                                 logger.warning(
-                                    "Stream idle timeout on %s after %.0fs — closing SSE cleanly",
+                                    "Stream idle timeout on %s after %.0fs — emitting error SSE",
                                     mid,
                                     idle_s,
                                 )
-                                # Adaptive: slow stream → slight demotion via latency
+                                _cancel_producer()
+                                await _await_producer()
+                                if hasattr(rest, "aclose"):
+                                    with suppress(Exception):
+                                        await rest.aclose()
                                 elapsed = max(0.01, time.monotonic() - t0)
                                 self.registry.record_outcome(
                                     mid,
                                     kid,
-                                    success=True,
+                                    success=False,
                                     latency=elapsed,
                                     tokens=total_tokens or None,
-                                    status_code=200,
+                                    status_code=504,
                                 )
-                                yield b"data: [DONE]\n\n"
+                                _mark_failed()
+                                async for err_chunk in _emit_stream_error(
+                                    f"Stream idle timeout after {idle_s:.0f}s",
+                                    code="upstream_stream_idle",
+                                ):
+                                    yield err_chunk
                                 return
                             if chunk is None:  # sentinel from producer
                                 break
@@ -1342,51 +1541,33 @@ class FallbackExecutor:
                             )
                         return
                     except (asyncio.CancelledError, GeneratorExit):
-                        producer_task.cancel()
+                        _cancel_producer()
+                        await _await_producer()
                         raise
                     except Exception as e:
-                        producer_task.cancel()
+                        _cancel_producer()
+                        await _await_producer()
                         logger.warning(
                             "Stream ended early on %s: %s — closing SSE with error",
                             mid,
                             e,
                         )
-                        stream_failed = True
-                        # finish_reason=error chunk + error event before [DONE] (F-06/T6)
-                        err_msg = str(e)[:500]
-                        finish = {
-                            "id": "nimmakai-stream-error",
-                            "object": "chat.completion.chunk",
-                            "choices": [
-                                {
-                                    "index": 0,
-                                    "delta": {},
-                                    "finish_reason": "error",
-                                }
-                            ],
-                        }
-                        err_evt = openai_error(
-                            err_msg,
-                            code="upstream_stream_error",
-                            type_="server_error",
-                        )
+                        _mark_failed()
+                        # finish_reason=error chunk + error event before [DONE] (F-17)
                         try:
-                            yield (
-                                b"data: "
-                                + _json.dumps(finish).encode("utf-8")
-                                + b"\n\n"
-                            )
-                            yield (
-                                b"data: "
-                                + _json.dumps(err_evt).encode("utf-8")
-                                + b"\n\n"
-                            )
-                            yield b"data: [DONE]\n\n"
+                            async for err_chunk in _emit_stream_error(
+                                str(e)[:500],
+                                code="upstream_stream_error",
+                            ):
+                                yield err_chunk
                         except Exception:
                             pass
                         return
+                    finally:
+                        _cancel_producer()
+                        await _await_producer()
 
-                return StreamResult(
+                stream_result = StreamResult(
                     status_code=status,
                     byte_iter=robust_iter(first_chunk, byte_iter),
                     headers=headers,
@@ -1400,8 +1581,10 @@ class FallbackExecutor:
                     completion_tokens=usage_bag["completion_tokens"],
                     cached_tokens=usage_bag["cached_tokens"],
                     provider_id=pid,
-                    stream_failed=stream_failed,
+                    stream_failed=False,
                 )
+                result_holder["r"] = stream_result
+                return stream_result
 
             # Failed stream open — advance on same retryable set as JSON path
             if status >= 500:
@@ -1439,7 +1622,22 @@ class FallbackExecutor:
                     )
                 err_raw = _json.dumps(err_body).encode("utf-8")
 
-            retryable = status in {404, 429, 500, 502, 503, 504} or (
+            # Always normalize non-empty upstream error bodies to OpenAI envelope
+            if err_body is not None:
+                wrapped = wrap_upstream_error(err_body, status=status)
+                err_raw = (
+                    b"data: "
+                    + _json.dumps(wrapped).encode("utf-8")
+                    + b"\n\ndata: [DONE]\n\n"
+                )
+            else:
+                err_raw = frame_sse_error(
+                    f"Upstream error HTTP {status}",
+                    code="upstream_error",
+                    status=status,
+                )
+
+            retryable = status in {401, 403, 404, 429, 500, 502, 503, 504} or (
                 status == 400 and _is_retryable_model_error(status, err_body)
             )
             self.registry.record_outcome(
@@ -1451,7 +1649,7 @@ class FallbackExecutor:
                 intent=decision.intent.value,
             )
             if retryable and idx < len(chain) - 1:
-                if status in {429, 500, 502, 503, 504}:
+                if status in {401, 403, 429, 500, 502, 503, 504}:
                     ra = parse_retry_after(
                         headers.get("Retry-After") or headers.get("retry-after")
                     )
@@ -1476,7 +1674,7 @@ class FallbackExecutor:
             return StreamResult(
                 status_code=status,
                 byte_iter=err_bytes(),
-                headers={**headers, "content-type": "application/json"},
+                headers={**headers, "content-type": "text/event-stream"},
                 key=key,
                 model=model,
                 fallback_index=idx,
@@ -1485,15 +1683,20 @@ class FallbackExecutor:
             )
 
         # No stream successfully relayed — never return 2xx with empty body (F-05)
-        terminal_status = 504 if saw_ttft_stall or last_status < 400 else last_status
+        if saw_deadline:
+            terminal_status = 504
+            code = "request_deadline_exceeded"
+            msg = "Request deadline exceeded before a stream could be opened."
+        elif saw_ttft_stall or last_status < 400:
+            terminal_status = 504
+            code = "upstream_timeout"
+            msg = "All models timed out waiting for the first stream token."
+        else:
+            terminal_status = last_status if last_status >= 400 else 504
+            code = "nimmakai_models_exhausted"
+            msg = "All models in routing chain failed to open a stream."
         if terminal_status < 400:
             terminal_status = 504
-        code = "upstream_timeout" if terminal_status == 504 else "nimmakai_models_exhausted"
-        msg = (
-            "All models timed out waiting for the first stream token."
-            if terminal_status == 504
-            else "All models in routing chain failed to open a stream."
-        )
         payload = _error_bytes(msg, code=code, status=terminal_status)
 
         async def empty_fail(p: bytes = payload) -> AsyncIterator[bytes]:
@@ -1502,7 +1705,7 @@ class FallbackExecutor:
         return StreamResult(
             status_code=terminal_status,
             byte_iter=empty_fail(),
-            headers=last_headers or {"content-type": "application/json"},
+            headers={"content-type": "text/event-stream"},
             key=last_key,
             model=last_model,
             fallback_index=max(0, len(chain) - 1),

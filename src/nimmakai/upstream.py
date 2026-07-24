@@ -264,6 +264,7 @@ class UpstreamClient:
 
                 if resp.status_code == 429:
                     retry_after = parse_retry_after(resp.headers.get("Retry-After"))
+                    ra_raw = resp.headers.get("Retry-After")
                     await resp.aclose()
                     await self.pool.release(
                         key,
@@ -289,17 +290,24 @@ class UpstreamClient:
                         )
                         continue
 
-                    async def empty_429() -> AsyncIterator[bytes]:
-                        if False:  # pragma: no cover
-                            yield b""
-                        return
+                    from nimmakai.compat import frame_sse_error
 
-                    return (
-                        429,
-                        empty_429(),
-                        {"content-type": "application/json"},
-                        key,
+                    payload = frame_sse_error(
+                        "Rate limited by upstream",
+                        code="rate_limit_exceeded",
+                        status=429,
+                        retry_after=str(ra_raw) if ra_raw else None,
                     )
+
+                    async def err_429(p: bytes = payload) -> AsyncIterator[bytes]:
+                        yield p
+
+                    headers_out: dict[str, str] = {
+                        "content-type": "text/event-stream"
+                    }
+                    if ra_raw:
+                        headers_out["Retry-After"] = str(ra_raw)
+                    return (429, err_429(), headers_out, key)
 
                 if resp.status_code in {401, 403}:
                     await resp.aclose()
@@ -310,15 +318,23 @@ class UpstreamClient:
                     if attempt < max_retries - 1:
                         continue
 
-                    async def empty_auth() -> AsyncIterator[bytes]:
-                        if False:  # pragma: no cover
-                            yield b""
-                        return
+                    from nimmakai.compat import frame_sse_error
+
+                    payload = frame_sse_error(
+                        f"Upstream authentication failed (HTTP {resp.status_code})",
+                        code="upstream_auth_error",
+                        status=resp.status_code,
+                    )
+
+                    async def err_auth(
+                        p: bytes = payload, st: int = resp.status_code
+                    ) -> AsyncIterator[bytes]:
+                        yield p
 
                     return (
                         resp.status_code,
-                        empty_auth(),
-                        {"content-type": "application/json"},
+                        err_auth(),
+                        {"content-type": "text/event-stream"},
                         key,
                     )
 

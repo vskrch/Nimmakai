@@ -269,7 +269,12 @@ async def test_all_models_ttft_stall_returns_504(
     chunks = [c async for c in result.byte_iter]
     joined = b"".join(chunks)
     assert b"error" in joined
-    assert b"upstream_timeout" in joined or b"timeout" in joined.lower()
+    assert (
+        b"upstream_timeout" in joined
+        or b"request_deadline_exceeded" in joined
+        or b"timeout" in joined.lower()
+        or b"deadline" in joined.lower()
+    )
 
 
 # ── TICKET-7: routing_headers never raises ──────────────────────────

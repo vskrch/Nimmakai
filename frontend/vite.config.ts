@@ -12,6 +12,8 @@ export default defineConfig({
       '/v1': 'http://localhost:8000',
       '/admin': 'http://localhost:8000',
       '/analytics': 'http://localhost:8000',
+      '/auth': 'http://localhost:8000',
+      '/accounts': 'http://localhost:8000',
       '/health': 'http://localhost:8000',
       '/stats': 'http://localhost:8000',
       '/ladder': 'http://localhost:8000',

@@ -481,10 +481,9 @@ async def analytics_events(request: Request) -> StreamingResponse | JSONResponse
     store = getattr(request.app.state, "accounts", None)
     token = request.query_params.get("token") or extract_bearer(request)
 
-    if request.cookies.get(cookie):
-        auth = resolve_auth(request, settings)
-        require_proxy_auth(request, settings)
-    elif token:
+    # Prefer explicit token (EventSource ?token= / Bearer) over cookie so
+    # break-glass keys work even when a stale nk_session cookie is present.
+    if token:
         validate_proxy_token(token, settings, accounts=store)
         # Build AuthContext from query/header token (EventSource cannot set Authorization)
         if store is not None and token.startswith("sk-nk-"):
@@ -529,6 +528,9 @@ async def analytics_events(request: Request) -> StreamingResponse | JSONResponse
                 {"error": {"message": "Invalid API key", "code": "invalid_api_key"}},
                 status_code=401,
             )
+    elif request.cookies.get(cookie):
+        auth = resolve_auth(request, settings)
+        require_proxy_auth(request, settings)
     else:
         return JSONResponse(
             {"error": {"message": "Authentication required", "code": "unauthorized"}},

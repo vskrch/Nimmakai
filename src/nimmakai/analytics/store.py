@@ -26,6 +26,47 @@ _SORT_COLS = {
 }
 
 
+def _zero_fill_buckets(
+    rows: list[dict[str, Any]],
+    *,
+    since: float,
+    until: float,
+    step: int,
+    empty: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Fill missing interval buckets so charts render a continuous time axis.
+
+    Prefer recent data: when the range would exceed max_buckets, coarsen the
+    step (or truncate from ``since``) so the window always ends at ``until``.
+    """
+    if step <= 0:
+        return rows
+    max_buckets = 500
+    span = max(0.0, until - since)
+    # Auto-coarsen so we never silently drop the newest buckets
+    needed = int(span / step) + 1 if step else 0
+    if needed > max_buckets:
+        step = max(step, int(math.ceil(span / max_buckets)))
+        # Snap step to a round interval when possible
+        for candidate in (60, 300, 900, 3600, 86400):
+            if candidate >= step:
+                step = candidate
+                break
+    start = int(since // step) * step
+    end = int(until // step) * step
+    by_ts = {int(r["ts"]): r for r in rows if r.get("ts") is not None}
+    out: list[dict[str, Any]] = []
+    ts = start
+    while ts <= end and len(out) < max_buckets:
+        if ts in by_ts:
+            # Re-bucket if we coarsened: keep first hit for that snapped ts
+            out.append(by_ts[ts])
+        else:
+            out.append({"ts": ts, **empty})
+        ts += step
+    return out
+
+
 def _row_to_dict(row: Any) -> dict[str, Any]:
     d = dict(row)
     if "chain_json" in d and d["chain_json"]:
@@ -76,6 +117,9 @@ class AnalyticsStore:
         self._db = db
         self._summary_cache: tuple[float, dict[str, Any]] | None = None
         self._summary_ttl = 10.0
+        self._cost_cache: dict[str, tuple[float, float]] | None = None
+        self._cost_cache_at: float = 0.0
+        self._cost_cache_gen: int = 0
 
     # ── traces ──────────────────────────────────────────────────────
 
@@ -231,7 +275,18 @@ class AnalyticsStore:
             """
             with self._db._lock:
                 rows = self._db._conn.execute(sql, [step, step, *params]).fetchall()
-            return [dict(r) for r in rows]
+            return _zero_fill_buckets(
+                [dict(r) for r in rows],
+                since=since,
+                until=until,
+                step=step,
+                empty={
+                    "requests": 0,
+                    "success": 0,
+                    "errors": 0,
+                    "avg_ms": None,
+                },
+            )
 
         if metric == "tokens":
             sql = f"""
@@ -246,7 +301,18 @@ class AnalyticsStore:
             """
             with self._db._lock:
                 rows = self._db._conn.execute(sql, [step, step, *params]).fetchall()
-            return [dict(r) for r in rows]
+            return _zero_fill_buckets(
+                [dict(r) for r in rows],
+                since=since,
+                until=until,
+                step=step,
+                empty={
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "cached_tokens": 0,
+                    "total_tokens": 0,
+                },
+            )
 
         if metric == "cost":
             sql = f"""
@@ -259,7 +325,13 @@ class AnalyticsStore:
             """
             with self._db._lock:
                 rows = self._db._conn.execute(sql, [step, step, *params]).fetchall()
-            return [dict(r) for r in rows]
+            return _zero_fill_buckets(
+                [dict(r) for r in rows],
+                since=since,
+                until=until,
+                step=step,
+                empty={"cost_usd": 0, "requests": 0},
+            )
 
         if metric == "ttft":
             sql = f"""
@@ -272,7 +344,13 @@ class AnalyticsStore:
             """
             with self._db._lock:
                 rows = self._db._conn.execute(sql, [step, step, *params]).fetchall()
-            return [dict(r) for r in rows]
+            return _zero_fill_buckets(
+                [dict(r) for r in rows],
+                since=since,
+                until=until,
+                step=step,
+                empty={"avg_ttft_ms": None, "samples": 0},
+            )
 
         if metric == "latency":
             # Pull durations and compute percentiles in Python (SQLite has no PERCENTILE)
@@ -300,7 +378,19 @@ class AnalyticsStore:
                         "samples": len(vals),
                     }
                 )
-            return out
+            return _zero_fill_buckets(
+                out,
+                since=since,
+                until=until,
+                step=step,
+                empty={
+                    "avg_ms": None,
+                    "p50_ms": None,
+                    "p95_ms": None,
+                    "p99_ms": None,
+                    "samples": 0,
+                },
+            )
 
         return []
 
@@ -509,9 +599,6 @@ class AnalyticsStore:
 
     # ── cost overrides ──────────────────────────────────────────────
 
-    _cost_cache: dict[str, tuple[float, float]] | None = None
-    _cost_cache_at: float = 0.0
-
     def list_cost_overrides(self) -> list[dict[str, Any]]:
         with self._db._lock:
             rows = self._db._conn.execute(
@@ -554,19 +641,23 @@ class AnalyticsStore:
         now = time.monotonic()
         if self._cost_cache is not None and now - self._cost_cache_at < 60.0:
             return self._cost_cache
+        gen = self._cost_cache_gen
         raw = self.list_cost_overrides()
         cache = {
             r["model_id"]: (float(r["input_per_m"]), float(r["output_per_m"]))
             for r in raw
         }
-        self._cost_cache = cache
-        self._cost_cache_at = now
+        # Discard if invalidate ran while we were reading
+        if gen == self._cost_cache_gen:
+            self._cost_cache = cache
+            self._cost_cache_at = now
         return cache
 
     def invalidate_cost_cache(self) -> None:
         """Force reload on next cost_overrides_map() call."""
         self._cost_cache = None
         self._cost_cache_at = 0.0
+        self._cost_cache_gen += 1
 
     # ── export ──────────────────────────────────────────────────────
 

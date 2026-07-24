@@ -12,13 +12,13 @@ export function fmtTokens(n: number | null | undefined): string {
 }
 
 export function fmtUsd(n: number | null | undefined): string {
-  if (n == null) return '—'
+  if (n == null || Number.isNaN(n)) return '—'
   if (n < 0.01 && n > 0) return `$${n.toFixed(4)}`
   return `$${n.toFixed(2)}`
 }
 
 export function fmtPct(n: number | null | undefined): string {
-  if (n == null) return '—'
+  if (n == null || Number.isNaN(n)) return '—'
   return `${(n * 100).toFixed(1)}%`
 }
 

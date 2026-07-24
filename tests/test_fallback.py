@@ -305,3 +305,227 @@ async def test_token_accounting_stream() -> None:
     
     assert ex.stats.model_tokens["model-a"].prompt_tokens == 20
     assert ex.stats.model_tokens["model-a"].completion_tokens == 10
+
+
+@pytest.mark.asyncio
+async def test_empty_stream_last_model_returns_502_not_200() -> None:
+    """Last-model empty body must be a terminal error, not HTTP 200 + empty SSE."""
+    settings = Settings(nim_api_keys=["k"], max_model_fallbacks=3)
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a"}
+
+    async def fake_stream(method, path, **kwargs):
+        async def empty_iter():
+            if False:
+                yield b""
+            return
+
+        return 200, empty_iter(), {}, _key()
+
+    upstream = AsyncMock()
+    upstream.stream = fake_stream
+    decision = RouteDecision(
+        chain=["model-a"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    result = await ex.execute_stream("/chat/completions", {"messages": []}, decision)
+    assert result.status_code >= 400, f"expected error status, got {result.status_code}"
+    chunks = [c async for c in result.byte_iter]
+    joined = b"".join(chunks)
+    assert b"error" in joined.lower() or result.status_code == 502
+
+
+@pytest.mark.asyncio
+async def test_mid_stream_idle_emits_error_not_clean_done() -> None:
+    """Idle timeout must emit finish_reason=error + error event, not bare [DONE]."""
+    settings = Settings(
+        nim_api_keys=["k"],
+        stream_idle_timeout_seconds=0.05,
+        stream_ttft_timeout_seconds=5.0,
+    )
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a"}
+
+    async def fake_stream(method, path, **kwargs):
+        async def slow_iter():
+            yield b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'
+            import asyncio as _aio
+
+            await _aio.sleep(2.0)
+            yield b'data: {"choices":[{"delta":{"content":"bye"}}]}\n\n'
+
+        return 200, slow_iter(), {}, _key()
+
+    upstream = AsyncMock()
+    upstream.stream = fake_stream
+    decision = RouteDecision(
+        chain=["model-a"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    result = await ex.execute_stream("/chat/completions", {"messages": []}, decision)
+    assert 200 <= result.status_code < 300
+    chunks = [c async for c in result.byte_iter]
+    joined = b"".join(chunks)
+    assert b"finish_reason" in joined and b"error" in joined
+    assert b"[DONE]" in joined
+    assert result.stream_failed is True
+
+
+@pytest.mark.asyncio
+async def test_stream_failed_flag_set_after_mid_stream_error() -> None:
+    """stream_failed must be visible on StreamResult after the iterator finishes."""
+    settings = Settings(nim_api_keys=["k"], stream_idle_timeout_seconds=180.0)
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a"}
+
+    async def fake_stream(method, path, **kwargs):
+        async def boom_iter():
+            yield b'data: {"choices":[{"delta":{"content":"x"}}]}\n\n'
+            raise RuntimeError("upstream dropped")
+
+        return 200, boom_iter(), {}, _key()
+
+    upstream = AsyncMock()
+    upstream.stream = fake_stream
+    decision = RouteDecision(
+        chain=["model-a"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    result = await ex.execute_stream("/chat/completions", {"messages": []}, decision)
+    assert result.stream_failed is False  # not yet consumed
+    _ = [c async for c in result.byte_iter]
+    assert result.stream_failed is True
+
+
+@pytest.mark.asyncio
+async def test_execute_stream_honors_request_deadline() -> None:
+    """Stream path must stop advancing when request deadline is nearly exhausted."""
+    settings = Settings(
+        nim_api_keys=["k"],
+        request_deadline_seconds=0.01,
+        stream_ttft_timeout_seconds=12.0,
+        max_model_fallbacks=5,
+    )
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b", "model-c"}
+
+    calls: list[str] = []
+
+    async def fake_stream(method, path, **kwargs):
+        body = kwargs.get("json_body") or {}
+        model = body.get("model")
+        calls.append(model)
+
+        async def stalled():
+            import asyncio as _aio
+
+            await _aio.sleep(0.05)
+            yield b"never"
+
+        return 200, stalled(), {}, _key()
+
+    upstream = AsyncMock()
+    upstream.stream = fake_stream
+    # Force TTFT to fail fast so we advance between models under deadline
+    settings.stream_ttft_timeout_seconds = 0.02
+    decision = RouteDecision(
+        chain=["model-a", "model-b", "model-c"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    import asyncio
+
+    result = await asyncio.wait_for(
+        ex.execute_stream("/chat/completions", {"messages": []}, decision),
+        timeout=3.0,
+    )
+    assert result.status_code >= 400
+    # Must not burn the entire 3-model chain when deadline is tiny
+    assert len(calls) < 3, f"deadline ignored; tried all models: {calls}"
+
+
+@pytest.mark.asyncio
+async def test_json_401_advances_to_next_provider() -> None:
+    settings = Settings(nim_api_keys=["k"], max_model_fallbacks=3)
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b"}
+
+    async def fake_json(method, path, **kwargs):
+        body = kwargs.get("json_body") or {}
+        model = body.get("model")
+        if model == "model-a":
+            return 401, {"error": {"message": "bad key"}}, {}, _key()
+        return (
+            200,
+            {
+                "id": "ok",
+                "model": model,
+                "choices": [{"message": {"content": "hi"}}],
+            },
+            {},
+            _key(1),
+        )
+
+    upstream = AsyncMock()
+    upstream.request_json = fake_json
+    decision = RouteDecision(
+        chain=["model-a", "model-b"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    result = await ex.execute_json("/chat/completions", {"messages": []}, decision)
+    assert result.status_code == 200
+    assert result.model == "model-b"
+
+
+@pytest.mark.asyncio
+async def test_stream_json_content_type_converted_to_sse() -> None:
+    settings = Settings(nim_api_keys=["k"])
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a"}
+
+    async def fake_stream(method, path, **kwargs):
+        async def json_iter():
+            yield b'{"id":"1","choices":[{"message":{"content":"hello"},"finish_reason":"stop"}]}'
+
+        return (
+            200,
+            json_iter(),
+            {"content-type": "application/json"},
+            _key(),
+        )
+
+    upstream = AsyncMock()
+    upstream.stream = fake_stream
+    decision = RouteDecision(
+        chain=["model-a"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    result = await ex.execute_stream("/chat/completions", {"messages": []}, decision)
+    assert result.status_code == 200
+    assert "event-stream" in result.headers.get("content-type", "")
+    joined = b"".join([c async for c in result.byte_iter])
+    assert b"data:" in joined and b"[DONE]" in joined
+    assert b"hello" in joined

@@ -721,7 +721,36 @@ async def _chat_like(
                             result.model,
                             stream_exc,
                         )
+                        # Never bare [DONE] — emit finish_reason=error + error event
                         with suppress(Exception):
+                            import json as _json
+
+                            finish = {
+                                "id": "nimmakai-stream-error",
+                                "object": "chat.completion.chunk",
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {},
+                                        "finish_reason": "error",
+                                    }
+                                ],
+                            }
+                            err_evt = openai_error(
+                                err[:500],
+                                code="upstream_stream_error",
+                                type_="server_error",
+                            )
+                            yield (
+                                b"data: "
+                                + _json.dumps(finish).encode("utf-8")
+                                + b"\n\n"
+                            )
+                            yield (
+                                b"data: "
+                                + _json.dumps(err_evt).encode("utf-8")
+                                + b"\n\n"
+                            )
                             yield b"data: [DONE]\n\n"
                     finally:
                         # Check if robust_iter detected a mid-stream failure
@@ -894,6 +923,34 @@ async def _chat_like(
                 except Exception as stream_exc:
                     err = str(stream_exc)
                     with suppress(Exception):
+                        import json as _json
+
+                        finish = {
+                            "id": "nimmakai-stream-error",
+                            "object": "chat.completion.chunk",
+                            "choices": [
+                                {
+                                    "index": 0,
+                                    "delta": {},
+                                    "finish_reason": "error",
+                                }
+                            ],
+                        }
+                        err_evt = openai_error(
+                            err[:500],
+                            code="upstream_stream_error",
+                            type_="server_error",
+                        )
+                        yield (
+                            b"data: "
+                            + _json.dumps(finish).encode("utf-8")
+                            + b"\n\n"
+                        )
+                        yield (
+                            b"data: "
+                            + _json.dumps(err_evt).encode("utf-8")
+                            + b"\n\n"
+                        )
                         yield b"data: [DONE]\n\n"
                 finally:
                     await guard.after_request(ctx, key_id=key_id, success=ok and not err)
@@ -968,6 +1025,8 @@ async def _chat_like(
             timing=timing,
         )
         headers = {**headers, "X-Request-Id": req_id}
+        if status >= 400:
+            resp_body = wrap_upstream_error(resp_body, status=status)
         return JSONResponse(content=resp_body, status_code=status, headers=headers)
     except RuntimeError as exc:
         await guard.after_request(ctx, success=False)
@@ -995,6 +1054,22 @@ async def _chat_like(
             timing=timing,
         )
         logger.exception("chat path failed req=%s", req_id)
+        raise
+    except BaseException as exc:
+        # CancelledError etc. — must release the concurrency gate
+        with suppress(Exception):
+            await guard.after_request(ctx, success=False)
+        _finish_log(entry, status=499, t0=t0, error=type(exc).__name__, stream=stream)
+        with suppress(Exception):
+            _finalize_trace(
+                request,
+                trace,
+                t0=t0,
+                status=499,
+                decision=decision,
+                error=type(exc).__name__,
+                timing=timing,
+            )
         raise
 
 

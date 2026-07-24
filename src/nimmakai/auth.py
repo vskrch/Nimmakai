@@ -95,6 +95,20 @@ def resolve_auth(request: Request, settings: Settings) -> AuthContext:
             via="legacy_proxy",
         )
 
+    # Explicit bearer/API-key header present but not accepted → do not fall
+    # through to session cookie (break-glass must not silently become cookie auth).
+    if bearer and not settings.accept_any_proxy_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "error": {
+                    "message": "Invalid API key.",
+                    "type": "invalid_request_error",
+                    "code": "invalid_api_key",
+                }
+            },
+        )
+
     cookie_name = getattr(settings, "session_cookie_name", "nk_session") or "nk_session"
     session_raw = request.cookies.get(cookie_name)
 
