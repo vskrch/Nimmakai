@@ -25,8 +25,8 @@ class ProviderCircuitBreaker:
 
     def __init__(
         self,
-        failure_threshold: int = 5,
-        recovery_timeout: float = 30.0,
+        failure_threshold: int = 3,
+        recovery_timeout: float = 15.0,
         cooldown_multiplier: float = 2.0,
     ) -> None:
         self.failure_threshold = failure_threshold

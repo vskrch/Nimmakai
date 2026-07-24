@@ -57,8 +57,13 @@ class UpstreamClient:
     async def start(self) -> None:
         kwargs: dict[str, Any] = {
             "base_url": self.base_url,
-            "timeout": httpx.Timeout(self.timeout, connect=5.0),
+            "timeout": httpx.Timeout(self.timeout, connect=2.0),
             "follow_redirects": True,
+            "limits": httpx.Limits(
+                max_connections=200,
+                max_keepalive_connections=50,
+                keepalive_expiry=30.0,
+            ),
         }
         if self.proxy_url:
             kwargs["proxy"] = self.proxy_url
@@ -190,25 +195,8 @@ class UpstreamClient:
                     )
                     continue
 
-                # 5xx: backoff + key rotate before giving up to caller
-                if (
-                    resp.status_code in {500, 502, 503, 504}
-                    and attempt < max_retries - 1
-                ):
-                    delay = await sleep_backoff(
-                        attempt,
-                        base=self.retry_backoff_base,
-                        cap=self.retry_backoff_cap,
-                    )
-                    logger.info(
-                        "upstream HTTP %s on %s; backoff %.2fs (attempt %s)",
-                        resp.status_code,
-                        key.key_id,
-                        delay,
-                        attempt + 1,
-                    )
-                    continue
-
+                # 5xx: return immediately — fallback executor handles model-level
+                # failover. Retrying the same provider wastes deadline seconds.
                 return resp.status_code, body, self._filter_headers(resp.headers), key
             except BaseException as exc:
                 # Cancel-safe: release key even on cancellation/task abort
@@ -338,29 +326,7 @@ class UpstreamClient:
                         key,
                     )
 
-                if (
-                    resp.status_code in {500, 502, 503, 504}
-                    and attempt < max_retries - 1
-                ):
-                    await resp.aclose()
-                    await self.pool.release(
-                        key, success=False, status_code=resp.status_code
-                    )
-                    released = True
-                    delay = await sleep_backoff(
-                        attempt,
-                        base=self.retry_backoff_base,
-                        cap=self.retry_backoff_cap,
-                    )
-                    logger.info(
-                        "upstream stream HTTP %s on %s; backoff %.2fs (attempt %s)",
-                        resp.status_code,
-                        key.key_id,
-                        delay,
-                        attempt + 1,
-                    )
-                    continue
-
+                # 5xx: return immediately — fallback executor handles model failover
                 out_headers = self._filter_headers(resp.headers, streaming=True)
                 status_code = resp.status_code
                 bound_key = key

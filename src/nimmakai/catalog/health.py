@@ -45,7 +45,7 @@ class ModelHealthStore:
     min_samples: int = 2
     # Short cooldowns = auto-adaptive recovery (was 600s — too sticky for free tiers)
     model_cooldown_seconds: float = 45.0
-    hard_fail_cooldown_seconds: float = 20.0
+    hard_fail_cooldown_seconds: float = 5.0
     _by_model: dict[str, ModelHealth] = field(default_factory=dict)
     _by_pair: dict[tuple[str, str], ModelHealth] = field(default_factory=dict)
 
@@ -103,7 +103,7 @@ class ModelHealthStore:
             if status_code is not None and status_code >= 500:
                 h.cooldown_until = max(
                     h.cooldown_until,
-                    now + self.hard_fail_cooldown_seconds * min(h.consecutive_fails, 4),
+                    now + self.hard_fail_cooldown_seconds * min(h.consecutive_fails, 3),
                 )
             elif status_code == 429:
                 h.cooldown_until = max(h.cooldown_until, now + 15.0)

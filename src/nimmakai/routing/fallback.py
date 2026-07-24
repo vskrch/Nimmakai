@@ -128,7 +128,7 @@ def _is_model_not_found(status: int, body: Any) -> bool:
 
 
 def _is_retryable_model_error(status: int, body: Any) -> bool:
-    if status in {401, 403, 429, 500, 502, 503, 504}:
+    if status in {401, 403, 405, 408, 429, 500, 502, 503, 504}:
         return True
     if _is_model_not_found(status, body):
         return True
@@ -573,6 +573,46 @@ class FallbackExecutor:
             h["X-Nimmakai-Provider"] = pid
         return h
 
+    async def _json_one_attempt(
+        self,
+        model: str,
+        path: str,
+        body: dict[str, Any],
+        *,
+        forward_headers: dict[str, str] | None,
+        preferred_key_id: str | None,
+        budget: float,
+    ) -> tuple[int, Any, dict[str, str], Any, str | None, float]:
+        """Single model JSON attempt. Raises on transport error / timeout."""
+        client, upstream_mid = self._client_for(model)
+        attempt_body = {**body, "model": upstream_mid}
+        if hasattr(self.registry, "ladder"):
+            rec = self.registry.ladder.model_recommendations(model)
+            if rec:
+                max_limit = rec.get("max_tokens_limit")
+                if max_limit and not attempt_body.get("max_tokens"):
+                    attempt_body["max_tokens"] = max_limit
+                elif max_limit and attempt_body.get("max_tokens"):
+                    attempt_body["max_tokens"] = min(
+                        attempt_body["max_tokens"], max_limit
+                    )
+        pid = self._provider_id_for(model)
+        import asyncio as _aio
+
+        t0 = time.perf_counter()
+        status, resp_body, headers, key = await _aio.wait_for(
+            client.request_json(
+                "POST",
+                path,
+                json_body=attempt_body,
+                forward_headers=forward_headers,
+                preferred_key_id=preferred_key_id,
+                max_retries=2,
+            ),
+            timeout=budget,
+        )
+        return status, resp_body, headers, key, pid, (time.perf_counter() - t0) * 1000
+
     async def execute_json(
         self,
         path: str,
@@ -620,9 +660,131 @@ class FallbackExecutor:
             getattr(self.settings, "request_deadline_seconds", 180.0) or 180.0
         )
 
+        import asyncio
+
+        # Hedged racing: fire top 2 models concurrently, take first hard 2xx.
+        # ponytail: if both fail or soft-fail, fall through to sequential for the rest.
+        skip: set[str] = set()
+        best_soft: UpstreamResult | None = None
+        if len(chain) >= 2:
+            hedge_budget = max(1.0, min(deadline - time.monotonic(), 45.0))
+            h_tasks: dict[asyncio.Task, int] = {}
+            for i, m in enumerate(chain[:2]):
+                h_tasks[asyncio.create_task(
+                    self._json_one_attempt(
+                        m, path, body,
+                        forward_headers=forward_headers,
+                        preferred_key_id=preferred_key_id,
+                        budget=hedge_budget,
+                    )
+                )] = i
+            h_pending: set[asyncio.Task] = set(h_tasks.keys())
+            h_deadline = time.monotonic() + hedge_budget
+            while h_pending:
+                rem_h = h_deadline - time.monotonic()
+                if rem_h <= 0:
+                    break
+                h_done, h_pending = await asyncio.wait(
+                    h_pending, timeout=rem_h,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if not h_done:
+                    break
+                for t in h_done:
+                    i = h_tasks[t]
+                    if t.cancelled():
+                        continue
+                    try:
+                        s_h, b_h, h_h, k_h, pid_h, lat_h = t.result()
+                        if 200 <= s_h < 300:
+                            empty_r, tool_ok = _analyze_success_body(
+                                b_h, had_tools=had_tools, path=path
+                            )
+                            if not ((had_tools and tool_ok is False) or empty_r):
+                                for pt in h_pending:
+                                    pt.cancel()
+                                self._circuit_succeed(pid_h)
+                                self._emit_span(self._make_upstream_span(
+                                    model=chain[i],
+                                    t0=time.perf_counter() - lat_h / 1000,
+                                    status=s_h, success=True,
+                                    metadata={"hedged": True},
+                                ))
+                                pt_j = ct_j = cached_j = 0
+                                if isinstance(b_h, dict):
+                                    usage = b_h.get("usage")
+                                    if isinstance(usage, dict):
+                                        pt_j = int(usage.get("prompt_tokens") or 0)
+                                        ct_j = int(usage.get("completion_tokens") or 0)
+                                        cached_j = int(
+                                            usage.get("cached_tokens")
+                                            or (usage.get("prompt_tokens_details") or {}).get(
+                                                "cached_tokens", 0
+                                            ) or 0
+                                        )
+                                self.registry.record_outcome(
+                                    chain[i], k_h.key_id if k_h else None,
+                                    success=True, latency=lat_h / 1000,
+                                    status_code=s_h, intent=decision.intent.value,
+                                    empty_reply=empty_r, had_tools=had_tools,
+                                    tool_ok=tool_ok,
+                                )
+                                self.stats.record(decision.intent.value, chain[i], advanced=i > 0)
+                                self.stats.record_tokens(
+                                    chain[i], k_h.key_id if k_h else None, pt_j, ct_j,
+                                )
+                                if isinstance(b_h, dict) and "model" in b_h:
+                                    b_h = {**b_h, "model": chain[i]}
+                                return UpstreamResult(
+                                    status_code=s_h, body=b_h, headers=h_h,
+                                    key=k_h, model=chain[i], fallback_index=i,
+                                    decision=decision, prompt_tokens=pt_j,
+                                    completion_tokens=ct_j, cached_tokens=cached_j,
+                                    upstream_ms=lat_h, provider_id=pid_h,
+                                )
+                        # Failed or soft-fail — record and keep checking
+                        if 200 <= s_h < 300:
+                            # Soft 2xx — remember as fallback if no hard success
+                            self._circuit_succeed(pid_h)
+                            if isinstance(b_h, dict) and "model" in b_h:
+                                b_h = {**b_h, "model": chain[i]}
+                            best_soft = UpstreamResult(
+                                status_code=s_h, body=b_h, headers=h_h,
+                                key=k_h, model=chain[i], fallback_index=i,
+                                decision=decision, upstream_ms=lat_h,
+                                provider_id=pid_h,
+                            )
+                        else:
+                            self._circuit_fail(pid_h)
+                            from nimmakai.compat import wrap_upstream_error
+
+                            last = UpstreamResult(
+                                status_code=s_h,
+                                body=wrap_upstream_error(b_h, status=s_h),
+                                headers=h_h, key=k_h, model=chain[i],
+                                fallback_index=i, decision=decision,
+                                upstream_ms=lat_h, provider_id=pid_h,
+                            )
+                        self.registry.record_outcome(
+                            chain[i], k_h.key_id if k_h else None,
+                            success=200 <= s_h < 300, status_code=s_h,
+                            intent=decision.intent.value,
+                        )
+                    except (Exception, asyncio.CancelledError):
+                        self._circuit_fail(self._provider_id_for(chain[i]))
+                        self.registry.record_outcome(
+                            chain[i], None, success=False, status_code=503,
+                            intent=decision.intent.value,
+                        )
+            for pt in h_pending:
+                pt.cancel()
+            skip = {chain[0], chain[1]}
+
         for idx, model in enumerate(chain):
+            if model in skip:
+                continue
             remaining = deadline - time.monotonic()
-            if remaining < 8.0 and idx > 0:
+            if remaining < 3.0 and idx > 0:
                 return UpstreamResult(
                     status_code=504,
                     body=openai_error(
@@ -686,7 +848,7 @@ class FallbackExecutor:
             try:
                 import asyncio as _aio
 
-                attempt_budget = max(1.0, min(remaining, 120.0))
+                attempt_budget = max(1.0, min(remaining, 45.0))
                 status, resp_body, headers, key = await _aio.wait_for(
                     client.request_json(
                         "POST",
@@ -694,6 +856,7 @@ class FallbackExecutor:
                         json_body=attempt_body,
                         forward_headers=forward_headers,
                         preferred_key_id=preferred_key_id,
+                        max_retries=2,
                     ),
                     timeout=attempt_budget,
                 )
@@ -937,7 +1100,9 @@ class FallbackExecutor:
                 return last
 
             if _is_retryable_model_error(status, resp_body) and idx < len(chain) - 1:
-                if status in {401, 403, 429, 500, 502, 503, 504}:
+                # 504 = upstream gateway timeout — no point backoff, advance now.
+                # 503 = transient overload — tiny backoff then advance.
+                if status == 429:
                     ra = parse_retry_after(
                         headers.get("Retry-After") or headers.get("retry-after")
                     )
@@ -945,7 +1110,13 @@ class FallbackExecutor:
                         idx,
                         base=self.settings.retry_backoff_base_seconds,
                         cap=self.settings.retry_backoff_cap_seconds,
-                        retry_after=ra if status == 429 else None,
+                        retry_after=ra,
+                    )
+                elif status in {500, 502, 503}:
+                    await sleep_backoff(
+                        idx,
+                        base=self.settings.retry_backoff_base_seconds,
+                        cap=min(1.0, self.settings.retry_backoff_cap_seconds),
                     )
                 self.stats.fallback_advances += 1
                 logger.info(
@@ -976,6 +1147,14 @@ class FallbackExecutor:
 
         assert last is not None
         if last.status_code >= 400:
+            if best_soft is not None:
+                self.stats.record(
+                    decision.intent.value, best_soft.model, advanced=True
+                )
+                return best_soft
+            if _is_non_retryable_client_error(last.status_code, last.body):
+                self.stats.record(decision.intent.value, last.model, advanced=False)
+                return last
             last = UpstreamResult(
                 status_code=503,
                 body={
@@ -1064,7 +1243,7 @@ class FallbackExecutor:
 
         for idx, model in enumerate(chain):
             remaining = deadline - time.monotonic()
-            if remaining < 8.0 and idx > 0:
+            if remaining < 3.0 and idx > 0:
                 last_status, last_model = 504, model
                 saw_deadline = True
                 logger.warning(
@@ -1104,7 +1283,7 @@ class FallbackExecutor:
             try:
                 import asyncio as _aio
 
-                attempt_budget = max(1.0, min(remaining, 120.0))
+                attempt_budget = max(1.0, min(remaining, 45.0))
                 status, byte_iter, headers, key = await _aio.wait_for(
                     client.stream(
                         "POST",
@@ -1112,6 +1291,7 @@ class FallbackExecutor:
                         json_body=attempt_body,
                         forward_headers=forward_headers,
                         preferred_key_id=preferred_key_id,
+                        max_retries=2,
                     ),
                     timeout=attempt_budget,
                 )
@@ -1637,7 +1817,7 @@ class FallbackExecutor:
                     status=status,
                 )
 
-            retryable = status in {401, 403, 404, 429, 500, 502, 503, 504} or (
+            retryable = status in {401, 403, 404, 405, 408, 429, 500, 502, 503, 504} or (
                 status == 400 and _is_retryable_model_error(status, err_body)
             )
             self.registry.record_outcome(
@@ -1649,7 +1829,8 @@ class FallbackExecutor:
                 intent=decision.intent.value,
             )
             if retryable and idx < len(chain) - 1:
-                if status in {401, 403, 429, 500, 502, 503, 504}:
+                # 504 = gateway timeout — advance immediately, no backoff
+                if status == 429:
                     ra = parse_retry_after(
                         headers.get("Retry-After") or headers.get("retry-after")
                     )
@@ -1657,7 +1838,13 @@ class FallbackExecutor:
                         idx,
                         base=self.settings.retry_backoff_base_seconds,
                         cap=self.settings.retry_backoff_cap_seconds,
-                        retry_after=ra if status == 429 else None,
+                        retry_after=ra,
+                    )
+                elif status in {500, 502, 503}:
+                    await sleep_backoff(
+                        idx,
+                        base=self.settings.retry_backoff_base_seconds,
+                        cap=min(1.0, self.settings.retry_backoff_cap_seconds),
                     )
                 self.stats.fallback_advances += 1
                 logger.info(

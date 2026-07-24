@@ -460,6 +460,43 @@ async def test_execute_stream_honors_request_deadline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_json_405_advances_to_next_model() -> None:
+    settings = Settings(nim_api_keys=["k"], max_model_fallbacks=3)
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b"}
+
+    async def fake_json(method, path, **kwargs):
+        body = kwargs.get("json_body") or {}
+        model = body.get("model")
+        if model == "model-a":
+            return 405, {"error": {"message": "method not allowed"}}, {}, _key()
+        return (
+            200,
+            {
+                "id": "ok",
+                "model": model,
+                "choices": [{"message": {"content": "hi"}}],
+            },
+            {},
+            _key(1),
+        )
+
+    upstream = AsyncMock()
+    upstream.request_json = fake_json
+    decision = RouteDecision(
+        chain=["model-a", "model-b"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    result = await ex.execute_json("/chat/completions", {"messages": []}, decision)
+    assert result.status_code == 200
+    assert result.model == "model-b"
+
+
+@pytest.mark.asyncio
 async def test_json_401_advances_to_next_provider() -> None:
     settings = Settings(nim_api_keys=["k"], max_model_fallbacks=3)
     reg = ModelRegistry.from_yaml(YAML)
