@@ -12,6 +12,10 @@ dist/
 .venv/
 venv/
 ENV/
+.cursorrules/
+.cursor/
+.claude/
+.claude/
 
 # Env / secrets
 .env
