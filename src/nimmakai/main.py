@@ -127,9 +127,9 @@ def _init_analytics(app: FastAPI, settings: Settings) -> None:
 
 
 def _configure_request_logs(app: FastAPI, settings: Settings) -> None:
-    """Bind durable request log file next to SQLite + live SSE publisher."""
+    """Bind rotating request logs next to SQLite + live SSE publisher."""
     from nimmakai.catalog.db import get_db
-    from nimmakai.logging_setup import default_log_file_path, request_logs
+    from nimmakai.logging_setup import default_log_dir, request_logs
 
     try:
         db = get_db(settings.sqlite_path)
@@ -148,17 +148,23 @@ def _configure_request_logs(app: FastAPI, settings: Settings) -> None:
 
     request_logs.configure(
         max_entries=max(100, int(settings.request_log_size)),
-        file_path=default_log_file_path(settings.sqlite_path),
+        log_dir=default_log_dir(settings.sqlite_path),
         enabled=bool(getattr(settings, "request_file_logging", True)),
+        max_file_bytes=int(
+            getattr(settings, "request_log_max_bytes", 50 * 1024 * 1024)
+        ),
+        retention_days=int(getattr(settings, "request_log_retention_days", 90)),
         db=db,
         on_add=_on_add,
     )
     st = request_logs.status()
     logger.info(
-        "request file logging enabled=%s path=%s max=%s",
+        "request file logging enabled=%s dir=%s active=%s max_file=%sB retention=%sd",
         st.get("enabled"),
+        st.get("log_dir"),
         st.get("file_path"),
-        st.get("max_entries"),
+        st.get("max_file_bytes"),
+        st.get("retention_days"),
     )
 
 

@@ -1,43 +1,23 @@
 # Scratchpad
 
 ## Current task
-10-pass deep-dive resiliency/robustness hardening — COMPLETE
+Request log rotation 50MB + 3-month retention — COMPLETE
 
-## Plan (10 passes)
-- [X] P1 Transport/failover: httpx catch (prior), 401/403 advance, Retry-After bodies, connect=5s (prior)
-- [X] P2 Stream envelope: terminal SSE framing, idle/error, empty last-model, JSON→SSE (F-18)
-- [X] P3 Deadlines: per-attempt wait_for + between-model; saw_deadline label; CancelledError gate release
-- [X] P4 Circuit mid-stream fail (prior holder); sticky via stream_failed
-- [X] P5 Auth: invalid Bearer no cookie fallthrough; SSE ?token= preferred over cookie
-- [X] P6 Analytics: zero-fill coarsen, cost cache gen, writer backoff/drain
-- [X] P7 Frontend: authError UX, prior refetch/spinner/Donut fixes
-- [X] P8 Inter-model backoff on transport/TTFT; wrap_upstream on stream/passthrough errors
-- [X] P9 Compat frame_sse_error + json_body_to_sse
-- [X] P10 Regression tests + full suite (257) + frontend build
+## Plan
+- [X] Size-rotate dated files under `<sqlite_dir>/request_logs/`
+- [X] Purge files older than 90 days
+- [X] Config + status API + tests + UI copy
 
-## Remaining (deferred / medium)
-- CSRF tokens for cookie mutations
-- Row-level provider upsert (stale full rewrite)
-- Frontend Vitest + CI build gate
-- Commit lockfile for reproducible Docker builds
-- HALF_OPEN allow() before keys check (hub)
-- JSONDecodeError from upstream.json() outside FallbackExecutor catch set
-
-## Design decisions
-- Explicit Bearer beats cookie; invalid Bearer → 401 (no cookie fallthrough)
-- Analytics SSE prefers ?token=/Bearer over session cookie
-- Terminal stream errors always SSE-framed (`data:` + `[DONE]`) with text/event-stream
-- 401/403 advance to next model after in-provider key rotation exhausted
-- Per-attempt asyncio.wait_for budget = min(remaining, 120s)
+## Design
+- Dir: `<data>/request_logs/requests-YYYY-MM-DD.log`
+- Rotate to `requests-YYYY-MM-DD.N.log` at 50MB (`REQUEST_LOG_MAX_BYTES`)
+- Retention 90 days (`REQUEST_LOG_RETENTION_DAYS`) by filename date
+- Memory ring still 20k for Live Feed /admin/logs
+- Toggle unchanged: PUT `/admin/request-logging`
 
 ## Lessons
-- .cursorrules can be overwritten by concurrent agent sessions — re-read before editing, merge don't clobber
-- Spokenly MCP may be unavailable; supercoder says NEVER ASK — proceed autonomously
-- Project venv is `.venv` (uv), not `venv`
-- EventSource cannot send Authorization — use ?token= or session cookie for SSE
-- Empty-stream last-model must continue — fall-through yields HTTP 200
-- stream_failed must mutate StreamResult via holder after construction
-- Awaiting cancelled Task re-raises CancelledError — catch explicitly
-- except BaseException before except Exception makes Exception unreachable
-- Broad monkeypatch of asyncio.wait_for also hits per-attempt deadlines — tests must accept request_deadline_exceeded
-- Zero-fill must coarsen step or fill from until — capping from since drops newest buckets
+- EventSource onerror fires on reconnect — never permanently close; reset on onopen + Reconnect button
+- Live feed lagged because EventBus only published after SQLite flush — publish on enqueue + request add
+- `max(100, max_entries)` blocked tests — floor at 1; production still uses max(100, settings)
+- Persist toggles in sqlite `meta` via get_meta/set_meta
+- Request log max_file_bytes floor must stay low (1) so unit tests can force rotation

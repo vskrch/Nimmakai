@@ -1,15 +1,18 @@
-"""Production request logging + durable ring file + live callback."""
+"""Production request logging + rotating durable files + live callback."""
 
 from __future__ import annotations
 
 import logging
+import re
 import sys
 import threading
 import time
 import uuid
 from collections import deque
 from collections.abc import Callable
+from contextlib import suppress
 from dataclasses import asdict, dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +20,10 @@ logger = logging.getLogger("nimmakai.request")
 
 META_KEY_ENABLED = "request_file_logging_enabled"
 DEFAULT_MAX_ENTRIES = 20_000
-DEFAULT_FILENAME = "request_logs.txt"
+DEFAULT_MAX_BYTES = 50 * 1024 * 1024  # 50 MiB per file
+DEFAULT_RETENTION_DAYS = 90  # ~3 months
+DEFAULT_LOG_DIRNAME = "request_logs"
+_DATE_RE = re.compile(r"^requests-(\d{4}-\d{2}-\d{2})(?:\.(\d+))?\.log$")
 
 
 @dataclass
@@ -74,7 +80,6 @@ class RequestLog:
         if self.fallback_index:
             parts.append(f"fallback={self.fallback_index}")
         if self.error:
-            # Keep one line — collapse newlines
             err = str(self.error).replace("\n", " ").replace("\r", " ")[:400]
             parts.append(f"error={err}")
         return " ".join(parts)
@@ -82,39 +87,64 @@ class RequestLog:
 
 class RequestLogStore:
     """
-    In-memory ring + optional durable text file (last N lines) beside the DB.
+    In-memory ring (for Live Feed /admin/logs) + perpetual rotating files.
 
-    File path defaults to ``<sqlite_dir>/request_logs.txt``. Toggle via
-    ``set_enabled`` (persisted in sqlite meta when a db handle is bound).
+    Files live under ``<sqlite_dir>/request_logs/``:
+
+    - Active: ``requests-YYYY-MM-DD.log``
+    - Rotated at ``max_file_bytes`` (default 50MB): ``requests-YYYY-MM-DD.N.log``
+    - Retention: delete dated files older than ``retention_days`` (default 90)
+
+    Toggle via ``set_enabled`` (persisted in sqlite meta when a db is bound).
     """
 
-    def __init__(self, max_entries: int = DEFAULT_MAX_ENTRIES) -> None:
+    def __init__(
+        self,
+        max_entries: int = DEFAULT_MAX_ENTRIES,
+        *,
+        max_file_bytes: int = DEFAULT_MAX_BYTES,
+        retention_days: int = DEFAULT_RETENTION_DAYS,
+    ) -> None:
         self.max_entries = max(1, int(max_entries))
+        self.max_file_bytes = max(1, int(max_file_bytes))
+        self.retention_days = max(1, int(retention_days))
         self._items: deque[RequestLog] = deque(maxlen=self.max_entries)
         self._lock = threading.Lock()
-        self._file_path: Path | None = None
+        self._log_dir: Path | None = None
         self._file_enabled: bool = True
-        self._appends_since_trim: int = 0
+        self._appends_since_maintain: int = 0
         self._db: Any | None = None
         self._on_add: Callable[[RequestLog], None] | None = None
+        self._active_path: Path | None = None
+        self._active_day: str | None = None
 
     def configure(
         self,
         *,
         max_entries: int | None = None,
         file_path: Path | str | None = None,
+        log_dir: Path | str | None = None,
         enabled: bool | None = None,
+        max_file_bytes: int | None = None,
+        retention_days: int | None = None,
         db: Any | None = None,
         on_add: Callable[[RequestLog], None] | None = None,
     ) -> None:
         with self._lock:
             if max_entries is not None:
                 self.max_entries = max(1, int(max_entries))
-                # Resize deque preserving newest
                 items = list(self._items)[: self.max_entries]
                 self._items = deque(items, maxlen=self.max_entries)
-            if file_path is not None:
-                self._file_path = Path(file_path)
+            if max_file_bytes is not None:
+                self.max_file_bytes = max(1, int(max_file_bytes))
+            if retention_days is not None:
+                self.retention_days = max(1, int(retention_days))
+            if log_dir is not None:
+                self._log_dir = Path(log_dir)
+            elif file_path is not None:
+                # Back-compat: treat a file path as either the log dir or a file inside it
+                p = Path(file_path)
+                self._log_dir = p if p.suffix == "" else p.parent
             if db is not None:
                 self._db = db
                 stored = db.get_meta(META_KEY_ENABLED)
@@ -129,6 +159,12 @@ class RequestLogStore:
                 self._file_enabled = bool(enabled)
             if on_add is not None:
                 self._on_add = on_add
+            if self._log_dir is not None:
+                try:
+                    self._log_dir.mkdir(parents=True, exist_ok=True)
+                    self._purge_old_unlocked()
+                except Exception:
+                    logger.exception("request log dir setup failed")
 
     @property
     def enabled(self) -> bool:
@@ -136,7 +172,12 @@ class RequestLogStore:
 
     @property
     def file_path(self) -> Path | None:
-        return self._file_path
+        """Active append target (for status / UI)."""
+        return self._active_path or self._current_active_path_unlocked()
+
+    @property
+    def log_dir(self) -> Path | None:
+        return self._log_dir
 
     @property
     def count(self) -> int:
@@ -152,27 +193,38 @@ class RequestLogStore:
                     )
                 except Exception:
                     logger.exception("failed to persist request logging flag")
-            if self._file_enabled and self._file_path is not None:
-                # Rewrite current ring so enabling starts from a consistent file
-                self._rewrite_file_unlocked()
 
     def status(self) -> dict[str, Any]:
         with self._lock:
+            files = self._list_log_files_unlocked()
+            total = 0
+            for f in files:
+                with suppress(OSError):
+                    total += f.stat().st_size
+            active = self._current_active_path_unlocked()
+            active_size = 0
+            if active and active.is_file():
+                with suppress(OSError):
+                    active_size = active.stat().st_size
             return {
                 "enabled": self._file_enabled,
                 "max_entries": self.max_entries,
                 "memory_count": len(self._items),
-                "file_path": str(self._file_path) if self._file_path else None,
-                "file_exists": bool(
-                    self._file_path and self._file_path.is_file()
-                ),
+                "log_dir": str(self._log_dir) if self._log_dir else None,
+                "file_path": str(active) if active else None,
+                "file_exists": bool(active and active.is_file()),
+                "active_file_bytes": active_size,
+                "max_file_bytes": self.max_file_bytes,
+                "retention_days": self.retention_days,
+                "file_count": len(files),
+                "total_bytes": total,
             }
 
     def add(self, entry: RequestLog) -> None:
         cb: Callable[[RequestLog], None] | None
         with self._lock:
             self._items.appendleft(entry)
-            if self._file_enabled and self._file_path is not None:
+            if self._file_enabled and self._log_dir is not None:
                 self._append_file_unlocked(entry)
             cb = self._on_add
         if cb is not None:
@@ -203,50 +255,112 @@ class RequestLogStore:
                     break
         return out
 
+    def _utc_day(self, ts: float | None = None) -> str:
+        t = ts if ts is not None else time.time()
+        return time.strftime("%Y-%m-%d", time.gmtime(t))
+
+    def _current_active_path_unlocked(self) -> Path | None:
+        if self._log_dir is None:
+            return None
+        day = self._utc_day()
+        return self._log_dir / f"requests-{day}.log"
+
     def _append_file_unlocked(self, entry: RequestLog) -> None:
-        assert self._file_path is not None
+        assert self._log_dir is not None
         try:
-            self._file_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self._file_path, "a", encoding="utf-8") as f:
+            self._log_dir.mkdir(parents=True, exist_ok=True)
+            day = self._utc_day(entry.ts)
+            path = self._log_dir / f"requests-{day}.log"
+            # New calendar day → reset active handle tracking
+            if self._active_day != day:
+                self._active_day = day
+                self._active_path = path
+            self._maybe_rotate_unlocked(path)
+            with open(path, "a", encoding="utf-8") as f:
                 f.write(entry.format_line() + "\n")
-            self._appends_since_trim += 1
-            if self._appends_since_trim >= 500:
-                self._trim_file_unlocked()
-                self._appends_since_trim = 0
+            self._active_path = path
+            self._appends_since_maintain += 1
+            if self._appends_since_maintain >= 200:
+                self._purge_old_unlocked()
+                self._appends_since_maintain = 0
         except Exception:
             logger.exception("failed to append request log file")
 
-    def _trim_file_unlocked(self) -> None:
-        """Keep only the last ``max_entries`` lines on disk."""
-        if self._file_path is None or not self._file_path.is_file():
-            return
+    def _maybe_rotate_unlocked(self, path: Path) -> None:
+        """If ``path`` is at/over max size, rename to .N and start a fresh file."""
         try:
-            with open(self._file_path, encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
-            if len(lines) <= self.max_entries:
+            if not path.is_file():
                 return
-            keep = lines[-self.max_entries :]
-            tmp = self._file_path.with_suffix(self._file_path.suffix + ".tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.writelines(keep)
-            tmp.replace(self._file_path)
+            size = path.stat().st_size
+            if size < self.max_file_bytes:
+                return
+            # Find next free index for this day
+            day = path.name.removeprefix("requests-").removesuffix(".log")
+            # day may already be YYYY-MM-DD
+            n = 1
+            while True:
+                rotated = path.parent / f"requests-{day}.{n}.log"
+                if not rotated.exists():
+                    break
+                n += 1
+            path.rename(rotated)
+            logger.info(
+                "rotated request log %s → %s (size=%s >= %s)",
+                path.name,
+                rotated.name,
+                size,
+                self.max_file_bytes,
+            )
         except Exception:
-            logger.exception("failed to trim request log file")
+            logger.exception("request log rotation failed")
 
-    def _rewrite_file_unlocked(self) -> None:
-        if self._file_path is None:
+    def _list_log_files_unlocked(self) -> list[Path]:
+        if self._log_dir is None or not self._log_dir.is_dir():
+            return []
+        out: list[Path] = []
+        for p in self._log_dir.iterdir():
+            if p.is_file() and _DATE_RE.match(p.name):
+                out.append(p)
+        return sorted(out)
+
+    def _purge_old_unlocked(self) -> None:
+        """Delete request log files older than retention_days (by date in name)."""
+        if self._log_dir is None or not self._log_dir.is_dir():
             return
-        try:
-            self._file_path.parent.mkdir(parents=True, exist_ok=True)
-            # Memory is newest-first; file should be chronological oldest→newest
-            lines = [e.format_line() + "\n" for e in reversed(self._items)]
-            tmp = self._file_path.with_suffix(self._file_path.suffix + ".tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                f.writelines(lines)
-            tmp.replace(self._file_path)
-            self._appends_since_trim = 0
-        except Exception:
-            logger.exception("failed to rewrite request log file")
+        cutoff = datetime.now(UTC).date() - timedelta(days=self.retention_days)
+        deleted = 0
+        for p in list(self._log_dir.iterdir()):
+            if not p.is_file():
+                continue
+            m = _DATE_RE.match(p.name)
+            if not m:
+                # Legacy single-file name from older versions
+                if p.name in {"request_logs.txt", "requests.log"}:
+                    with suppress(OSError):
+                        # Keep if still recent by mtime
+                        mtime = datetime.fromtimestamp(
+                            p.stat().st_mtime, tz=UTC
+                        ).date()
+                        if mtime < cutoff:
+                            p.unlink(missing_ok=True)
+                            deleted += 1
+                continue
+            try:
+                file_day = datetime.strptime(m.group(1), "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if file_day < cutoff:
+                try:
+                    p.unlink(missing_ok=True)
+                    deleted += 1
+                except OSError:
+                    logger.warning("failed to delete old request log %s", p)
+        if deleted:
+            logger.info(
+                "purged %s request log file(s) older than %s days",
+                deleted,
+                self.retention_days,
+            )
 
 
 # Process-global store (one per worker)
@@ -293,6 +407,12 @@ def log_request_line(entry: RequestLog) -> None:
         logger.info(line)
 
 
+def default_log_dir(sqlite_path: str | Path) -> Path:
+    """Directory for rotating request logs beside the SQLite DB."""
+    return Path(sqlite_path).expanduser().resolve().parent / DEFAULT_LOG_DIRNAME
+
+
 def default_log_file_path(sqlite_path: str | Path) -> Path:
-    """Place request_logs.txt next to the SQLite DB (same data directory)."""
-    return Path(sqlite_path).expanduser().resolve().parent / DEFAULT_FILENAME
+    """Active dated log file path for today (UTC)."""
+    day = time.strftime("%Y-%m-%d", time.gmtime())
+    return default_log_dir(sqlite_path) / f"requests-{day}.log"

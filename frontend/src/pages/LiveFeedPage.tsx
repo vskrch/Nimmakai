@@ -9,15 +9,19 @@ export default function LiveFeedPage() {
   const { data: summary } = useAnalyticsSummary('1h')
   const [logEnabled, setLogEnabled] = useState<boolean | null>(null)
   const [logPath, setLogPath] = useState<string | null>(null)
+  const [logDir, setLogDir] = useState<string | null>(null)
   const [logBusy, setLogBusy] = useState(false)
   const [logMsg, setLogMsg] = useState<string | null>(null)
 
+  const applyLogStatus = (r: Record<string, unknown>) => {
+    setLogEnabled(Boolean(r.enabled))
+    setLogPath(typeof r.file_path === 'string' ? r.file_path : null)
+    setLogDir(typeof r.log_dir === 'string' ? r.log_dir : null)
+  }
+
   const loadLogging = useCallback(async () => {
     const r = await api<Record<string, unknown>>('/admin/request-logging')
-    if (r && okBody(r)) {
-      setLogEnabled(Boolean(r.enabled))
-      setLogPath(typeof r.file_path === 'string' ? r.file_path : null)
-    }
+    if (r && okBody(r)) applyLogStatus(r)
   }, [])
 
   useEffect(() => { loadLogging() }, [loadLogging])
@@ -32,8 +36,7 @@ export default function LiveFeedPage() {
     })
     setLogBusy(false)
     if (r && okBody(r)) {
-      setLogEnabled(Boolean(r.enabled))
-      setLogPath(typeof r.file_path === 'string' ? r.file_path : null)
+      applyLogStatus(r)
       setLogMsg(r.enabled ? 'Request file logging enabled' : 'Request file logging disabled')
     } else {
       setLogMsg(errMsg(r, 'Failed to update logging'))
@@ -66,7 +69,9 @@ export default function LiveFeedPage() {
       {logMsg && (
         <div className="mb-3 text-xs text-zinc-400">
           {logMsg}
-          {logPath && <span className="ml-2 font-mono text-zinc-500">{logPath}</span>}
+          {(logDir || logPath) && (
+            <span className="ml-2 font-mono text-zinc-500">{logDir || logPath}</span>
+          )}
         </div>
       )}
 
@@ -95,7 +100,7 @@ export default function LiveFeedPage() {
               Waiting for requests… Send a chat completion to see live events.
               {logEnabled && (
                 <div className="mt-2 text-xs text-zinc-600">
-                  File logging is on — last 20k requests are also written next to the DB.
+                  File logging is on — rotating dated logs (50 MB/file, 90‑day retention) beside the DB.
                 </div>
               )}
             </div>

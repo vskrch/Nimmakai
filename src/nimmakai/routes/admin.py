@@ -96,8 +96,10 @@ async def admin_logs(request: Request) -> JSONResponse:
                 limit=limit, path_prefix=path_prefix, errors_only=errors_only
             ),
             "hint": (
-                f"Durable file (last {st.get('max_entries')} requests): "
-                f"{st.get('file_path') or 'not configured'}. "
+                f"Rotating logs under {st.get('log_dir') or 'not configured'} "
+                f"(≤{st.get('max_file_bytes')} bytes/file, "
+                f"{st.get('retention_days')}d retention). "
+                f"Active: {st.get('file_path') or '—'}. "
                 "Toggle via PUT /admin/request-logging."
             ),
         }
@@ -106,7 +108,7 @@ async def admin_logs(request: Request) -> JSONResponse:
 
 @router.get("/admin/request-logging")
 async def get_request_logging(request: Request) -> JSONResponse:
-    """Status of durable request file logging."""
+    """Status of durable rotating request file logging."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
     require_admin(request, settings)
     from nimmakai.logging_setup import request_logs
@@ -116,7 +118,7 @@ async def get_request_logging(request: Request) -> JSONResponse:
 
 @router.put("/admin/request-logging")
 async def put_request_logging(request: Request) -> JSONResponse:
-    """Enable/disable writing requests to request_logs.txt beside the DB."""
+    """Enable/disable writing requests to rotating files beside the DB."""
     settings = getattr(request.app.state, "settings", None) or get_settings()
     require_admin(request, settings)
     from nimmakai.logging_setup import request_logs

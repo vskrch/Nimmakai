@@ -46,8 +46,10 @@ class Settings(BaseSettings):
     # long idle once first token arrives (Cursor/agent safe).
     stream_ttft_timeout_seconds: float = 12.0
     stream_idle_timeout_seconds: float = 180.0
-    request_log_size: int = 20000
+    request_log_size: int = 20000  # in-memory ring for Live Feed /admin/logs
     request_file_logging: bool = True
+    request_log_max_bytes: int = 50 * 1024 * 1024  # 50 MiB per rotated file
+    request_log_retention_days: int = 90  # ~3 months on disk
     # Adaptive: always prefer currently responding models at request time
     adaptive_routing: bool = True
 

@@ -16,7 +16,8 @@ ENV/
 .cursor/
 .claude/
 .claude/
-
+.cursorrules.md
+.cursorrules
 # Env / secrets
 .env
 .env.local
