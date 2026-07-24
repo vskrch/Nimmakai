@@ -217,10 +217,9 @@ class ModelSelector:
         if is_auto:
             chain = self.registry.chain_for_intent(intent_key, variant=variant)
             if not chain and self.registry.active_live_ids():
-                if intent_key == "coding_agentic":
-                    from nimmakai.resilience import emergency_coding_chain
+                from nimmakai.resilience import emergency_chain
 
-                    chain = emergency_coding_chain(self.registry)
+                chain = emergency_chain(self.registry, intent=intent_key)
                 if not chain:
                     chain = sorted(self.registry.active_live_ids())
             chain = self._finalize_chain(

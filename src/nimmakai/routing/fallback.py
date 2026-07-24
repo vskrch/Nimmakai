@@ -428,14 +428,16 @@ class FallbackExecutor:
         # Drop models whose provider has no active keys/runtime (production safety)
         available = [m for m in raw if self._provider_available(m)]
         if not available:
-            # Self-heal: rebuild emergency chain from live catalog
+            # Self-heal: rebuild emergency chain from live catalog (intent-aware)
             try:
-                from nimmakai.resilience import emergency_coding_chain
+                from nimmakai.resilience import emergency_chain
                 from nimmakai.routing.auto_router import filter_chain
 
                 available = [
                     m
-                    for m in emergency_coding_chain(self.registry, max_n=max_n)
+                    for m in emergency_chain(
+                        self.registry, intent=decision.intent.value, max_n=max_n
+                    )
                     if self._provider_available(m)
                     and (
                         self.registry.resolve_live_id(m, include_disabled=True) or m
@@ -482,10 +484,12 @@ class FallbackExecutor:
             if pin_live in disabled:
                 pinned = None
         # Re-rank, but keep pinned head first unless unhealthy (F-08)
+        # Skip re-optimization if no filtering changed the chain (selector already optimized)
         if available:
             from nimmakai.routing.optimizer import optimize_chain
 
-            if pinned and pinned in available:
+            needs_optimize = available != raw or pinned
+            if needs_optimize and pinned and pinned in available:
                 tail = [m for m in available if m != pinned]
                 tail = optimize_chain(
                     tail,
@@ -509,7 +513,7 @@ class FallbackExecutor:
                     )
                 else:
                     available = [pinned] + tail
-            else:
+            elif needs_optimize:
                 available = optimize_chain(
                     available,
                     self.registry,
@@ -525,6 +529,22 @@ class FallbackExecutor:
             if pinned and pinned in hot:
                 hot = [pinned] + [m for m in hot if m != pinned]
             available = hot + cold[:1]
+        # Quality floor: drop models below min_quality_ratio × top model quality.
+        # Never pick dumb models — better to return 503 than subpar results.
+        if available and len(available) > 1:
+            min_ratio = float(
+                getattr(self.settings, "min_quality_ratio", 0.6) or 0.6
+            )
+            ladder = getattr(self.registry, "ladder", None)
+            if ladder is not None:
+                snap = getattr(ladder, "_ladders", {}).get((intent, variant))
+                if snap is not None and getattr(snap, "scores", None):
+                    scores = snap.scores
+                    top_score = max(scores.get(m, 0.0) for m in available) or 1.0
+                    floor = top_score * min_ratio
+                    filtered = [m for m in available if scores.get(m, 0.0) >= floor]
+                    if filtered:
+                        available = filtered
         # Drop models whose known context cannot fit the estimate (T13)
         est = getattr(decision, "estimated_tokens", None)
         if est and available:
@@ -996,12 +1016,13 @@ class FallbackExecutor:
                         self.hub.circuit_breaker.force_allow(pid)
                 retry_chain = self._chain(decision, had_tools=had_tools)
                 if not retry_chain:
-                    from nimmakai.resilience import emergency_coding_chain
+                    from nimmakai.resilience import emergency_chain
 
-                    retry_chain = emergency_coding_chain(
+                    retry_chain = emergency_chain(
                         self.registry,
+                        intent=decision.intent.value,
                         max_n=int(
-                            getattr(self.settings, "coding_max_fallbacks", 12) or 12
+                            getattr(self.settings, "coding_max_fallbacks", 5) or 5
                         ),
                     )
                 tried = set(chain)
@@ -1863,12 +1884,13 @@ class FallbackExecutor:
                     self.hub.circuit_breaker.force_allow(pid_r)
             retry_chain = self._chain(decision, had_tools=had_tools)
             if not retry_chain:
-                from nimmakai.resilience import emergency_coding_chain
+                from nimmakai.resilience import emergency_chain
 
-                retry_chain = emergency_coding_chain(
+                retry_chain = emergency_chain(
                     self.registry,
+                    intent=decision.intent.value,
                     max_n=int(
-                        getattr(self.settings, "coding_max_fallbacks", 12) or 12
+                        getattr(self.settings, "coding_max_fallbacks", 5) or 5
                     ),
                 )
             tried = set(chain)

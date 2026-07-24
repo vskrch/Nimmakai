@@ -77,6 +77,9 @@ class ModelRegistry:
         self.rankings_sticky: bool = True
         self.rankings_cache_key: str = "default"
         self._db: Any = None
+        # Cache for coding_candidates (invalidated on live_ids/disabled_models change)
+        self._coding_candidates_cache: list[str] | None = None
+        self._coding_candidates_key: tuple[frozenset[str], frozenset[str]] | None = None
         self._load_disk_snapshot()
         if self.live_ids:
             self.ladder.set_docs(self.doc_models)
@@ -508,18 +511,35 @@ class ModelRegistry:
     def coding_candidates(self) -> list[str]:
         """Every live model that can serve coding_agentic, right now.
 
+        Cached: invalidated when live_ids or disabled_models changes.
+
         ponytail: the request-time optimizer only re-ranks whatever chain it is
         handed (the frozen sticky ladder). Newly-live coders never get a chance
         to lead. This exposes the full live coding pool so the per-request
         scorer can always pick the most efficient available coder.
         """
+        # Check cache validity
+        current_key = (frozenset(self.live_ids), frozenset(self.disabled_models))
+        if (
+            self._coding_candidates_cache is not None
+            and self._coding_candidates_key == current_key
+        ):
+            return list(self._coding_candidates_cache)
+
         active = self.active_live_ids()
         if not active:
+            self._coding_candidates_cache = []
+            self._coding_candidates_key = current_key
             return []
         ladder = getattr(self, "ladder", None)
         if ladder is None:
-            return list(active)
-        return [m for m in active if ladder.is_coding_capable(m)]
+            result = list(active)
+        else:
+            result = [m for m in active if ladder.is_coding_capable(m)]
+
+        self._coding_candidates_cache = result
+        self._coding_candidates_key = current_key
+        return result
 
     def load_rankings_cache(self) -> bool:
         if self._db is None:

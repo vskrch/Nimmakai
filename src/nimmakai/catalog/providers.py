@@ -114,6 +114,11 @@ def namespace_model(provider_id: str, upstream_model_id: str) -> str:
     return f"{pid}/{mid}"
 
 
+# Module-level cache for split_provider_model (invalidated on provider changes)
+_split_cache: dict[str, tuple[str, str]] = {}
+_split_cache_key: list[tuple[frozenset[str], str] | None] = [None]
+
+
 def split_provider_model(
     model_id: str,
     provider_ids: set[str],
@@ -123,17 +128,34 @@ def split_provider_model(
     """
     Split `provider/upstream...` using known provider ids.
     Bare org/model ids default to `default_provider` (usually nim).
+
+    Cached: invalidated when provider_ids changes (rare, admin action only).
     """
     mid = model_id.strip()
     if not mid:
         return default_provider, mid
+
+    # Cache key: frozenset of provider_ids + default_provider
+    cache_key = (frozenset(p.lower() for p in provider_ids), default_provider)
+    if _split_cache_key[0] != cache_key:
+        _split_cache.clear()
+        _split_cache_key[0] = cache_key
+
+    if mid in _split_cache:
+        return _split_cache[mid]
+
     lower = mid.lower()
     # Longest provider id first so `foo-bar` wins over `foo`
     for pid in sorted(provider_ids, key=len, reverse=True):
         prefix = f"{pid.lower()}/"
         if lower.startswith(prefix):
-            return pid.lower(), mid[len(prefix) :]
-    return default_provider, mid
+            result = (pid.lower(), mid[len(prefix) :])
+            _split_cache[mid] = result
+            return result
+
+    result = (default_provider, mid)
+    _split_cache[mid] = result
+    return result
 
 
 def scoring_model_id(namespaced: str, provider_ids: set[str]) -> str:

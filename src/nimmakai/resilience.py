@@ -100,9 +100,14 @@ async def heal_and_refresh(
     return report
 
 
-def emergency_coding_chain(registry: Any, *, max_n: int = 10) -> list[str]:
+def emergency_chain(
+    registry: Any,
+    *,
+    intent: str = "coding_agentic",
+    max_n: int = 5,
+) -> list[str]:
     """
-    Last-resort chain when ladder is empty: score live models for coding_agentic.
+    Last-resort chain when ladder is empty: score live models for the given intent.
 
     Does NOT rebuild the frozen ladder (too expensive on request path).
     Returns active models sorted by ladder scoring or alphabetically as fallback.
@@ -115,24 +120,28 @@ def emergency_coding_chain(registry: Any, *, max_n: int = 10) -> list[str]:
         else set(registry.live_ids)
     )
     try:
-        chain = registry.ladder.ladder_for("coding_agentic", max_n=max_n)
+        chain = registry.ladder.ladder_for(intent, max_n=max_n)
         if chain:
             return registry.health_reorder(chain)
-        # Cold ladder: return active models (fallback executor handles ranking)
         if not active:
             _alert(
                 "nimmakai.all_chains_empty",
-                intent="coding_agentic",
+                intent=intent,
                 live_models=0,
                 cause="no_live_models",
             )
         return active[:max_n]
     except Exception:
-        logger.exception("emergency_coding_chain failed")
+        logger.exception("emergency_chain failed for intent=%s", intent)
         _alert(
             "nimmakai.all_chains_empty",
-            intent="coding_agentic",
+            intent=intent,
             live_models=len(active),
             cause="emergency_chain_failed",
         )
         return active[:max_n]
+
+
+def emergency_coding_chain(registry: Any, *, max_n: int = 10) -> list[str]:
+    """Backward-compatible wrapper for coding_agentic intent."""
+    return emergency_chain(registry, intent="coding_agentic", max_n=max_n)

@@ -38,12 +38,15 @@ def _quality_prior(
     model_id: str,
     *,
     ladder_scores: dict[str, float] | None,
+    max_score: float | None = None,
 ) -> float:
     """Quality prior from precomputed ladder scores, normalized to (0, 1].
 
     Uses the ladder's actual composite score to preserve the full quality
     spread. A 95-quality model maps to ~0.95, a 60-quality model to ~0.60.
     Floor at 0.35 so weak models participate as deep fallbacks only.
+
+    max_score: precomputed max of ladder_scores (avoids recomputing per model).
     """
     if not ladder_scores:
         return 0.70
@@ -53,7 +56,8 @@ def _quality_prior(
     raw = float(raw)
     if raw <= 0 or raw != raw:  # NaN guard: NaN != NaN
         return 0.50
-    max_score = max(ladder_scores.values())
+    if max_score is None:
+        max_score = max(ladder_scores.values())
     if max_score <= 0:
         return 0.65
     return max(0.35, min(1.0, raw / max_score))
@@ -137,12 +141,13 @@ def score_model_live(
     ladder_scores: dict[str, float] | None,
     health: Any,
     provider_ids: set[str],
+    max_score: float | None = None,
 ) -> float:
     """Single composite score for continuous ranking."""
     if health is not None and health.is_unhealthy(model_id):
-        return 1e-6 * _quality_prior(model_id, ladder_scores=ladder_scores)
+        return 1e-6 * _quality_prior(model_id, ladder_scores=ladder_scores, max_score=max_score)
 
-    intel = _quality_prior(model_id, ladder_scores=ladder_scores)
+    intel = _quality_prior(model_id, ladder_scores=ladder_scores, max_score=max_score)
     speed = _speed_factor(health, model_id)
     avail = _availability_factor(health, model_id)
     prov = _provider_factor(model_id, provider_ids, health)
@@ -178,10 +183,14 @@ def optimize_chain(
     provider_ids = set(getattr(ladder, "provider_ids", None) or {"nim"})
 
     ladder_scores: dict[str, float] | None = None
+    max_score: float | None = None
     if ladder is not None:
         snap = getattr(ladder, "_ladders", {}).get((intent, variant))
         if snap is not None and getattr(snap, "scores", None):
             ladder_scores = dict(snap.scores)
+            # Precompute max_score once instead of per-model
+            if ladder_scores:
+                max_score = max(ladder_scores.values())
 
     scored: list[tuple[float, str]] = []
     for mid in sticky:
@@ -190,6 +199,7 @@ def optimize_chain(
             ladder_scores=ladder_scores,
             health=health,
             provider_ids=provider_ids,
+            max_score=max_score,
         )
         scored.append((s, mid))
 
@@ -214,14 +224,17 @@ def explain_top(
     health = getattr(registry, "health", None)
     provider_ids = set(getattr(ladder, "provider_ids", None) or {"nim"})
     ladder_scores = None
+    max_score: float | None = None
     if ladder is not None:
         snap = getattr(ladder, "_ladders", {}).get((intent, variant))
         if snap is not None and getattr(snap, "scores", None):
             ladder_scores = dict(snap.scores)
+            if ladder_scores:
+                max_score = max(ladder_scores.values())
 
     rows = []
     for mid in sticky[: max(n * 3, 12)]:
-        intel = _quality_prior(mid, ladder_scores=ladder_scores)
+        intel = _quality_prior(mid, ladder_scores=ladder_scores, max_score=max_score)
         speed = _speed_factor(health, mid)
         hs = health.health_score(mid) if health else 1.0
         total = score_model_live(
@@ -229,6 +242,7 @@ def explain_top(
             ladder_scores=ladder_scores,
             health=health,
             provider_ids=provider_ids,
+            max_score=max_score,
         )
         rows.append(
             {
