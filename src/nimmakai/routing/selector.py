@@ -12,10 +12,12 @@ from typing import TYPE_CHECKING, Any, Literal
 from nimmakai.catalog.aliases import looks_like_nim_id, normalize_model_name
 from nimmakai.routing.auto_router import (
     AutoRouterOptions,
+    build_intent_aware_pool,
     filter_chain,
     is_auto_router_id,
     pin_model_first,
     resolve_auto_tier,
+    sticky_fits_intent_pool,
     tier_to_variant,
 )
 from nimmakai.routing.intents import Intent, IntentResult
@@ -215,33 +217,15 @@ class ModelSelector:
             or is_auto_router_id(raw)
         )
         if is_auto:
-            chain = self.registry.chain_for_intent(intent_key, variant=variant)
-            if not chain and self.registry.active_live_ids():
-                from nimmakai.resilience import emergency_chain
-
-                chain = emergency_chain(self.registry, intent=intent_key)
-                if not chain:
-                    chain = sorted(self.registry.active_live_ids())
-            chain = self._finalize_chain(
-                chain,
+            return self._resolve_auto(
+                intent=intent,
+                intent_result=intent_result,
                 intent_key=intent_key,
                 variant=variant,
-                free_only=tier == "free",
-                allowed=opts.allowed_models,
+                tier=tier,
+                model_field=model_field,
+                opts=opts,
                 preferred_model=preferred_model,
-                models_fallback=opts.models_fallback,
-            )
-            return RouteDecision(
-                chain=chain,
-                mode="auto",
-                intent=intent,
-                rule_id=intent_result.rule_id,
-                requested_model=model_field,
-                auto_tier=tier or "balanced",
-                variant=variant,
-                sticky_model=preferred_model,
-                pinned_head=preferred_model,
-                allowed_models=list(opts.allowed_models),
             )
 
         if self.registry.is_alias(raw):
@@ -376,26 +360,107 @@ class ModelSelector:
                 )
 
         # Unknown non-NIM string → treat as auto (Cursor defaults, etc.)
-        chain = self.registry.chain_for_intent(intent_key, variant=variant)
+        return self._resolve_auto(
+            intent=intent,
+            intent_result=intent_result,
+            intent_key=intent_key,
+            variant=variant,
+            tier=tier,
+            model_field=model_field,
+            opts=opts,
+            preferred_model=preferred_model if tier else None,
+            mode="unknown_alias_as_auto",
+        )
+
+    def _resolve_auto(
+        self,
+        *,
+        intent: Intent,
+        intent_result: IntentResult,
+        intent_key: str,
+        variant: str,
+        tier: str | None,
+        model_field: str | None,
+        opts: AutoRouterOptions,
+        preferred_model: str | None,
+        mode: RouteMode = "auto",
+    ) -> RouteDecision:
+        """Always produce an intent-aligned chain for nimmakai/auto (and aliases).
+
+        Guarantees: if any active model exists and hard filters allow it, the
+        chain is non-empty. Primary intent leads; related intents extend the
+        fallback tail so the request can always be processed.
+        """
+        free_only = tier == "free"
+        max_n = int(getattr(self.settings, "max_model_fallbacks", 10) or 10)
+        if intent_key == "coding_agentic":
+            max_n = max(
+                max_n,
+                int(getattr(self.settings, "coding_max_fallbacks", 12) or 12),
+            )
+        # Pull a wide intent-aware pool, then finalize (health, filters, pin)
+        chain = build_intent_aware_pool(
+            self.registry,
+            primary_intent=intent_key,
+            variant=variant,
+            max_n=max(max_n * 2, 16),
+            include_related=True,
+            expand_coding_pool=intent_key
+            in {"coding_agentic", "reasoning", "long_horizon"},
+        )
+        # Soft sticky: only pin when the model fits this intent (or low confidence)
+        pin = preferred_model
+        if pin and not sticky_fits_intent_pool(
+            pin,
+            chain,
+            confidence=float(intent_result.confidence or 0.0),
+            force_intent=intent_result.rule_id
+            in {"tools_present", "agent_fingerprint", "agent_header", "forced_header"},
+        ):
+            pin = None
+
         chain = self._finalize_chain(
             chain,
             intent_key=intent_key,
             variant=variant,
-            free_only=tier == "free",
+            free_only=free_only,
             allowed=opts.allowed_models,
-            preferred_model=preferred_model if tier else None,
+            preferred_model=pin,
             models_fallback=opts.models_fallback,
         )
+
+        # Hard guarantee for auto: never return empty when the live pool has models
+        if not chain:
+            chain = build_intent_aware_pool(
+                self.registry,
+                primary_intent=intent_key,
+                variant=variant,
+                max_n=max_n,
+                include_related=True,
+                expand_coding_pool=True,
+            )
+            chain = filter_chain(
+                chain,
+                allowed_models=opts.allowed_models or None,
+                free_only=free_only,
+            )
+            if not chain and not opts.allowed_models and not free_only:
+                # Absolute last resort — any active model, no free/allowed constraints
+                try:
+                    chain = sorted(self.registry.active_live_ids())[:max_n]
+                except Exception:
+                    chain = []
+
         return RouteDecision(
             chain=chain,
-            mode="unknown_alias_as_auto",
+            mode=mode,
             intent=intent,
             rule_id=intent_result.rule_id,
             requested_model=model_field,
-            auto_tier=tier,
+            auto_tier=tier or ("balanced" if mode == "auto" else tier),
             variant=variant,
-            sticky_model=preferred_model,
-            pinned_head=preferred_model,
+            sticky_model=pin,
+            pinned_head=pin,
             allowed_models=list(opts.allowed_models),
         )
 

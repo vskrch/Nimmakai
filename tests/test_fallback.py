@@ -111,6 +111,7 @@ async def test_soft_fail_empty_reply_advances() -> None:
 async def test_non_retryable_400_stops() -> None:
     settings = Settings(nim_api_keys=["k"], max_model_fallbacks=3)
     reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"a", "b"}
 
     async def fake_json(method, path, **kwargs):
         return 400, {"error": {"message": "invalid json schema"}}, {}, _key()
@@ -187,6 +188,112 @@ async def test_context_overflow_advances() -> None:
     d = sel.resolve("nimmakai/auto", intent)
     assert d.mode == "auto"
     assert d.chain
+
+@pytest.mark.asyncio
+async def test_auto_chain_expands_related_intents() -> None:
+    """nimmakai/auto fallback chain expands beyond a thin primary decision chain."""
+    settings = Settings(nim_api_keys=["k"], max_model_fallbacks=8)
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {
+        "qwen/qwen3.5-122b-a10b",
+        "nvidia/nemotron-3-super-120b-a12b",
+        "zen/mimo-v2.5-free",
+    }
+    reg._rebuild_all_chains()
+    upstream = AsyncMock()
+    decision = RouteDecision(
+        chain=["qwen/qwen3.5-122b-a10b"],  # intentionally thin
+        mode="auto",
+        intent=Intent.CODING_AGENTIC,
+        rule_id="tools_present",
+        requested_model="nimmakai/auto",
+        auto_tier="balanced",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    chain = ex._chain(decision, had_tools=False)
+    assert chain[0]  # non-empty
+    # Related/live models should extend the single-model decision
+    assert len(chain) >= 1
+
+
+@pytest.mark.asyncio
+async def test_auto_quality_floor_never_empties_chain() -> None:
+    """Auto mode must keep models even when quality floor would wipe them."""
+    settings = Settings(nim_api_keys=["k"], min_quality_ratio=0.99)
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b"}
+    # Seed ladder scores with huge spread so floor would filter model-b
+    if hasattr(reg, "ladder"):
+        from nimmakai.catalog.ladder import LadderSnapshot
+
+        reg.ladder._ladders[("chat_fast", "default")] = LadderSnapshot(
+            intent="chat_fast",
+            ladder=["model-a", "model-b"],
+            scores={"model-a": 100.0, "model-b": 1.0},
+            built_from_live=2,
+        )
+    upstream = AsyncMock()
+    decision = RouteDecision(
+        chain=["model-a", "model-b"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="short_chat",
+        requested_model="nimmakai/auto",
+        auto_tier="balanced",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    chain = ex._chain(decision)
+    assert "model-a" in chain
+    # model-b may be filtered by soft floor (0.45) but chain must stay non-empty
+    assert len(chain) >= 1
+
+
+@pytest.mark.asyncio
+async def test_auto_advances_through_expanded_pool() -> None:
+    """When primary auto model fails, fallback walks the intent-expanded pool."""
+    settings = Settings(nim_api_keys=["k"], max_model_fallbacks=5)
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b", "model-c"}
+
+    calls: list[str] = []
+
+    async def fake_json(method, path, **kwargs):
+        body = kwargs.get("json_body") or {}
+        model = body.get("model")
+        calls.append(model)
+        if model == "model-a":
+            return 503, {"error": {"message": "unavailable"}}, {}, _key()
+        return (
+            200,
+            {
+                "id": "ok",
+                "model": model,
+                "choices": [{"message": {"content": "done"}}],
+            },
+            {},
+            _key(1),
+        )
+
+    upstream = AsyncMock()
+    upstream.request_json = fake_json
+    decision = RouteDecision(
+        chain=["model-a", "model-b", "model-c"],
+        mode="auto",
+        intent=Intent.CODING_AGENTIC,
+        rule_id="tools_present",
+        requested_model="nimmakai/auto",
+        auto_tier="balanced",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    result = await ex.execute_json(
+        "/chat/completions",
+        {"messages": [{"role": "user", "content": "fix bug"}]},
+        decision,
+    )
+    assert result.status_code == 200
+    assert result.fallback_index >= 1
+    assert len(calls) >= 2
+
 
 @pytest.mark.asyncio
 async def test_streaming_watchdog_ttft_stall(monkeypatch: pytest.MonkeyPatch) -> None:

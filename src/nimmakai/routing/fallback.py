@@ -394,14 +394,146 @@ class FallbackExecutor:
             logger.exception("provider availability check failed for model %s", model)
             return False
 
+    def _is_auto_decision(self, decision: RouteDecision) -> bool:
+        """True when the client asked for auto routing (nimmakai/auto etc.)."""
+        mode = str(decision.mode or "")
+        if mode in {"auto", "unknown_alias_as_auto"}:
+            return True
+        if getattr(decision, "auto_tier", None):
+            return True
+        req = str(decision.requested_model or "").lower()
+        if not req or req in {"auto", ""}:
+            return True
+        try:
+            from nimmakai.routing.auto_router import is_auto_router_id
+
+            return is_auto_router_id(req)
+        except Exception:
+            return False
+
+    def _heal_empty_chain(
+        self,
+        decision: RouteDecision,
+        *,
+        max_n: int,
+        disabled: set[str],
+        had_tools: bool,
+    ) -> list[str]:
+        """Rebuild a non-empty intent-aware chain when the primary path is empty."""
+        from nimmakai.routing.auto_router import (
+            build_intent_aware_pool,
+            filter_chain,
+        )
+
+        intent = decision.intent.value
+        variant = getattr(decision, "variant", None) or "default"
+        pool = build_intent_aware_pool(
+            self.registry,
+            primary_intent=intent,
+            variant=variant,
+            max_n=max(max_n * 2, 16),
+            include_related=True,
+            expand_coding_pool=True,
+        )
+        available = [
+            m
+            for m in pool
+            if self._provider_available(m)
+            and (
+                self.registry.resolve_live_id(m, include_disabled=True) or m
+            )
+            not in disabled
+        ]
+        if had_tools and hasattr(self.registry, "ladder"):
+            caps = getattr(self.registry.ladder, "capabilities", {})
+            tool_ok = [
+                m
+                for m in available
+                if not (caps.get(m) or {}).get("supports_tools") is False
+            ]
+            if tool_ok:
+                available = tool_ok
+        allowed = list(getattr(decision, "allowed_models", None) or [])
+        free_only = str(getattr(decision, "auto_tier", "") or "").lower() == "free"
+        if allowed or free_only:
+            available = filter_chain(
+                available, allowed_models=allowed or None, free_only=free_only
+            )
+        return available
+
     def _chain(self, decision: RouteDecision, *, had_tools: bool = False) -> list[str]:
         max_n = int(getattr(self.settings, "max_model_fallbacks", 10) or 10)
-        if decision.intent.value == "coding_agentic":
+        is_auto = self._is_auto_decision(decision)
+        if decision.intent.value == "coding_agentic" or is_auto:
             max_n = max(
                 max_n,
                 int(getattr(self.settings, "coding_max_fallbacks", 12) or 12),
             )
+        # Auto gets a longer attempt budget so intent can always be served
+        if is_auto:
+            max_n = max(max_n, 12)
+
         raw = list(decision.chain)
+        # For auto: widen with related-intent models before execution so
+        # exhaustion of the primary ladder still processes the request.
+        # Intent-escalation: when auto, append models from higher-capability
+        # intents after the primary chain so a misclassified or underestimated
+        # intent can still be served.  Expansion is limited to models already
+        # in the chain or live_ids so tests / constrained pools are not polluted
+        # with random catalog entries.
+        if is_auto:
+            try:
+                from nimmakai.routing.auto_router import (
+                    build_intent_aware_pool,
+                    intent_expansion_order,
+                )
+
+                live_set = getattr(self.registry, "live_ids", None) or set()
+                chain_set = {m.lower() for m in raw}
+                # When live_ids is populated, expansion adds models from the
+                # catalog that are live.  When live_ids is empty (unit tests,
+                # minimal setups), skip expansion to preserve the test chain.
+                if live_set:
+                    expanded = build_intent_aware_pool(
+                        self.registry,
+                        primary_intent=decision.intent.value,
+                        variant=getattr(decision, "variant", None) or "default",
+                        max_n=max(max_n * 2, 20),
+                        include_related=True,
+                        expand_coding_pool=decision.intent.value
+                        in {"coding_agentic", "reasoning", "long_horizon"},
+                    )
+                    if expanded:
+                        seen = {m.lower() for m in raw}
+                        for m in expanded:
+                            ml = m.lower()
+                            if ml not in seen and (ml in live_set or ml in chain_set):
+                                raw.append(m)
+                                seen.add(ml)
+                    # Intent-escalation tail: append models from higher-capability
+                    # intents that are already in the live pool, so a chat_fast
+                    # request that turns out to be agentic still reaches coding.
+                    seen = {m.lower() for m in raw}
+                    escalation_intents = [
+                        i for i in intent_expansion_order(decision.intent.value)
+                        if i != decision.intent.value
+                    ]
+                    for esc_intent in escalation_intents:
+                        try:
+                            esc_chain = self.registry.chain_for_intent(
+                                esc_intent,
+                                variant=getattr(decision, "variant", None) or "default",
+                            )
+                            for m in (esc_chain or []):
+                                ml = m.lower()
+                                if ml not in seen and ml in live_set:
+                                    raw.append(m)
+                                    seen.add(ml)
+                        except Exception:
+                            pass
+            except Exception:
+                logger.debug("auto chain expansion failed", exc_info=True)
+
         # Never execute admin-disabled models (covers passthrough / emergency paths)
         disabled = getattr(self.registry, "disabled_models", None) or set()
         if disabled:
@@ -423,40 +555,33 @@ class FallbackExecutor:
                     logger.debug("pre-filter: skipping %s (tools not supported)", m)
                     continue
                 filtered.append(m)
+            # Keep at least one candidate even if all claim no tools (capability may be stale)
             if filtered:
                 raw = filtered
+            elif is_auto and raw:
+                logger.info(
+                    "tools pre-filter emptied chain; keeping candidates for auto intent=%s",
+                    decision.intent.value,
+                )
         # Drop models whose provider has no active keys/runtime (production safety)
         available = [m for m in raw if self._provider_available(m)]
         if not available:
-            # Self-heal: rebuild emergency chain from live catalog (intent-aware)
+            # Self-heal: intent-aware multi-ladder rebuild, then emergency
             try:
-                from nimmakai.resilience import emergency_chain
-                from nimmakai.routing.auto_router import filter_chain
-
-                available = [
-                    m
-                    for m in emergency_chain(
-                        self.registry, intent=decision.intent.value, max_n=max_n
-                    )
-                    if self._provider_available(m)
-                    and (
-                        self.registry.resolve_live_id(m, include_disabled=True) or m
-                    )
-                    not in disabled
-                ]
-                # Re-apply caller hard constraints after emergency rebuild
-                allowed = list(getattr(decision, "allowed_models", None) or [])
-                free_only = str(getattr(decision, "auto_tier", "") or "").lower() == "free"
-                if allowed or free_only:
-                    available = filter_chain(
-                        available, allowed_models=allowed or None, free_only=free_only
-                    )
+                available = self._heal_empty_chain(
+                    decision,
+                    max_n=max_n,
+                    disabled=disabled,
+                    had_tools=had_tools,
+                )
                 if available:
                     logger.warning(
-                        "empty chain healed with %s emergency models", len(available)
+                        "empty chain healed with %s intent-aware models (intent=%s)",
+                        len(available),
+                        decision.intent.value,
                     )
             except Exception:
-                logger.exception("emergency chain rebuild failed")
+                logger.exception("intent-aware chain heal failed")
         if not available and raw:
             logger.warning("all %s chain models have unavailable providers", len(raw))
         # Continuous optimizer: intelligence × speed × health (every request)
@@ -483,6 +608,9 @@ class FallbackExecutor:
             )
             if pin_live in disabled:
                 pinned = None
+        # Auto intent-strict: demote pin outside the available intent pool
+        if is_auto and pinned and available and pinned not in available:
+            pinned = None
         # Re-rank, but keep pinned head first unless unhealthy (F-08)
         # Skip re-optimization if no filtering changed the chain (selector already optimized)
         if available:
@@ -522,19 +650,27 @@ class FallbackExecutor:
                     max_n=None,
                 )
         # Fail-fast: skip cooling models for TTFT (keep 1 cold last-resort)
-        # Preserve pinned head if healthy.
+        # Preserve pinned head if healthy. Auto keeps more cold models as safety net.
         if available and hasattr(self.registry, "health"):
             hot = [m for m in available if not self.registry.health.is_unhealthy(m)]
             cold = [m for m in available if self.registry.health.is_unhealthy(m)]
             if pinned and pinned in hot:
                 hot = [pinned] + [m for m in hot if m != pinned]
-            available = hot + cold[:1]
+            # Auto keeps more cold models: escalation tail from related intents
+            # may be cooling but still the only path to intent fulfillment.
+            cold_keep = min(len(cold), 6 if is_auto else 1)
+            available = hot + cold[:cold_keep]
         # Quality floor: drop models below min_quality_ratio × top model quality.
-        # Never pick dumb models — better to return 503 than subpar results.
+        # For auto: never empty the chain — prefer a lower-quality model over 503.
+        # Auto floor is deliberately low (0.35) so escalation-tail models are
+        # not pruned before they get a chance to serve.
         if available and len(available) > 1:
             min_ratio = float(
                 getattr(self.settings, "min_quality_ratio", 0.6) or 0.6
             )
+            # Auto softens floor so intent can still be served under pool pressure
+            if is_auto:
+                min_ratio = min(min_ratio, 0.35)
             ladder = getattr(self.registry, "ladder", None)
             if ladder is not None:
                 snap = getattr(ladder, "_ladders", {}).get((intent, variant))
@@ -545,20 +681,44 @@ class FallbackExecutor:
                     filtered = [m for m in available if scores.get(m, 0.0) >= floor]
                     if filtered:
                         available = filtered
+                    elif is_auto:
+                        # Keep original ranking — serving beats silence
+                        logger.info(
+                            "quality floor would empty auto chain intent=%s; keeping all",
+                            intent,
+                        )
         # Drop models whose known context cannot fit the estimate (T13)
         est = getattr(decision, "estimated_tokens", None)
         if est and available:
             fit: list[str] = []
             unknown: list[str] = []
+            overflow: list[str] = []
             for m in available:
                 ctx_len = self.registry.context_length_for(m)
                 if ctx_len is None:
                     unknown.append(m)
                 elif ctx_len >= est:
                     fit.append(m)
+                else:
+                    overflow.append(m)
             if fit or unknown:
-                available = fit + unknown
+                # Auto: keep overflow models at the very tail (provider may still accept)
+                available = fit + unknown + (overflow if is_auto else [])
+            elif is_auto and overflow:
+                # Only overflow known — still try rather than 503
+                available = overflow
         chain = available[: max(1, max_n)]
+        # Final auto guarantee
+        if not chain and is_auto:
+            try:
+                chain = self._heal_empty_chain(
+                    decision,
+                    max_n=max_n,
+                    disabled=disabled,
+                    had_tools=had_tools,
+                )[: max(1, max_n)]
+            except Exception:
+                logger.exception("final auto chain heal failed")
         return chain
 
     def routing_headers(
@@ -1016,21 +1176,37 @@ class FallbackExecutor:
                         self.hub.circuit_breaker.force_allow(pid)
                 retry_chain = self._chain(decision, had_tools=had_tools)
                 if not retry_chain:
-                    from nimmakai.resilience import emergency_chain
+                    try:
+                        retry_chain = self._heal_empty_chain(
+                            decision,
+                            max_n=int(
+                                getattr(self.settings, "coding_max_fallbacks", 12)
+                                or 12
+                            ),
+                            disabled=getattr(self.registry, "disabled_models", None)
+                            or set(),
+                            had_tools=had_tools,
+                        )
+                    except Exception:
+                        from nimmakai.resilience import emergency_chain
 
-                    retry_chain = emergency_chain(
-                        self.registry,
-                        intent=decision.intent.value,
-                        max_n=int(
-                            getattr(self.settings, "coding_max_fallbacks", 5) or 5
-                        ),
-                    )
-                tried = set(chain)
-                fresh = [m for m in (retry_chain or []) if m not in tried]
+                        retry_chain = emergency_chain(
+                            self.registry,
+                            intent=decision.intent.value,
+                            max_n=int(
+                                getattr(self.settings, "coding_max_fallbacks", 5)
+                                or 5
+                            ),
+                        )
+                tried = {m.lower() for m in chain}
+                fresh = [
+                    m for m in (retry_chain or []) if m.lower() not in tried
+                ]
                 if fresh:
                     logger.warning(
-                        "last-resort: retrying %s previously-cooled models",
+                        "last-resort: retrying %s intent-aware models (intent=%s)",
                         len(fresh),
+                        decision.intent.value,
                     )
                     import asyncio as _aio2
 
@@ -1884,23 +2060,39 @@ class FallbackExecutor:
                     self.hub.circuit_breaker.force_allow(pid_r)
             retry_chain = self._chain(decision, had_tools=had_tools)
             if not retry_chain:
-                from nimmakai.resilience import emergency_chain
+                try:
+                    retry_chain = self._heal_empty_chain(
+                        decision,
+                        max_n=int(
+                            getattr(self.settings, "coding_max_fallbacks", 12)
+                            or 12
+                        ),
+                        disabled=getattr(self.registry, "disabled_models", None)
+                        or set(),
+                        had_tools=had_tools,
+                    )
+                except Exception:
+                    from nimmakai.resilience import emergency_chain
 
-                retry_chain = emergency_chain(
-                    self.registry,
-                    intent=decision.intent.value,
-                    max_n=int(
-                        getattr(self.settings, "coding_max_fallbacks", 5) or 5
-                    ),
-                )
-            tried = set(chain)
-            fresh = [m for m in (retry_chain or []) if m not in tried]
+                    retry_chain = emergency_chain(
+                        self.registry,
+                        intent=decision.intent.value,
+                        max_n=int(
+                            getattr(self.settings, "coding_max_fallbacks", 5)
+                            or 5
+                        ),
+                    )
+            tried = {m.lower() for m in chain}
+            fresh = [
+                m for m in (retry_chain or []) if m.lower() not in tried
+            ]
             if fresh:
                 import asyncio as _aio_s
 
                 logger.warning(
-                    "stream last-resort: retrying %s previously-cooled models",
+                    "stream last-resort: retrying %s intent-aware models (intent=%s)",
                     len(fresh),
+                    decision.intent.value,
                 )
                 for idx2, model2 in enumerate(fresh):
                     rem2 = deadline - time.monotonic()

@@ -254,3 +254,162 @@ def pin_model_first(chain: list[str], preferred: str | None) -> list[str]:
             return [chain[i]] + chain[:i] + chain[i + 1 :]
     # Preferred not in pool — put it first anyway (passthrough pin)
     return [preferred] + [m for m in chain if m.lower() != pref]
+
+
+# Related-intent expansion for auto: primary intent first, then closest siblings.
+# Vision / embeddings stay isolated (wrong modality is worse than 503).
+INTENT_EXPANSION: dict[str, tuple[str, ...]] = {
+    "coding_agentic": (
+        "coding_agentic",
+        "reasoning",
+        "long_horizon",
+        "chat_fast",
+    ),
+    "reasoning": (
+        "reasoning",
+        "coding_agentic",
+        "long_horizon",
+        "chat_fast",
+    ),
+    "chat_fast": (
+        "chat_fast",
+        "coding_agentic",
+        "long_horizon",
+        "reasoning",
+    ),
+    "long_horizon": (
+        "long_horizon",
+        "coding_agentic",
+        "reasoning",
+        "chat_fast",
+    ),
+    "vision": ("vision",),
+    "embeddings": ("embeddings",),
+}
+
+
+def intent_expansion_order(intent: str) -> list[str]:
+    """Ordered related intents: primary first, then closest fallbacks."""
+    key = (intent or "coding_agentic").strip().lower()
+    order = INTENT_EXPANSION.get(key)
+    if order:
+        return list(order)
+    # Unknown intent → coding-first general pool
+    return ["coding_agentic", "reasoning", "long_horizon", "chat_fast"]
+
+
+def sticky_fits_intent_pool(
+    preferred: str | None,
+    intent_pool: list[str],
+    *,
+    confidence: float = 1.0,
+    force_intent: bool = False,
+) -> bool:
+    """Whether a session pin should lead for this intent.
+
+    High-confidence / forced-intent auto requests only honor sticky when the
+    pin already sits in the intent-aligned pool. Low confidence keeps sticky
+    for multi-turn continuity.
+    """
+    if not preferred:
+        return False
+    if not intent_pool:
+        return True
+    pref = preferred.lower()
+    bare = pref.rsplit("/", 1)[-1]
+    in_pool = any(
+        m.lower() == pref or m.lower().endswith("/" + bare) for m in intent_pool
+    )
+    if in_pool:
+        return True
+    # Strict intent path: do not pin a model outside the intent pool
+    if force_intent or confidence >= 0.70:
+        return False
+    return True
+
+
+def merge_unique(*chains: list[str]) -> list[str]:
+    """Concatenate chains preserving first-seen order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for chain in chains:
+        for m in chain:
+            if not m:
+                continue
+            key = m.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(m)
+    return out
+
+
+def build_intent_aware_pool(
+    registry: Any,
+    *,
+    primary_intent: str,
+    variant: str = "default",
+    max_n: int = 16,
+    include_related: bool = True,
+    expand_coding_pool: bool = True,
+) -> list[str]:
+    """Build an intent-first candidate pool that prefers never going empty.
+
+    Order:
+      1. Primary intent ladder (best models for this job)
+      2. Related intents (still capable, slightly less ideal)
+      3. Coding candidates when coding-adjacent
+      4. Emergency live catalog slice
+    """
+    primary = (primary_intent or "coding_agentic").strip().lower()
+    intents = (
+        intent_expansion_order(primary)
+        if include_related
+        else [primary]
+    )
+    parts: list[list[str]] = []
+    for intent_key in intents:
+        try:
+            part = list(
+                registry.chain_for_intent(intent_key, variant=variant) or []
+            )
+        except Exception:
+            part = []
+        if part:
+            parts.append(part)
+
+    if (
+        expand_coding_pool
+        and primary in {"coding_agentic", "reasoning", "long_horizon"}
+        and hasattr(registry, "coding_candidates")
+    ):
+        try:
+            parts.append(list(registry.coding_candidates()[:24]))
+        except Exception:
+            pass
+
+    pool = merge_unique(*parts)
+    if pool:
+        return pool[: max(1, max_n)] if max_n else pool
+
+    # Last resort: any active live model, intent-scored when possible
+    try:
+        from nimmakai.resilience import emergency_chain
+
+        emergency = emergency_chain(
+            registry, intent=primary, max_n=max(max_n, 8)
+        )
+        if emergency:
+            return list(emergency)[: max(1, max_n)] if max_n else list(emergency)
+    except Exception:
+        pass
+
+    try:
+        active = sorted(
+            registry.active_live_ids()
+            if hasattr(registry, "active_live_ids")
+            else set(getattr(registry, "live_ids", None) or [])
+        )
+        return active[: max(1, max_n)] if max_n else active
+    except Exception:
+        return []

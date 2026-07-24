@@ -175,6 +175,26 @@ class IntentClassifier:
 
         features = self._extract_features(body, path_l)
         result = self._rules(features, path_l)
+
+        # Auto-routing + weak classification → force coding (T13 override).
+        # When the model is an auto ID and confidence is low, the request
+        # likely carries code signals the rule engine missed (Cursor payloads,
+        # agent loops with implicit tools). Coding as fallback is safe because
+        # the coding chain covers all capability tiers.
+        raw_model = str(body.get("model") or "").lower()
+        from nimmakai.routing.auto_router import is_auto_router_id
+        if (
+            is_auto_router_id(raw_model)
+            and result.confidence < 0.70
+            and result.intent not in (Intent.EMBEDDINGS, Intent.VISION)
+        ):
+            result = self._result(
+                Intent.CODING_AGENTIC,
+                0.65,
+                "auto_weak_classify",
+                features,
+            )
+
         self.stats[result.intent.value] = self.stats.get(result.intent.value, 0) + 1
         return result
 
