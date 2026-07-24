@@ -1049,18 +1049,27 @@ async def _chat_like(
         return JSONResponse(content=guard.pool_exhausted_error(), status_code=503)
     except Exception as exc:
         await guard.after_request(ctx, success=False)
-        _finish_log(entry, status=500, t0=t0, error=str(exc), stream=stream)
+        _finish_log(entry, status=503, t0=t0, error=str(exc), stream=stream)
         _finalize_trace(
             request,
             trace,
             t0=t0,
-            status=500,
+            status=503,
             decision=decision,
             error=str(exc),
             timing=timing,
         )
         logger.exception("chat path failed req=%s", req_id)
-        raise
+        return JSONResponse(
+            content=openai_error(
+                "Upstream request failed — please retry.",
+                code="nimmakai_internal_error",
+                type_="server_error",
+                metadata={"retry_after": 5},
+            ),
+            status_code=503,
+            headers={"Retry-After": "5", "X-Request-Id": req_id},
+        )
     except BaseException as exc:
         # CancelledError etc. — must release the concurrency gate
         with suppress(Exception):

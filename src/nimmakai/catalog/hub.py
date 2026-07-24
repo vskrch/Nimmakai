@@ -197,9 +197,17 @@ class ProviderHub:
         )
         # Circuit breaker: skip providers in open state (NMK-401)
         if not self.circuit_breaker.allow(pid):
-            raise RuntimeError(
-                f"provider '{pid}' circuit is open — skipping model '{model_id}'"
-            )
+            # Last resort: if ALL providers are open, force-allow this one
+            # (better to try and fail than to not try at all)
+            if not self.circuit_breaker.any_closed(self.provider_ids):
+                logger.warning(
+                    "all provider circuits open — force-allowing %s", pid
+                )
+                self.circuit_breaker.force_allow(pid)
+            else:
+                raise RuntimeError(
+                    f"provider '{pid}' circuit is open — skipping model '{model_id}'"
+                )
         rt = self.runtimes.get(pid)
         if rt is not None and rt.config.enabled and rt.config.resolved_keys():
             return rt.upstream, pid, upstream_mid

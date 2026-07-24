@@ -59,6 +59,16 @@ class ProviderCircuitBreaker:
             return True
         return False
 
+    def any_closed(self, provider_ids: set[str] | list[str]) -> bool:
+        """True if at least one provider is NOT in open state."""
+        return any(self.allow(pid) for pid in provider_ids)
+
+    def force_allow(self, provider_id: str) -> None:
+        """Last-resort: force a provider to half-open so it can be tried."""
+        pid = provider_id.lower()
+        self._state[pid] = BreakerState.HALF_OPEN
+        self._last_probe[pid] = time.monotonic()
+
     def fail(self, provider_id: str) -> None:
         """Record a failure from this provider."""
         pid = provider_id.lower()

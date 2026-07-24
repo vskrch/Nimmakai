@@ -573,46 +573,6 @@ class FallbackExecutor:
             h["X-Nimmakai-Provider"] = pid
         return h
 
-    async def _json_one_attempt(
-        self,
-        model: str,
-        path: str,
-        body: dict[str, Any],
-        *,
-        forward_headers: dict[str, str] | None,
-        preferred_key_id: str | None,
-        budget: float,
-    ) -> tuple[int, Any, dict[str, str], Any, str | None, float]:
-        """Single model JSON attempt. Raises on transport error / timeout."""
-        client, upstream_mid = self._client_for(model)
-        attempt_body = {**body, "model": upstream_mid}
-        if hasattr(self.registry, "ladder"):
-            rec = self.registry.ladder.model_recommendations(model)
-            if rec:
-                max_limit = rec.get("max_tokens_limit")
-                if max_limit and not attempt_body.get("max_tokens"):
-                    attempt_body["max_tokens"] = max_limit
-                elif max_limit and attempt_body.get("max_tokens"):
-                    attempt_body["max_tokens"] = min(
-                        attempt_body["max_tokens"], max_limit
-                    )
-        pid = self._provider_id_for(model)
-        import asyncio as _aio
-
-        t0 = time.perf_counter()
-        status, resp_body, headers, key = await _aio.wait_for(
-            client.request_json(
-                "POST",
-                path,
-                json_body=attempt_body,
-                forward_headers=forward_headers,
-                preferred_key_id=preferred_key_id,
-                max_retries=2,
-            ),
-            timeout=budget,
-        )
-        return status, resp_body, headers, key, pid, (time.perf_counter() - t0) * 1000
-
     async def execute_json(
         self,
         path: str,
@@ -660,129 +620,7 @@ class FallbackExecutor:
             getattr(self.settings, "request_deadline_seconds", 180.0) or 180.0
         )
 
-        import asyncio
-
-        # Hedged racing: fire top 2 models concurrently, take first hard 2xx.
-        # ponytail: if both fail or soft-fail, fall through to sequential for the rest.
-        skip: set[str] = set()
-        best_soft: UpstreamResult | None = None
-        if len(chain) >= 2:
-            hedge_budget = max(1.0, min(deadline - time.monotonic(), 45.0))
-            h_tasks: dict[asyncio.Task, int] = {}
-            for i, m in enumerate(chain[:2]):
-                h_tasks[asyncio.create_task(
-                    self._json_one_attempt(
-                        m, path, body,
-                        forward_headers=forward_headers,
-                        preferred_key_id=preferred_key_id,
-                        budget=hedge_budget,
-                    )
-                )] = i
-            h_pending: set[asyncio.Task] = set(h_tasks.keys())
-            h_deadline = time.monotonic() + hedge_budget
-            while h_pending:
-                rem_h = h_deadline - time.monotonic()
-                if rem_h <= 0:
-                    break
-                h_done, h_pending = await asyncio.wait(
-                    h_pending, timeout=rem_h,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                if not h_done:
-                    break
-                for t in h_done:
-                    i = h_tasks[t]
-                    if t.cancelled():
-                        continue
-                    try:
-                        s_h, b_h, h_h, k_h, pid_h, lat_h = t.result()
-                        if 200 <= s_h < 300:
-                            empty_r, tool_ok = _analyze_success_body(
-                                b_h, had_tools=had_tools, path=path
-                            )
-                            if not ((had_tools and tool_ok is False) or empty_r):
-                                for pt in h_pending:
-                                    pt.cancel()
-                                self._circuit_succeed(pid_h)
-                                self._emit_span(self._make_upstream_span(
-                                    model=chain[i],
-                                    t0=time.perf_counter() - lat_h / 1000,
-                                    status=s_h, success=True,
-                                    metadata={"hedged": True},
-                                ))
-                                pt_j = ct_j = cached_j = 0
-                                if isinstance(b_h, dict):
-                                    usage = b_h.get("usage")
-                                    if isinstance(usage, dict):
-                                        pt_j = int(usage.get("prompt_tokens") or 0)
-                                        ct_j = int(usage.get("completion_tokens") or 0)
-                                        cached_j = int(
-                                            usage.get("cached_tokens")
-                                            or (usage.get("prompt_tokens_details") or {}).get(
-                                                "cached_tokens", 0
-                                            ) or 0
-                                        )
-                                self.registry.record_outcome(
-                                    chain[i], k_h.key_id if k_h else None,
-                                    success=True, latency=lat_h / 1000,
-                                    status_code=s_h, intent=decision.intent.value,
-                                    empty_reply=empty_r, had_tools=had_tools,
-                                    tool_ok=tool_ok,
-                                )
-                                self.stats.record(decision.intent.value, chain[i], advanced=i > 0)
-                                self.stats.record_tokens(
-                                    chain[i], k_h.key_id if k_h else None, pt_j, ct_j,
-                                )
-                                if isinstance(b_h, dict) and "model" in b_h:
-                                    b_h = {**b_h, "model": chain[i]}
-                                return UpstreamResult(
-                                    status_code=s_h, body=b_h, headers=h_h,
-                                    key=k_h, model=chain[i], fallback_index=i,
-                                    decision=decision, prompt_tokens=pt_j,
-                                    completion_tokens=ct_j, cached_tokens=cached_j,
-                                    upstream_ms=lat_h, provider_id=pid_h,
-                                )
-                        # Failed or soft-fail — record and keep checking
-                        if 200 <= s_h < 300:
-                            # Soft 2xx — remember as fallback if no hard success
-                            self._circuit_succeed(pid_h)
-                            if isinstance(b_h, dict) and "model" in b_h:
-                                b_h = {**b_h, "model": chain[i]}
-                            best_soft = UpstreamResult(
-                                status_code=s_h, body=b_h, headers=h_h,
-                                key=k_h, model=chain[i], fallback_index=i,
-                                decision=decision, upstream_ms=lat_h,
-                                provider_id=pid_h,
-                            )
-                        else:
-                            self._circuit_fail(pid_h)
-                            from nimmakai.compat import wrap_upstream_error
-
-                            last = UpstreamResult(
-                                status_code=s_h,
-                                body=wrap_upstream_error(b_h, status=s_h),
-                                headers=h_h, key=k_h, model=chain[i],
-                                fallback_index=i, decision=decision,
-                                upstream_ms=lat_h, provider_id=pid_h,
-                            )
-                        self.registry.record_outcome(
-                            chain[i], k_h.key_id if k_h else None,
-                            success=200 <= s_h < 300, status_code=s_h,
-                            intent=decision.intent.value,
-                        )
-                    except (Exception, asyncio.CancelledError):
-                        self._circuit_fail(self._provider_id_for(chain[i]))
-                        self.registry.record_outcome(
-                            chain[i], None, success=False, status_code=503,
-                            intent=decision.intent.value,
-                        )
-            for pt in h_pending:
-                pt.cancel()
-            skip = {chain[0], chain[1]}
-
         for idx, model in enumerate(chain):
-            if model in skip:
-                continue
             remaining = deadline - time.monotonic()
             if remaining < 3.0 and idx > 0:
                 return UpstreamResult(
@@ -1147,14 +985,159 @@ class FallbackExecutor:
 
         assert last is not None
         if last.status_code >= 400:
-            if best_soft is not None:
-                self.stats.record(
-                    decision.intent.value, best_soft.model, advanced=True
-                )
-                return best_soft
-            if _is_non_retryable_client_error(last.status_code, last.body):
-                self.stats.record(decision.intent.value, last.model, advanced=False)
-                return last
+            # ── Last-resort: clear cooldowns, force-allow providers, retry fresh models ──
+            remaining = deadline - time.monotonic()
+            if remaining >= 5.0:
+                if hasattr(self.registry, "health"):
+                    for h in self.registry.health._by_model.values():
+                        h.cooldown_until = 0.0
+                if self.hub is not None:
+                    for pid in self.hub.provider_ids:
+                        self.hub.circuit_breaker.force_allow(pid)
+                retry_chain = self._chain(decision, had_tools=had_tools)
+                if not retry_chain:
+                    from nimmakai.resilience import emergency_coding_chain
+
+                    retry_chain = emergency_coding_chain(
+                        self.registry,
+                        max_n=int(
+                            getattr(self.settings, "coding_max_fallbacks", 12) or 12
+                        ),
+                    )
+                tried = set(chain)
+                fresh = [m for m in (retry_chain or []) if m not in tried]
+                if fresh:
+                    logger.warning(
+                        "last-resort: retrying %s previously-cooled models",
+                        len(fresh),
+                    )
+                    import asyncio as _aio2
+
+                    from nimmakai.compat import wrap_upstream_error as _wue
+
+                    for idx2, model2 in enumerate(fresh):
+                        rem2 = deadline - time.monotonic()
+                        if rem2 < 3.0:
+                            break
+                        try:
+                            client2, upstream_mid2 = self._client_for(model2)
+                        except RuntimeError:
+                            continue
+                        attempt_body2 = {**body, "model": upstream_mid2}
+                        if hasattr(self.registry, "ladder"):
+                            rec = self.registry.ladder.model_recommendations(model2)
+                            if rec:
+                                ml = rec.get("max_tokens_limit")
+                                if ml and not attempt_body2.get("max_tokens"):
+                                    attempt_body2["max_tokens"] = ml
+                                elif ml and attempt_body2.get("max_tokens"):
+                                    attempt_body2["max_tokens"] = min(
+                                        attempt_body2["max_tokens"], ml
+                                    )
+                        pid2 = self._provider_id_for(model2)
+                        t2 = time.perf_counter()
+                        try:
+                            budget2 = max(1.0, min(rem2, 45.0))
+                            s2, rb2, hd2, k2 = await _aio2.wait_for(
+                                client2.request_json(
+                                    "POST",
+                                    path,
+                                    json_body=attempt_body2,
+                                    forward_headers=forward_headers,
+                                    preferred_key_id=preferred_key_id,
+                                    max_retries=2,
+                                ),
+                                timeout=budget2,
+                            )
+                        except TimeoutError:
+                            self._circuit_fail(pid2)
+                            self.registry.record_outcome(
+                                model2, None, success=False,
+                                status_code=504, intent=decision.intent.value,
+                            )
+                            continue
+                        except (RuntimeError, httpx.HTTPError, OSError):
+                            self._circuit_fail(pid2)
+                            self.registry.record_outcome(
+                                model2, None, success=False,
+                                status_code=503, intent=decision.intent.value,
+                            )
+                            continue
+
+                        lat2 = (time.perf_counter() - t2) * 1000
+                        if 200 <= s2 < 300:
+                            self._circuit_succeed(pid2)
+                            empty2, tool_ok2 = _analyze_success_body(
+                                rb2, had_tools=had_tools, path=path
+                            )
+                            if empty2 or (had_tools and tool_ok2 is False):
+                                self.registry.record_outcome(
+                                    model2, k2.key_id if k2 else None,
+                                    success=False, status_code=s2,
+                                    intent=decision.intent.value,
+                                    empty_reply=empty2, had_tools=had_tools,
+                                    tool_ok=tool_ok2,
+                                )
+                                last = UpstreamResult(
+                                    status_code=s2, body=rb2, headers=hd2,
+                                    key=k2, model=model2,
+                                    fallback_index=len(chain) + idx2,
+                                    decision=decision, upstream_ms=lat2,
+                                    provider_id=pid2,
+                                )
+                                continue
+                            pt2 = ct2 = cached2 = 0
+                            if isinstance(rb2, dict):
+                                usage2 = rb2.get("usage")
+                                if isinstance(usage2, dict):
+                                    pt2 = int(usage2.get("prompt_tokens") or 0)
+                                    ct2 = int(usage2.get("completion_tokens") or 0)
+                                    cached2 = int(
+                                        usage2.get("cached_tokens")
+                                        or (usage2.get("prompt_tokens_details") or {}).get(
+                                            "cached_tokens", 0
+                                        )
+                                        or 0
+                                    )
+                            self.registry.record_outcome(
+                                model2, k2.key_id if k2 else None,
+                                success=True, latency=lat2 / 1000,
+                                status_code=s2, intent=decision.intent.value,
+                                empty_reply=empty2, had_tools=had_tools,
+                                tool_ok=tool_ok2,
+                            )
+                            self.stats.record(
+                                decision.intent.value, model2, advanced=True
+                            )
+                            self.stats.record_tokens(
+                                model2, k2.key_id if k2 else None, pt2, ct2
+                            )
+                            if isinstance(rb2, dict) and "model" in rb2:
+                                rb2 = {**rb2, "model": model2}
+                            return UpstreamResult(
+                                status_code=s2, body=rb2, headers=hd2,
+                                key=k2, model=model2,
+                                fallback_index=len(chain) + idx2,
+                                decision=decision, prompt_tokens=pt2,
+                                completion_tokens=ct2, cached_tokens=cached2,
+                                upstream_ms=lat2, provider_id=pid2,
+                            )
+                        # Failed — record and try next fresh model
+                        self._circuit_fail(pid2)
+                        self.registry.record_outcome(
+                            model2, k2.key_id if k2 else None,
+                            success=False, status_code=s2,
+                            intent=decision.intent.value,
+                        )
+                        last = UpstreamResult(
+                            status_code=s2,
+                            body=_wue(rb2, status=s2),
+                            headers=hd2, key=k2, model=model2,
+                            fallback_index=len(chain) + idx2,
+                            decision=decision, upstream_ms=lat2,
+                            provider_id=pid2,
+                        )
+
             last = UpstreamResult(
                 status_code=503,
                 body={
@@ -1868,6 +1851,376 @@ class FallbackExecutor:
                 decision=decision,
                 provider_id=pid,
             )
+
+        # ── Last-resort: clear cooldowns, force-allow providers, retry fresh models ──
+        remaining = deadline - time.monotonic()
+        if remaining >= 5.0 and last_status >= 400:
+            if hasattr(self.registry, "health"):
+                for h in self.registry.health._by_model.values():
+                    h.cooldown_until = 0.0
+            if self.hub is not None:
+                for pid_r in self.hub.provider_ids:
+                    self.hub.circuit_breaker.force_allow(pid_r)
+            retry_chain = self._chain(decision, had_tools=had_tools)
+            if not retry_chain:
+                from nimmakai.resilience import emergency_coding_chain
+
+                retry_chain = emergency_coding_chain(
+                    self.registry,
+                    max_n=int(
+                        getattr(self.settings, "coding_max_fallbacks", 12) or 12
+                    ),
+                )
+            tried = set(chain)
+            fresh = [m for m in (retry_chain or []) if m not in tried]
+            if fresh:
+                import asyncio as _aio_s
+
+                logger.warning(
+                    "stream last-resort: retrying %s previously-cooled models",
+                    len(fresh),
+                )
+                for idx2, model2 in enumerate(fresh):
+                    rem2 = deadline - time.monotonic()
+                    if rem2 < 3.0:
+                        saw_deadline = True
+                        break
+                    pid2 = self._provider_id_for(model2)
+                    try:
+                        client2, upstream_mid2 = self._client_for(model2)
+                    except RuntimeError:
+                        self._circuit_fail(pid2)
+                        continue
+                    attempt_body2 = {**body, "model": upstream_mid2}
+                    t2 = time.perf_counter()
+                    try:
+                        budget2 = max(1.0, min(rem2, 45.0))
+                        s2, byte_iter2, hd2, k2 = await _aio_s.wait_for(
+                            client2.stream(
+                                "POST", path,
+                                json_body=attempt_body2,
+                                forward_headers=forward_headers,
+                                preferred_key_id=preferred_key_id,
+                                max_retries=2,
+                            ),
+                            timeout=budget2,
+                        )
+                    except (TimeoutError, RuntimeError, httpx.HTTPError, OSError):
+                        self._circuit_fail(pid2)
+                        self.registry.record_outcome(
+                            model2, None, success=False,
+                            status_code=503, intent=decision.intent.value,
+                        )
+                        continue
+
+                    if 200 <= s2 < 300:
+                        ct2 = (
+                            hd2.get("content-type") or hd2.get("Content-Type") or ""
+                        ).lower()
+                        if "application/json" in ct2 and "text/event-stream" not in ct2:
+                            raw_parts: list[bytes] = []
+                            try:
+                                async for chunk in byte_iter2:
+                                    raw_parts.append(chunk)
+                                    if sum(len(c) for c in raw_parts) > 2_000_000:
+                                        break
+                            except Exception:
+                                pass
+                            if hasattr(byte_iter2, "aclose"):
+                                with suppress(Exception):
+                                    await byte_iter2.aclose()
+                            raw = b"".join(raw_parts)
+                            try:
+                                parsed = _json.loads(raw.decode("utf-8", errors="replace"))
+                            except Exception:
+                                parsed = raw.decode("utf-8", errors="replace")
+                            sse_payload = json_body_to_sse(
+                                parsed, routed_model=model2
+                            )
+                            self._circuit_succeed(pid2)
+                            self.stats.record(
+                                decision.intent.value, model2, advanced=True
+                            )
+
+                            async def json_as_sse2(
+                                p: bytes = sse_payload,
+                            ) -> AsyncIterator[bytes]:
+                                yield p
+
+                            return StreamResult(
+                                status_code=200,
+                                byte_iter=json_as_sse2(),
+                                headers={
+                                    **hd2, "content-type": "text/event-stream"
+                                },
+                                key=k2, model=model2,
+                                fallback_index=len(chain) + idx2,
+                                decision=decision, provider_id=pid2,
+                            )
+
+                        ttft2 = float(
+                            getattr(
+                                self.settings, "stream_ttft_timeout_seconds", 12.0
+                            )
+                            or 12.0
+                        )
+                        idle2 = float(
+                            getattr(
+                                self.settings, "stream_idle_timeout_seconds", 180.0
+                            )
+                            or 180.0
+                        )
+                        t_stream2 = time.monotonic()
+                        try:
+                            first_chunk2 = await _aio_s.wait_for(
+                                anext(byte_iter2), timeout=ttft2
+                            )
+                        except (StopAsyncIteration, TimeoutError, Exception):
+                            self._circuit_fail(pid2)
+                            if hasattr(byte_iter2, "aclose"):
+                                with suppress(Exception):
+                                    await byte_iter2.aclose()
+                            self.registry.record_outcome(
+                                model2, k2.key_id if k2 else None,
+                                success=False, status_code=504,
+                                intent=decision.intent.value,
+                            )
+                            continue
+
+                        # Stream opened successfully — return it
+                        self._circuit_succeed(pid2)
+                        ttft_lat2 = max(0.01, time.monotonic() - t_stream2)
+                        self.registry.record_outcome(
+                            model2, k2.key_id if k2 else None,
+                            success=True, latency=ttft_lat2,
+                            status_code=s2, intent=decision.intent.value,
+                            had_tools=had_tools,
+                        )
+                        self.stats.record(
+                            decision.intent.value, model2, advanced=True
+                        )
+                        bound_model2 = model2
+                        bound_key_id2 = k2.key_id if k2 else None
+                        bound_idle2 = idle2
+                        bound_t02 = t_stream2
+                        bound_ttft_ms2 = ttft_lat2 * 1000
+                        usage_bag2: dict[str, int] = {
+                            "prompt_tokens": 0,
+                            "completion_tokens": 0,
+                            "cached_tokens": 0,
+                        }
+                        result_holder2: dict[str, StreamResult | None] = {
+                            "r": None
+                        }
+
+                        async def robust_iter2(
+                            first: bytes,
+                            rest: AsyncIterator[bytes],
+                            *,
+                            mid: str = bound_model2,
+                            kid: str | None = bound_key_id2,
+                            idle_s: float = bound_idle2,
+                            t0: float = bound_t02,
+                            usage: dict[str, int] = usage_bag2,
+                        ) -> AsyncIterator[bytes]:
+                            total_tokens = 0
+                            _BP = 32
+                            _bpq: _aio_s.Queue[bytes | None] = _aio_s.Queue(
+                                maxsize=_BP
+                            )
+                            _up_done = False
+                            _up_err: Exception | None = None
+
+                            async def _prod() -> None:
+                                nonlocal _up_done, _up_err, total_tokens
+                                try:
+                                    async for c in rest:
+                                        _scan2(c)
+                                        await _bpq.put(c)
+                                except Exception as e:
+                                    _up_err = e
+                                finally:
+                                    _up_done = True
+                                    with suppress(Exception):
+                                        await _bpq.put(None)
+
+                            def _scan2(c: bytes) -> None:
+                                nonlocal total_tokens
+                                if b'"usage"' in c or b"completion_tokens" in c:
+                                    import re
+
+                                    p = re.search(
+                                        rb'"prompt_tokens"\s*:\s*(\d+)', c
+                                    )
+                                    ct = re.search(
+                                        rb'"completion_tokens"\s*:\s*(\d+)', c
+                                    )
+                                    if p and ct:
+                                        pt_i, ct_i = int(p.group(1)), int(
+                                            ct.group(1)
+                                        )
+                                        total_tokens = pt_i + ct_i
+                                        usage["prompt_tokens"] = pt_i
+                                        usage["completion_tokens"] = ct_i
+                                        self.stats.record_tokens(
+                                            mid, kid, pt_i, ct_i
+                                        )
+
+                            prod_task = _aio_s.create_task(_prod())
+                            try:
+                                if first:
+                                    _scan2(first)
+                                    yield first
+                                while True:
+                                    try:
+                                        chunk = await _aio_s.wait_for(
+                                            _bpq.get(), timeout=idle_s
+                                        )
+                                    except TimeoutError:
+                                        prod_task.cancel()
+                                        with suppress(Exception):
+                                            await prod_task
+                                        if hasattr(rest, "aclose"):
+                                            with suppress(Exception):
+                                                await rest.aclose()
+                                        elapsed = max(
+                                            0.01, time.monotonic() - t0
+                                        )
+                                        self.registry.record_outcome(
+                                            mid, kid, success=False,
+                                            latency=elapsed,
+                                            tokens=total_tokens or None,
+                                            status_code=504,
+                                        )
+                                        held = result_holder2["r"]
+                                        if held is not None:
+                                            held.stream_failed = True
+                                        self._circuit_fail(pid2)
+                                        finish = {
+                                            "id": "nimmakai-stream-error",
+                                            "object": "chat.completion.chunk",
+                                            "choices": [
+                                                {
+                                                    "index": 0,
+                                                    "delta": {},
+                                                    "finish_reason": "error",
+                                                }
+                                            ],
+                                        }
+                                        err_evt = openai_error(
+                                            f"Stream idle timeout after {idle_s:.0f}s",
+                                            code="upstream_stream_idle",
+                                            type_="server_error",
+                                        )
+                                        yield (
+                                            b"data: "
+                                            + _json.dumps(finish).encode("utf-8")
+                                            + b"\n\n"
+                                        )
+                                        yield (
+                                            b"data: "
+                                            + _json.dumps(err_evt).encode("utf-8")
+                                            + b"\n\n"
+                                        )
+                                        yield b"data: [DONE]\n\n"
+                                        return
+                                    if chunk is None:
+                                        break
+                                    yield chunk
+                                if _up_err and not isinstance(
+                                    _up_err, StopAsyncIteration
+                                ):
+                                    raise _up_err
+                                elapsed = max(0.01, time.monotonic() - t0)
+                                if total_tokens > 0:
+                                    self.registry.record_outcome(
+                                        mid, kid, success=True,
+                                        latency=elapsed, tokens=total_tokens,
+                                        status_code=200,
+                                    )
+                                return
+                            except (_aio_s.CancelledError, GeneratorExit):
+                                prod_task.cancel()
+                                with suppress(Exception):
+                                    await prod_task
+                                raise
+                            except Exception as e:
+                                prod_task.cancel()
+                                with suppress(Exception):
+                                    await prod_task
+                                held = result_holder2["r"]
+                                if held is not None:
+                                    held.stream_failed = True
+                                self._circuit_fail(pid2)
+                                try:
+                                    finish = {
+                                        "id": "nimmakai-stream-error",
+                                        "object": "chat.completion.chunk",
+                                        "choices": [
+                                            {
+                                                "index": 0,
+                                                "delta": {},
+                                                "finish_reason": "error",
+                                            }
+                                        ],
+                                    }
+                                    err_evt = openai_error(
+                                        str(e)[:500],
+                                        code="upstream_stream_error",
+                                        type_="server_error",
+                                    )
+                                    yield (
+                                        b"data: "
+                                        + _json.dumps(finish).encode("utf-8")
+                                        + b"\n\n"
+                                    )
+                                    yield (
+                                        b"data: "
+                                        + _json.dumps(err_evt).encode("utf-8")
+                                        + b"\n\n"
+                                    )
+                                    yield b"data: [DONE]\n\n"
+                                except Exception:
+                                    pass
+                                return
+                            finally:
+                                prod_task.cancel()
+                                with suppress(Exception):
+                                    await prod_task
+
+                        stream_result2 = StreamResult(
+                            status_code=s2,
+                            byte_iter=robust_iter2(first_chunk2, byte_iter2),
+                            headers=hd2,
+                            key=k2,
+                            model=model2,
+                            fallback_index=len(chain) + idx2,
+                            decision=decision,
+                            upstream_ttft_ms=bound_ttft_ms2,
+                            usage=usage_bag2,
+                            provider_id=pid2,
+                            stream_failed=False,
+                        )
+                        result_holder2["r"] = stream_result2
+                        return stream_result2
+
+                    # Non-2xx stream response
+                    if s2 >= 500:
+                        self._circuit_fail(pid2)
+                    err_raw2 = b""
+                    try:
+                        async for chunk in byte_iter2:
+                            err_raw2 += chunk
+                            if len(err_raw2) > 8192:
+                                break
+                    except Exception:
+                        pass
+                    self.registry.record_outcome(
+                        model2, k2.key_id if k2 else None,
+                        success=False, status_code=s2,
+                        intent=decision.intent.value,
+                    )
+                    last_status, last_model, last_pid = s2, model2, pid2
 
         # No stream successfully relayed — never return 2xx with empty body (F-05)
         if saw_deadline:
