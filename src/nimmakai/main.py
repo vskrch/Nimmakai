@@ -56,23 +56,28 @@ def _init_accounts(app: FastAPI, settings: Settings) -> None:
 
 
 def _init_analytics(app: FastAPI, settings: Settings) -> None:
-    """Start analytics writer / retention / event bus when enabled."""
-    app.state.event_bus = None
+    """Start analytics writer / retention / event bus when enabled.
+
+    EventBus is always created so Live Feed can stream request-log events
+    even when full analytics persistence is disabled.
+    """
+    from nimmakai.analytics.events import EventBus
+
+    app.state.event_bus = EventBus()
     app.state.trace_writer = None
     app.state.analytics_store = None
     app.state.retention_manager = None
     if not getattr(settings, "analytics_enabled", True):
-        logger.info("analytics disabled")
+        logger.info("analytics persistence disabled (live request feed still available)")
         return
     try:
-        from nimmakai.analytics.events import EventBus
         from nimmakai.analytics.retention import RetentionManager
         from nimmakai.analytics.store import AnalyticsStore
         from nimmakai.analytics.writer import TraceWriter
         from nimmakai.catalog.db import get_db
 
         db = get_db(settings.sqlite_path)
-        bus = EventBus()
+        bus = app.state.event_bus
         store = AnalyticsStore(db)
 
         on_flush = None
@@ -114,12 +119,47 @@ def _init_analytics(app: FastAPI, settings: Settings) -> None:
                 getattr(settings, "analytics_rollup_retention_days", 90) or 90
             ),
         )
-        app.state.event_bus = bus
         app.state.trace_writer = writer
         app.state.analytics_store = store
         app.state.retention_manager = retention
     except Exception:
-        logger.exception("analytics init failed — continuing without analytics")
+        logger.exception("analytics init failed — continuing without analytics persistence")
+
+
+def _configure_request_logs(app: FastAPI, settings: Settings) -> None:
+    """Bind durable request log file next to SQLite + live SSE publisher."""
+    from nimmakai.catalog.db import get_db
+    from nimmakai.logging_setup import default_log_file_path, request_logs
+
+    try:
+        db = get_db(settings.sqlite_path)
+    except Exception:
+        db = None
+        logger.exception("request log: sqlite unavailable for meta flag")
+
+    def _on_add(entry: Any) -> None:
+        bus = getattr(app.state, "event_bus", None)
+        if bus is None:
+            return
+        try:
+            bus.publish("request", entry.to_dict())
+        except Exception:
+            logger.debug("request log live publish failed", exc_info=True)
+
+    request_logs.configure(
+        max_entries=max(100, int(settings.request_log_size)),
+        file_path=default_log_file_path(settings.sqlite_path),
+        enabled=bool(getattr(settings, "request_file_logging", True)),
+        db=db,
+        on_add=_on_add,
+    )
+    st = request_logs.status()
+    logger.info(
+        "request file logging enabled=%s path=%s max=%s",
+        st.get("enabled"),
+        st.get("file_path"),
+        st.get("max_entries"),
+    )
 
 
 async def _start_analytics(app: FastAPI) -> None:
@@ -143,7 +183,8 @@ async def _stop_analytics(app: FastAPI) -> None:
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     setup_logging(settings.log_level)
-    request_logs.max_entries = max(50, int(settings.request_log_size))
+    # max_entries finalized in _configure_request_logs during lifespan
+    request_logs.configure(max_entries=max(100, int(settings.request_log_size)))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -375,6 +416,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         _init_accounts(app, settings)
         _init_analytics(app, settings)
+        _configure_request_logs(app, settings)
         await _start_analytics(app)
 
         logger.info(

@@ -46,7 +46,8 @@ class Settings(BaseSettings):
     # long idle once first token arrives (Cursor/agent safe).
     stream_ttft_timeout_seconds: float = 12.0
     stream_idle_timeout_seconds: float = 180.0
-    request_log_size: int = 200
+    request_log_size: int = 20000
+    request_file_logging: bool = True
     # Adaptive: always prefer currently responding models at request time
     adaptive_routing: bool = True
 

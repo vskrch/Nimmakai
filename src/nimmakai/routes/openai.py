@@ -500,6 +500,7 @@ def _finish_log(
     stream: bool | None = None,
     error: str | None = None,
     model_requested: str | None = None,
+    user_id: str | None = None,
 ) -> None:
     entry.status = status
     entry.duration_ms = (time.perf_counter() - t0) * 1000
@@ -519,6 +520,8 @@ def _finish_log(
         entry.error = error
     if model_requested is not None:
         entry.model_requested = model_requested
+    if user_id is not None:
+        entry.user_id = user_id
     request_logs.add(entry)
     log_request_line(entry)
 
@@ -593,6 +596,9 @@ async def _chat_like(
             path=upstream_path,
             auto_opts=auto_opts_raw,
         )
+        auth = getattr(request.state, "auth", None)
+        if auth is not None and getattr(auth, "user_id", None):
+            entry.user_id = auth.user_id
     except Exception as exc:
         # Auth HTTPException propagates via FastAPI — re-raise
         from fastapi import HTTPException

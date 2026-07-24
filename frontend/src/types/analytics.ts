@@ -110,7 +110,10 @@ export interface BreakdownItem {
 export interface LiveTraceEvent {
   type: string
   trace_id?: string
+  id?: string
   created_at?: number
+  ts?: number
+  path?: string
   model_routed?: string | null
   model_requested?: string | null
   intent?: string | null
@@ -122,6 +125,7 @@ export interface LiveTraceEvent {
   fallback_index?: number
   estimated_cost_usd?: number
   error_message?: string | null
+  error?: string | null
   is_stream?: boolean
 }
 

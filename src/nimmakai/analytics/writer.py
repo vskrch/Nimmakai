@@ -103,6 +103,13 @@ class TraceWriter:
                 logger.warning(
                     "analytics queue full — dropped %s traces", self._dropped
                 )
+            return
+        # Immediate live publish (don't wait for SQLite flush)
+        if self._event_bus is not None:
+            try:
+                self._event_bus.publish("trace", trace.to_summary())
+            except Exception:
+                logger.debug("immediate trace publish failed", exc_info=True)
 
     async def _flush_loop(self) -> None:
         while not self._stopped:
@@ -174,10 +181,8 @@ class TraceWriter:
                 raise
 
     def _publish_batch(self, batch: list[TraceRecord]) -> None:
-        if self._event_bus is None:
-            return
-        for trace in batch:
-            self._event_bus.publish("trace", trace.to_summary())
+        # Live SSE is published immediately in enqueue(); flush hooks still run.
+        return
 
     def stats(self) -> dict[str, Any]:
         return {

@@ -167,6 +167,7 @@ export function useAnalyticsSSE(enabled = true) {
   const [events, setEvents] = useState<LiveTraceEvent[]>([])
   const [paused, setPaused] = useState(false)
   const [authError, setAuthError] = useState(false)
+  const [epoch, setEpoch] = useState(0)
   const buffer = useRef<LiveTraceEvent[]>([])
   const pausedRef = useRef(false)
   const errorCount = useRef(0)
@@ -184,37 +185,46 @@ export function useAnalyticsSSE(enabled = true) {
     }
     es.onmessage = (e) => {
       try {
-        const payload = JSON.parse(e.data) as LiveTraceEvent
-        if (payload.type !== 'trace') return
+        const payload = JSON.parse(e.data) as LiveTraceEvent & { ts?: number; id?: string; path?: string; error?: string }
+        // Accept immediate request-log events and analytics traces
+        if (payload.type !== 'trace' && payload.type !== 'request') return
+        // Normalize request events into the feed shape
+        if (payload.type === 'request') {
+          payload.created_at = payload.created_at ?? payload.ts
+          payload.success = payload.success ?? !(payload.status_code && payload.status_code >= 400)
+          payload.error_message = payload.error_message ?? payload.error ?? null
+        }
         if (pausedRef.current) {
-          buffer.current = [payload, ...buffer.current].slice(0, 100)
+          buffer.current = [payload, ...buffer.current].slice(0, 200)
           return
         }
-        setEvents(prev => [payload, ...prev].slice(0, 100))
+        setEvents(prev => [payload, ...prev].slice(0, 200))
       } catch { /* ignore */ }
     }
     es.onerror = () => {
       setConnected(false)
       errorCount.current += 1
-      // EventSource auto-retries; after repeated failures surface reconnect help
-      // without claiming a specific auth failure (network blips are common).
-      if (errorCount.current >= 5) {
-        setAuthError(true)
-        es.close()
-      }
+      // EventSource auto-reconnects; only surface a warning, never kill the stream.
+      if (errorCount.current >= 3) setAuthError(true)
     }
     return () => { es.close(); setConnected(false) }
-  }, [enabled])
+  }, [enabled, epoch])
+
+  const reconnect = useCallback(() => {
+    setAuthError(false)
+    errorCount.current = 0
+    setEpoch(n => n + 1)
+  }, [])
 
   const togglePause = useCallback(() => {
     setPaused(p => {
       if (p && buffer.current.length) {
-        setEvents(prev => [...buffer.current, ...prev].slice(0, 100))
+        setEvents(prev => [...buffer.current, ...prev].slice(0, 200))
         buffer.current = []
       }
       return !p
     })
   }, [])
 
-  return { connected, events, paused, togglePause, setEvents, authError }
+  return { connected, events, paused, togglePause, setEvents, authError, reconnect }
 }

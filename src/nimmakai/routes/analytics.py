@@ -538,10 +538,7 @@ async def analytics_events(request: Request) -> StreamingResponse | JSONResponse
         )
 
     if not getattr(settings, "analytics_enabled", True):
-        return JSONResponse(
-            {"error": {"message": "Analytics disabled", "code": "analytics_disabled"}},
-            status_code=503,
-        )
+        pass  # persistence may be off; EventBus still serves live request feed
 
     bus = getattr(request.app.state, "event_bus", None)
     if bus is None:

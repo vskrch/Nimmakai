@@ -82,23 +82,56 @@ async def admin_logs(request: Request) -> JSONResponse:
 
     limit = 50
     with suppress(ValueError):
-        limit = min(200, max(1, int(request.query_params.get("limit") or 50)))
+        limit = min(500, max(1, int(request.query_params.get("limit") or 50)))
     errors_only = request.query_params.get("errors") in {"1", "true", "yes"}
     path_prefix = request.query_params.get("path") or None
+    st = request_logs.status()
     return JSONResponse(
         {
             "count": limit,
             "errors_only": errors_only,
             "path_prefix": path_prefix,
+            "logging": st,
             "entries": request_logs.list(
                 limit=limit, path_prefix=path_prefix, errors_only=errors_only
             ),
             "hint": (
-                "Heroku full logs: heroku logs -a your-nimmakai -t. "
-                "Each chat line includes req=… routed=… intent=… stream=…"
+                f"Durable file (last {st.get('max_entries')} requests): "
+                f"{st.get('file_path') or 'not configured'}. "
+                "Toggle via PUT /admin/request-logging."
             ),
         }
     )
+
+
+@router.get("/admin/request-logging")
+async def get_request_logging(request: Request) -> JSONResponse:
+    """Status of durable request file logging."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    from nimmakai.logging_setup import request_logs
+
+    return JSONResponse(request_logs.status())
+
+
+@router.put("/admin/request-logging")
+async def put_request_logging(request: Request) -> JSONResponse:
+    """Enable/disable writing requests to request_logs.txt beside the DB."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    from nimmakai.logging_setup import request_logs
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if "enabled" not in body:
+        return JSONResponse(
+            {"error": {"message": "enabled required", "code": "invalid_request"}},
+            status_code=400,
+        )
+    request_logs.set_enabled(bool(body.get("enabled")))
+    return JSONResponse({"ok": True, **request_logs.status()})
 
 
 @router.get("/health")
