@@ -119,7 +119,7 @@ export interface CatalogResponse {
 }
 
 export interface ModelHealthData {
-  ewma_latency_s: number
+  ewma_latency_ms: number
   ewma_tok_per_s: number
   success_count: number
   error_count: number
@@ -168,7 +168,7 @@ export interface ProviderHealth {
 
 export interface ModelHealthDetail {
   ok: boolean
-  ewma_latency_s: number
+  ewma_latency_ms: number
   ewma_tok_per_s: number
   success_count: number
   error_count: number

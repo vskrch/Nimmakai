@@ -72,7 +72,7 @@ export default function HealthPage() {
                             <Badge variant={ok ? 'ok' : 'err'}>{ok ? 'Healthy' : m.cooldown ? 'Cooldown' : 'Unhealthy'}</Badge>
                           </td>
                           <td className="px-6 py-3 text-[12px] text-zinc-400">{m.ewma_tok_per_s || '—'}</td>
-                          <td className="px-6 py-3 text-[12px] text-zinc-400">{m.ewma_latency_s != null ? `${m.ewma_latency_s}s` : '—'}</td>
+                          <td className="px-6 py-3 text-[12px] text-zinc-400">{m.ewma_latency_ms != null ? `${m.ewma_latency_ms}ms` : '—'}</td>
                           <td className={`px-6 py-3 text-[12px] ${m.error_rate > 0.3 ? 'text-red-400' : 'text-zinc-400'}`}>
                             {m.error_rate != null ? `${(m.error_rate * 100).toFixed(1)}%` : '—'}
                           </td>

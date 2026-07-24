@@ -1323,7 +1323,7 @@ async function loadHealth() {
               <td style="font-size:12px;padding:8px 20px">${esc(mid.split('/').slice(1).join('/'))}</td>
               <td><span class="badge ${ok ? 'ok' : 'err'}" style="font-size:11px">${ok ? 'Healthy' : m.cooldown ? 'Cooldown' : 'Unhealthy'}</span></td>
               <td style="font-size:12px;color:var(--dim)">${m.ewma_tok_per_s || '—'}</td>
-              <td style="font-size:12px;color:var(--dim)">${m.ewma_latency_s != null ? m.ewma_latency_s + 's' : '—'}</td>
+              <td style="font-size:12px;color:var(--dim)">${m.ewma_latency_ms != null ? m.ewma_latency_ms + 'ms' : '—'}</td>
               <td style="font-size:12px;color:${m.error_rate > 0.3 ? 'var(--red)' : 'var(--dim)'}">${m.error_rate != null ? (m.error_rate * 100).toFixed(1) + '%' : '—'}</td>
             </tr>`;
           }).join('')}</tbody>

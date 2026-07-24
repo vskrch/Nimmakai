@@ -642,7 +642,7 @@ class FallbackExecutor:
 
         for idx, model in enumerate(chain):
             remaining = deadline - time.monotonic()
-            if remaining < 3.0 and idx > 0:
+            if remaining < 1.0 and idx > 0:
                 return UpstreamResult(
                     status_code=504,
                     body=openai_error(

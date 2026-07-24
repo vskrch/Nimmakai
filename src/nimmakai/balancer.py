@@ -261,7 +261,7 @@ class KeyPool:
                     "rpm_used": len(k.request_times),
                     "rpm_limit": self.rpm_limit,
                     "in_flight": k.in_flight,
-                    "ewma_latency_s": round(k.ewma_latency, 3),
+                    "ewma_latency_ms": round(k.ewma_latency * 1000, 1),
                     "success_count": k.success_count,
                     "error_count": k.error_count,
                     "rate_limit_hits": k.rate_limit_hits,

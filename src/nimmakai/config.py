@@ -40,12 +40,12 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8080
     log_level: str = "info"
-    upstream_timeout: float = 300.0
+    upstream_timeout: float = 10.0  # total upstream timeout (3s target + failover margin)
     default_model: str | None = None
     # Streaming: short TTFT = fail-fast to next model if not responding;
     # long idle once first token arrives (Cursor/agent safe).
-    stream_ttft_timeout_seconds: float = 12.0
-    stream_idle_timeout_seconds: float = 180.0
+    stream_ttft_timeout_seconds: float = 2.0
+    stream_idle_timeout_seconds: float = 30.0
     request_log_size: int = 20000  # in-memory ring for Live Feed /admin/logs
     request_file_logging: bool = True
     request_log_max_bytes: int = 50 * 1024 * 1024  # 50 MiB per rotated file
@@ -99,11 +99,11 @@ class Settings(BaseSettings):
     sticky_session_ttl_seconds: float = 1800.0
     sticky_boost: float = 3.0
     allow_insecure_auth: bool = False  # must be true to accept any Bearer when PROXY empty
-    request_deadline_seconds: float = 180.0
+    request_deadline_seconds: float = 10.0  # total request deadline (3s target + margin)
     probe_every_n_refreshes: int = 6
     # Backoff only for 429 / transport / 5xx — not for model-not-found ladder steps
-    retry_backoff_base_seconds: float = 0.5
-    retry_backoff_cap_seconds: float = 16.0
+    retry_backoff_base_seconds: float = 0.1
+    retry_backoff_cap_seconds: float = 1.0
     cors_allow_origins: str = "*"
     upstream_user_agent: str = (
         f"nimmakai/{__version__} (OpenAI-compatible NIM proxy)"

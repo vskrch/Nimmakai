@@ -1179,7 +1179,7 @@ async def sse_events(request: Request):
                         health_payload[mid] = {
                             "ok": not registry.health.is_unhealthy(mid),
                             "tps": round(h.ewma_tok_per_s, 1) if h.ewma_tok_per_s > 0 else 0,
-                            "latency": round(h.ewma_latency, 2) if h.ewma_latency > 0 else 0,
+                            "latency_ms": round(h.ewma_latency * 1000, 1) if h.ewma_latency > 0 else 0,
                             "error_rate": round(h.error_rate, 2),
                         }
             payload = {
@@ -1219,7 +1219,7 @@ async def provider_health_view(request: Request) -> JSONResponse:
             if h:
                 model_details[mid] = {
                     "ok": not registry.health.is_unhealthy(mid),
-                    "ewma_latency_s": round(h.ewma_latency, 3),
+                    "ewma_latency_ms": round(h.ewma_latency * 1000, 1),
                     "ewma_tok_per_s": round(h.ewma_tok_per_s, 1),
                     "success_count": h.success_count,
                     "error_count": h.error_count,

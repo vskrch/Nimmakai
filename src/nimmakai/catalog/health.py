@@ -239,7 +239,7 @@ class ModelHealthStore:
         out: dict[str, dict] = {}
         for mid, h in self._by_model.items():
             out[mid] = {
-                "ewma_latency_s": round(h.ewma_latency, 3),
+                "ewma_latency_ms": round(h.ewma_latency * 1000, 1),
                 "ewma_tok_per_s": round(h.ewma_tok_per_s, 2),
                 "success_count": h.success_count,
                 "error_count": h.error_count,
