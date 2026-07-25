@@ -69,9 +69,11 @@ flowchart TD
 * **⚡ Dual-Stage Intelligent Routing**:
   - **Stage 1 (Ladder)**: Precomputed composite score combining benchmark quality, intent affinity, parameter sizes, and provider capabilities.
   - **Stage 2 (Cobb-Douglas Optimizer)**: Real-time request adaptation balancing quality, latency, key pool availability, and provider health.
+* **🎯 Granular Model Pool & Intent Gating**: Surgically restrict high-cost frontier models to specialized endpoints (e.g., `potato/coding` or `potato/best`) while excluding them from general auto-routing (`potato/auto`) to prevent token waste.
+* **🔑 4-Pillar Multi-Tenant Architecture & BYOK**: Dedicated tenant isolation where standard users manage their own encrypted API keys at rest (AES-256-GCM) and view private analytics, with Admin shared fallbacks and cross-tenant oversight (`multi-tenant` branch).
 * **🛡️ Zero-Downtime Fallback & Circuit Breakers**: Automatic fallbacks across providers. If a model encounters a 504 gateway timeout, rate limit (429), or 5xx server error, Potato immediately advances down the intelligence ladder without failing client requests.
 * **🤖 First-Class Agent Tooling**: Native drop-in compatibility for **Cursor IDE**, **Claude Code CLI**, **Cline**, **Windsurf**, and **OpenCode CLI**.
-* **📊 Glassmorphic Admin Dashboard**: Built with React 18 + Tailwind CSS, featuring live SSE request streams, latency waterfalls, token expenditure analytics, provider health controls, and interactive **Adaptive RL Policy** telemetry.
+* **📊 360° Request Explorer & Glassmorphic Dashboard**: Built with React 18 + Tailwind CSS, featuring live SSE request streams, latency waterfalls, token expenditure analytics, granular Model/Intent/Status filtering, and interactive **Adaptive RL Policy** telemetry.
 
 ---
 
@@ -160,11 +162,14 @@ Potato exposes three primary protocol surfaces:
 | :--- | :--- | :--- |
 | `POST /v1/chat/completions` | OpenAI Chat API | Standard OpenAI streaming & non-streaming completions |
 | `POST /v1/messages` | Anthropic Messages API | Native Claude Code CLI / Anthropic SDK streaming & tool calls |
+| `POST /v1/responses` | OpenAI Responses API | Native OpenAI Responses API mapping to multi-provider upstreams |
 | `POST /chat` | Unified Chat API | Dual-protocol endpoint for web clients & Open WebUI |
 | `GET /v1/models` | OpenAI Models API | Enriched catalog listing with context windows and capabilities |
+| `GET /admin/model-pools` | Admin Control | Granular per-model intent gating & auto-router pool rules |
+| `GET /v1/account/provider-keys` | BYOK Key Store | Manage tenant upstream API keys encrypted with AES-256-GCM |
 | `GET /admin/rl/stats` | Admin Telemetry | Live LinUCB bandit feature weights ($\theta$) & reward statistics |
 | `POST /admin/rl/reset` | Admin Action | Reset online RL policy per model or globally |
-| `GET /dashboard` | Web SaaS Portal | Admin dashboard, telemetry, routing rules, and provider settings |
+| `GET /dashboard` | Web SaaS Portal | User & Admin dashboard, telemetry, routing rules, and provider settings |
 
 ---
 
