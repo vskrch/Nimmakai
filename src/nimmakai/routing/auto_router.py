@@ -351,15 +351,13 @@ def build_intent_aware_pool(
     variant: str = "default",
     max_n: int = 16,
     include_related: bool = True,
-    expand_coding_pool: bool = True,
 ) -> list[str]:
     """Build an intent-first candidate pool that prefers never going empty.
 
     Order:
       1. Primary intent ladder (best models for this job)
       2. Related intents (still capable, slightly less ideal)
-      3. Coding candidates when coding-adjacent
-      4. Emergency live catalog slice
+      3. Emergency live catalog slice
     """
     primary = (primary_intent or "coding_agentic").strip().lower()
     intents = (
@@ -377,16 +375,6 @@ def build_intent_aware_pool(
             part = []
         if part:
             parts.append(part)
-
-    if (
-        expand_coding_pool
-        and primary in {"coding_agentic", "reasoning", "long_horizon"}
-        and hasattr(registry, "coding_candidates")
-    ):
-        try:
-            parts.append(list(registry.coding_candidates()[:24]))
-        except Exception:
-            pass
 
     pool = merge_unique(*parts)
     if pool:

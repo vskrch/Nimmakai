@@ -247,9 +247,10 @@ PROVIDER_PRESETS: list[dict[str, Any]] = [
     },
 ]
 
-# Known provider speed priors (multiplicative) used by the ladder for
-# best+fast combined ranking across free backends.
-PROVIDER_SPEED_PRIOR: dict[str, float] = {
+# Known provider speed priors (multiplicative) — cold-start ONLY.
+# Used until real EWMA TPS is measured (3+ outcomes); after that
+# ModelScore.measured_tps from the health tracker takes over via score_cache.py.
+PROVIDER_SPEED_PRIOR_COLDSTART: dict[str, float] = {
     "zen": 1.28,  # OpenCode Zen free coding hosts — high priority
     "groq": 1.35,
     "cerebras": 1.40,
@@ -295,24 +296,6 @@ _PROVIDER_ENV_ALIASES: dict[str, tuple[str, ...]] = {
 def env_aliases_for_provider(provider_id: str) -> tuple[str, ...]:
     return _PROVIDER_ENV_ALIASES.get(provider_id.strip().lower(), ())
 
-# Free OpenCode Zen coding model ids (bare, before namespacing)
-ZEN_FREE_CODING_MODELS: tuple[str, ...] = (
-    "mimo-v2.5-free",
-    "deepseek-v4-flash-free",
-    "north-mini-code-free",
-    "nemotron-3-ultra-free",
-    "big-pickle",
-    "qwen3.6-plus-free",
-    "minimax-m3-free",
-    "deepseek-v4-pro",
-    "deepseek-v4-flash",
-    "mimo-v2.5",
-    "kimi-k2.6",
-    "kimi-k2.7-code",
-    "minimax-m3",
-    "glm-5.2",
-)
-
 
 def list_presets(*, free_only: bool = False) -> list[dict[str, Any]]:
     out = []
@@ -332,4 +315,4 @@ def get_preset(provider_id: str) -> dict[str, Any] | None:
 
 
 def speed_prior_for_provider(provider_id: str) -> float:
-    return PROVIDER_SPEED_PRIOR.get(provider_id.lower(), 1.0)
+    return PROVIDER_SPEED_PRIOR_COLDSTART.get(provider_id.lower(), 1.0)

@@ -66,6 +66,12 @@ class ModelSelector:
         self.settings = settings
         self.preferences = preferences
 
+    def _max_n_for_intent(self, intent: str) -> int:
+        """Per-intent fallback cap from config (replaces coding_max_fallbacks)."""
+        limits = getattr(self.settings, "intent_max_fallbacks", {}) or {}
+        default = int(getattr(self.settings, "max_model_fallbacks", 10) or 10)
+        return int(limits.get(intent, default))
+
     def resolve(
         self,
         model_field: str | None,
@@ -265,16 +271,11 @@ class ModelSelector:
             # For coding, always rank all candidates — the best coder leads,
             # the user-requested model stays as fallback.
             if intent_key == "coding_agentic":
-                seen = set(chain)
-                for m in self.registry.coding_candidates():
-                    if m not in seen:
-                        chain.append(m)
-                        seen.add(m)
-                chain = self.registry.health_reorder(
+                optimized = self.registry.health_reorder(
                     chain, intent=intent_key, variant=variant
                 )
-                head = chain[0]
-                rest = [m for m in chain if m != head]
+                head = chain[0] if chain else target_model
+                rest = [m for m in optimized if m != head]
             else:
                 optimized = self.registry.health_reorder(
                     chain, intent=intent_key, variant=variant
@@ -340,11 +341,6 @@ class ModelSelector:
                 # For coding, rank candidates but keep the requested model pinned
                 # so _chain / sticky affinity is not silently discarded (F-08).
                 if intent_key == "coding_agentic":
-                    seen = set(chain)
-                    for m in self.registry.coding_candidates():
-                        if m not in seen:
-                            chain.append(m)
-                            seen.add(m)
                     chain = self.registry.health_reorder(
                         chain, intent=intent_key, variant=variant
                     )
@@ -392,12 +388,8 @@ class ModelSelector:
         fallback tail so the request can always be processed.
         """
         free_only = tier == "free"
-        max_n = int(getattr(self.settings, "max_model_fallbacks", 10) or 10)
-        if intent_key == "coding_agentic":
-            max_n = max(
-                max_n,
-                int(getattr(self.settings, "coding_max_fallbacks", 12) or 12),
-            )
+        max_n = self._max_n_for_intent(intent_key)
+        # Auto gets a longer attempt budget so intent can always be served
         # Pull a wide intent-aware pool, then finalize (health, filters, pin)
         chain = build_intent_aware_pool(
             self.registry,
@@ -405,8 +397,6 @@ class ModelSelector:
             variant=variant,
             max_n=max(max_n * 2, 16),
             include_related=True,
-            expand_coding_pool=intent_key
-            in {"coding_agentic", "reasoning", "long_horizon"},
         )
         # Soft sticky: only pin when the model fits this intent (or low confidence)
         pin = preferred_model
@@ -437,7 +427,6 @@ class ModelSelector:
                 variant=variant,
                 max_n=max_n,
                 include_related=True,
-                expand_coding_pool=True,
             )
             chain = filter_chain(
                 chain,
@@ -484,16 +473,6 @@ class ModelSelector:
                 resolved = self.registry.resolve_live_id(m) or m
                 if resolved not in chain:
                     chain = chain + [resolved]
-
-        # Always rank over the full live coding pool, not just the frozen
-        # ladder subset — a newly-available coder can lead when it scores
-        # best on capability × availability × latency.
-        if intent_key == "coding_agentic":
-            seen = set(chain)
-            for m in self.registry.coding_candidates()[:20]:
-                if m not in seen:
-                    chain = chain + [m]
-                    seen.add(m)
 
         chain = self.registry.health_reorder(
             chain, intent=intent_key, variant=variant

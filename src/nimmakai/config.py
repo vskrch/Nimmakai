@@ -40,12 +40,15 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8080
     log_level: str = "info"
-    upstream_timeout: float = 10.0  # total upstream timeout (3s target + failover margin)
+    # INVARIANT: upstream_timeout >= per_attempt_budget_seconds
+    # INVARIANT: request_deadline_seconds >= upstream_timeout
+    # Violating these guarantees a 504 cascade
+    upstream_timeout: float = 120.0
     default_model: str | None = None
     # Streaming: short TTFT = fail-fast to next model if not responding;
     # long idle once first token arrives (Cursor/agent safe).
-    stream_ttft_timeout_seconds: float = 2.0
-    stream_idle_timeout_seconds: float = 30.0
+    stream_ttft_timeout_seconds: float = 15.0
+    stream_idle_timeout_seconds: float = 60.0
     request_log_size: int = 20000  # in-memory ring for Live Feed /admin/logs
     request_file_logging: bool = True
     request_log_max_bytes: int = 50 * 1024 * 1024  # 50 MiB per rotated file
@@ -58,9 +61,22 @@ class Settings(BaseSettings):
     routing_enabled: bool = True
     classify_mode: Literal["rules_only", "rules_then_llm"] = "rules_only"
     enable_fallback_on_explicit: bool = True
-    max_model_fallbacks: int = 5  # top 5 by intelligence×speed, never dumb models
-    # Extra fallbacks for coding_agentic / Cursor tool loops
-    coding_max_fallbacks: int = 5
+    max_model_fallbacks: int = 10  # universal fallback cap; per-intent below
+    per_attempt_budget_seconds: float = 30.0
+    # Per-intent fallback counts and attempt budgets (data-driven, not coding-specific)
+    intent_max_fallbacks: dict = Field(
+        default_factory=lambda: {
+            "coding_agentic": 10, "reasoning": 10, "long_horizon": 8,
+            "chat_fast": 6, "vision": 6, "embeddings": 4,
+        }
+    )
+    intent_attempt_budget_seconds: dict = Field(
+        default_factory=lambda: {
+            "coding_agentic": 30.0, "reasoning": 45.0, "long_horizon": 45.0,
+            "chat_fast": 15.0, "vision": 20.0, "embeddings": 10.0,
+        }
+    )
+    deadline_guard_seconds: float = 3.0
     # Minimum quality ratio (0-1): models below this × top model quality are excluded
     min_quality_ratio: float = 0.6
     # Self-heal catalog/providers every N seconds (0 = only with catalog refresh)
@@ -99,11 +115,11 @@ class Settings(BaseSettings):
     sticky_session_ttl_seconds: float = 1800.0
     sticky_boost: float = 3.0
     allow_insecure_auth: bool = False  # must be true to accept any Bearer when PROXY empty
-    request_deadline_seconds: float = 10.0  # total request deadline (3s target + margin)
+    request_deadline_seconds: float = 120.0  # total request deadline (must >= upstream_timeout)
     probe_every_n_refreshes: int = 6
     # Backoff only for 429 / transport / 5xx — not for model-not-found ladder steps
-    retry_backoff_base_seconds: float = 0.1
-    retry_backoff_cap_seconds: float = 1.0
+    retry_backoff_base_seconds: float = 0.2
+    retry_backoff_cap_seconds: float = 2.0
     cors_allow_origins: str = "*"
     upstream_user_agent: str = (
         f"nimmakai/{__version__} (OpenAI-compatible NIM proxy)"
@@ -140,6 +156,29 @@ class Settings(BaseSettings):
     nim_egress_proxies: Annotated[list[str], NoDecode] = Field(default_factory=list)
     http_proxy: str | None = None
     https_proxy: str | None = None
+
+    # Health / cooldown tuning (NMK-C102)
+    error_rate_threshold: float = 0.45
+    model_cooldown_seconds: float = 45.0
+    hard_fail_cooldown_seconds: float = 5.0
+    max_cooldown_seconds: float = 180.0
+    rate_limit_cooldown_seconds: float = 15.0
+    gateway_timeout_cooldown_seconds: float = 30.0
+    health_window_size: int = 8
+    recent_success_window_seconds: float = 30.0
+
+    # Ladder / scoring tuning constants (NMK-C101)
+    ucb_exploration_c: float = 5.0
+    diversity_streak_max: int = 2
+    default_affinity: float = 0.85
+    thompson_scale: float = 16.0
+    thompson_blend_n: int = 12
+
+    # Dynamic Intelligence Scoring (NMK-I / NMK-S / NMK-G8)
+    artificial_analysis_api_key: str = ""
+    intel_fetch_ttl_hours: float = 6.0
+    intel_cache_path: str = ".nimmakai/intel_cache.json"
+    score_recompute_interval_seconds: float = 300.0
 
     @field_validator(
         "proxy_api_keys",

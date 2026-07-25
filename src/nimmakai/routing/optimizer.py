@@ -28,10 +28,31 @@ logger = logging.getLogger(__name__)
 
 # Weights: intelligence dominates for coding efficiency + low latency.
 # A 95-quality model at 40 TPS beats an 80-quality model at 120 TPS.
-_ALPHA_INTEL = 0.55
-_BETA_SPEED = 0.30
-_GAMMA_AVAIL = 0.12
-_DELTA_PROVIDER = 0.03
+# Loaded from YAML scoring.intent_optimizer_weights at startup (NMK-RT601).
+_INTENT_WEIGHTS: dict[str, tuple[float, float, float, float]] = {
+    "coding_agentic": (0.50, 0.32, 0.15, 0.03),
+    "reasoning": (0.55, 0.25, 0.17, 0.03),
+    "long_horizon": (0.50, 0.28, 0.19, 0.03),
+    "chat_fast": (0.30, 0.47, 0.20, 0.03),
+    "vision": (0.45, 0.35, 0.17, 0.03),
+    "embeddings": (0.25, 0.45, 0.27, 0.03),
+    "_default": (0.45, 0.35, 0.17, 0.03),
+}
+
+
+def load_intent_weights(yaml_scoring: dict) -> None:
+    """Called at startup after yaml is loaded. Overrides default weights from YAML."""
+    global _INTENT_WEIGHTS
+    for intent, w in (yaml_scoring.get("intent_optimizer_weights") or {}).items():
+        try:
+            _INTENT_WEIGHTS[intent] = (
+                float(w["intel"]),
+                float(w["speed"]),
+                float(w["avail"]),
+                float(w["prov"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            pass
 
 
 def _quality_prior(
@@ -142,22 +163,20 @@ def score_model_live(
     health: Any,
     provider_ids: set[str],
     max_score: float | None = None,
+    intent: str = "_default",
 ) -> float:
-    """Single composite score for continuous ranking."""
+    """Single composite score for continuous ranking (intent-weighted)."""
     if health is not None and health.is_unhealthy(model_id):
         return 1e-6 * _quality_prior(model_id, ladder_scores=ladder_scores, max_score=max_score)
+
+    alpha, beta, gamma, delta = _INTENT_WEIGHTS.get(intent, _INTENT_WEIGHTS["_default"])
 
     intel = _quality_prior(model_id, ladder_scores=ladder_scores, max_score=max_score)
     speed = _speed_factor(health, model_id)
     avail = _availability_factor(health, model_id)
     prov = _provider_factor(model_id, provider_ids, health)
 
-    score = (
-        (intel**_ALPHA_INTEL)
-        * (speed**_BETA_SPEED)
-        * (avail**_GAMMA_AVAIL)
-        * (prov**_DELTA_PROVIDER)
-    )
+    score = (intel**alpha) * (speed**beta) * (avail**gamma) * (prov**delta)
     return score
 
 
@@ -200,6 +219,7 @@ def optimize_chain(
             health=health,
             provider_ids=provider_ids,
             max_score=max_score,
+            intent=intent,
         )
         scored.append((s, mid))
 
@@ -243,6 +263,7 @@ def explain_top(
             health=health,
             provider_ids=provider_ids,
             max_score=max_score,
+            intent=intent,
         )
         rows.append(
             {

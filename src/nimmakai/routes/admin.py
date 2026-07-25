@@ -1252,3 +1252,95 @@ async def request_trace(request_id: str, request: Request) -> JSONResponse:
         "entries": matching,
         "hint": "Returns all log entries for the given request_id",
     })
+
+
+# ---------------------------------------------------------------------------
+# Dynamic Intelligence Router — score cache status + manual refresh (NMK-P901)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/admin/intel")
+async def get_intel_status(request: Request) -> JSONResponse:
+    """Current model score cache: version, sources, top models per intent."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    import time
+
+    from nimmakai.catalog.score_cache import ModelScoreCache
+
+    cache = ModelScoreCache.current()
+    if not cache:
+        return JSONResponse({"error": "score_cache_not_initialized"}, status_code=503)
+
+    intents = ["coding_agentic", "reasoning", "chat_fast", "long_horizon", "vision", "embeddings"]
+    top_by_intent = {}
+    for intent in intents:
+        ranked = sorted(
+            cache.scores.values(),
+            key=lambda ms: ms.intent_affinity.get(intent, 0) * ms.quality,
+            reverse=True,
+        )[:5]
+        top_by_intent[intent] = [
+            {
+                "model": ms.model_id,
+                "quality": round(ms.quality, 1),
+                "affinity": round(ms.intent_affinity.get(intent, 0), 3),
+                "modalities": sorted(ms.modalities),
+                "tps": round(ms.measured_tps, 1),
+                "sources": ms.sources,
+            }
+            for ms in ranked
+        ]
+
+    source_counts: dict[str, int] = {}
+    for ms in cache.scores.values():
+        for s in ms.sources:
+            source_counts[s] = source_counts.get(s, 0) + 1
+
+    return JSONResponse({
+        "version": cache.version,
+        "computed_at": cache.computed_at,
+        "age_seconds": round(time.time() - cache.computed_at, 1),
+        "model_count": len(cache.scores),
+        "live_pool_count": len(cache.live_pool),
+        "source_counts": source_counts,
+        "top_by_intent": top_by_intent,
+    })
+
+
+@router.post("/admin/intel/refresh")
+async def trigger_intel_refresh(request: Request) -> JSONResponse:
+    """Manually trigger an intel fetch + score recompute (fire-and-forget)."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    registry = getattr(request.app.state, "registry", None)
+    if registry is None or not hasattr(registry, "trigger_intel_refresh"):
+        return JSONResponse({"error": "intel_not_configured"}, status_code=503)
+    result = await registry.trigger_intel_refresh()
+    return JSONResponse(result)
+
+
+@router.get("/admin/score/{model_id:path}")
+async def get_model_score(model_id: str, request: Request) -> JSONResponse:
+    """Per-model score breakdown from the live ModelScoreCache."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    from nimmakai.catalog.score_cache import ModelScoreCache
+
+    cache = ModelScoreCache.current()
+    if not cache:
+        return JSONResponse({"error": "score_cache_not_initialized"}, status_code=503)
+    ms = cache.scores.get(model_id)
+    if not ms:
+        return JSONResponse({"error": "model_not_in_cache", "model_id": model_id}, status_code=404)
+    return JSONResponse({
+        "model_id": ms.model_id,
+        "quality": ms.quality,
+        "intent_affinity": ms.intent_affinity,
+        "modalities": sorted(ms.modalities),
+        "context_k": ms.context_k,
+        "measured_tps": ms.measured_tps,
+        "provider_id": ms.provider_id,
+        "sources": ms.sources,
+        "computed_at": ms.computed_at,
+    })

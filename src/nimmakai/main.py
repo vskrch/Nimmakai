@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
@@ -254,6 +255,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         fallback: FallbackExecutor | None = None
         routing_stats = RoutingStats()
         refresh_task: asyncio.Task | None = None
+        intel_task: asyncio.Task | None = None
 
         try:
             registry = ModelRegistry.from_settings(settings)
@@ -292,6 +294,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             fallback = FallbackExecutor(
                 upstream, registry, settings, stats=routing_stats, hub=hub
             )
+
+            # NMK-G805: bind IntelFetcher + load YAML scoring weights
+            from nimmakai.catalog.intel_fetcher import IntelFetcher
+            from nimmakai.routing.optimizer import load_intent_weights
+
+            intel_fetcher = IntelFetcher(
+                cache_path=Path(
+                    getattr(settings, "intel_cache_path", ".nimmakai/intel_cache.json")
+                ),
+                ttl_hours=float(getattr(settings, "intel_fetch_ttl_hours", 6.0)),
+                aa_api_key=(
+                    getattr(settings, "artificial_analysis_api_key", "")
+                    or os.environ.get("ARTIFICIAL_ANALYSIS_API_KEY", "")
+                ),
+            )
+            registry.bind_intel_fetcher(intel_fetcher, settings)
+
+            # Load intent optimizer weights from YAML scoring section
+            if hasattr(registry, "_yaml_scoring_config"):
+                load_intent_weights(registry._yaml_scoring_config.get("scoring", {}))
 
             # Defer initial catalog refresh to background — don't block startup
             async def _initial_refresh() -> None:
@@ -408,6 +430,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
             refresh_task = asyncio.create_task(_refresh_loop())
 
+            # NMK-G805: start intel refresh loop (periodic score recompute)
+            intel_task = asyncio.create_task(registry.start_intel_refresh_loop())
+
         app.state.settings = settings
         app.state.hub = hub
         app.state.pool = pool
@@ -437,6 +462,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             await _stop_analytics(app)
+            if intel_task is not None:
+                intel_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await intel_task
             if refresh_task is not None:
                 refresh_task.cancel()
                 with suppress(asyncio.CancelledError):

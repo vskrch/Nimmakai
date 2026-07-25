@@ -5,29 +5,44 @@ from __future__ import annotations
 from pathlib import Path
 
 from nimmakai.catalog.db import NimmakaiDB
+from nimmakai.catalog.health import ModelHealthStore
+from nimmakai.catalog.intel_fetcher import IntelBundle
 from nimmakai.catalog.ladder import LadderService
+from nimmakai.catalog.learning import LearningStore
 from nimmakai.catalog.registry import ModelRegistry
+from nimmakai.catalog.score_cache import ModelScoreCache, recompute
 
 
 def test_ladder_freeze_no_rescore() -> None:
-    svc = LadderService()
     live = {
         "nim/deepseek-ai/deepseek-v4-pro",
         "nim/google/gemma-2-2b-it",
         "nim/qwen/qwen3.5-122b-a10b",
     }
-    svc.rebuild(live, freeze=True)
-    first = svc.ladder_for("coding_agentic")
-    # Mutate health heavily — frozen cache must ignore re-score path
-    for _ in range(5):
-        svc.health.record_outcome(
-            "nim/deepseek-ai/deepseek-v4-pro",
-            success=False,
-            status_code=500,
-        )
-    second = svc.ladder_for("coding_agentic")
-    assert first == second
-    assert first[0] == "nim/deepseek-ai/deepseek-v4-pro"
+    # Install score cache: deepseek-v4-pro highest quality + tools
+    bundles = {
+        "deepseek-v4-pro": IntelBundle(model_slug="deepseek-v4-pro", aa_intelligence_idx=98.0, supports_tools=True),
+        "gemma-2-2b-it": IntelBundle(model_slug="gemma-2-2b-it", aa_intelligence_idx=50.0, supports_tools=False),
+        "qwen3.5-122b-a10b": IntelBundle(model_slug="qwen3.5-122b-a10b", aa_intelligence_idx=80.0, supports_tools=False),
+    }
+    cache = recompute(live_ids=live, intel_bundles=bundles, health=ModelHealthStore(), learning=LearningStore(), yaml_cfg={})
+    ModelScoreCache.install(cache)
+    try:
+        svc = LadderService()
+        svc.rebuild(live, freeze=True)
+        first = svc.ladder_for("coding_agentic")
+        # Mutate health heavily — frozen cache must ignore re-score path
+        for _ in range(5):
+            svc.health.record_outcome(
+                "nim/deepseek-ai/deepseek-v4-pro",
+                success=False,
+                status_code=500,
+            )
+        second = svc.ladder_for("coding_agentic")
+        assert first == second
+        assert first[0] == "nim/deepseek-ai/deepseek-v4-pro"
+    finally:
+        ModelScoreCache._current = None
 
 
 def test_ranking_cache_roundtrip(tmp_path: Path) -> None:

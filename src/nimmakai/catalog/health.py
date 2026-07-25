@@ -46,6 +46,11 @@ class ModelHealthStore:
     # Short cooldowns = auto-adaptive recovery (was 600s — too sticky for free tiers)
     model_cooldown_seconds: float = 45.0
     hard_fail_cooldown_seconds: float = 5.0
+    max_cooldown_seconds: float = 180.0
+    rate_limit_cooldown_seconds: float = 15.0
+    gateway_timeout_cooldown_seconds: float = 30.0
+    health_window_size: int = 8
+    recent_success_window_seconds: float = 30.0
     _by_model: dict[str, ModelHealth] = field(default_factory=dict)
     _by_pair: dict[tuple[str, str], ModelHealth] = field(default_factory=dict)
 
@@ -75,7 +80,7 @@ class ModelHealthStore:
             h.last_fail_at = now
             # Adaptive cooldown grows with consecutive fails, capped
             cool = min(
-                180.0,
+                self.max_cooldown_seconds,
                 self.model_cooldown_seconds * (1.0 + 0.5 * min(h.consecutive_fails, 6)),
             )
             h.cooldown_until = now + cool
@@ -100,13 +105,20 @@ class ModelHealthStore:
             h.consecutive_successes = 0
             h.last_fail_at = now
             # Fail-fast cool: 5xx / timeout-like — short so we skip quickly then retry soon
-            if status_code is not None and status_code >= 500:
+            if status_code == 504:
+                # Gateway timeout: upstream alive but overloaded.
+                # Adaptive cooldown grows with consecutive failures (caps at 3x).
+                cool = self.gateway_timeout_cooldown_seconds * min(h.consecutive_fails, 3)
+                h.cooldown_until = max(h.cooldown_until, now + cool)
+            elif status_code is not None and status_code >= 500:
                 h.cooldown_until = max(
                     h.cooldown_until,
                     now + self.hard_fail_cooldown_seconds * min(h.consecutive_fails, 3),
                 )
             elif status_code == 429:
-                h.cooldown_until = max(h.cooldown_until, now + 15.0)
+                h.cooldown_until = max(
+                    h.cooldown_until, now + self.rate_limit_cooldown_seconds
+                )
 
         if key_id:
             pair = self._by_pair.setdefault((model_id, key_id), ModelHealth())
@@ -171,7 +183,7 @@ class ModelHealthStore:
 
         # Adaptive window: demote non-responding within the quality head.
         # Do NOT reorder purely by latency among healthy models (preserve intelligence).
-        window = min(8, len(healthy))
+        window = min(self.health_window_size, len(healthy))
         head = healthy[:window]
         tail = healthy[window:]
         now = time.monotonic()
@@ -188,7 +200,7 @@ class ModelHealthStore:
                 # Among fully healthy: optional micro-boost for *very* recent success
                 # without overturning quality order (sticky dominates)
                 hot = 0
-                if h.last_success_at > 0 and (now - h.last_success_at) < 30.0:
+                if h.last_success_at > 0 and (now - h.last_success_at) < self.recent_success_window_seconds:
                     hot = -1
                 return (0, hot, sticky)
             # Failing / flaky: push back; among failers prefer lower fail streak

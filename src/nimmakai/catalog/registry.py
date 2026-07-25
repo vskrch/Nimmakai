@@ -77,9 +77,13 @@ class ModelRegistry:
         self.rankings_sticky: bool = True
         self.rankings_cache_key: str = "default"
         self._db: Any = None
-        # Cache for coding_candidates (invalidated on live_ids/disabled_models change)
-        self._coding_candidates_cache: list[str] | None = None
-        self._coding_candidates_key: tuple[frozenset[str], frozenset[str]] | None = None
+        # Cache for intent_candidates (invalidated on live_ids/disabled_models change)
+        self._intent_candidates_cache: dict[str, list[str]] = {}
+        self._intent_candidates_key: tuple[frozenset[str], frozenset[str]] | None = None
+        # Intel fetcher + score cache lifecycle (NMK-G804)
+        self._intel_fetcher: Any = None
+        self._intel_settings: Any = None
+        self._yaml_scoring_config: dict = {}
         self._load_disk_snapshot()
         if self.live_ids:
             self.ladder.set_docs(self.doc_models)
@@ -508,38 +512,37 @@ class ModelRegistry:
         except Exception:
             logger.exception("load disabled_models failed")
 
-    def coding_candidates(self) -> list[str]:
-        """Every live model that can serve coding_agentic, right now.
+    def intent_candidates(self, intent: str) -> list[str]:
+        """Every live model capable of serving the given intent. All intents — no coding-only cache.
 
-        Cached: invalidated when live_ids or disabled_models changes.
-
-        ponytail: the request-time optimizer only re-ranks whatever chain it is
-        handed (the frozen sticky ladder). Newly-live coders never get a chance
-        to lead. This exposes the full live coding pool so the per-request
-        scorer can always pick the most efficient available coder.
+        Cached: invalidated when live_ids or disabled_models change.
         """
-        # Check cache validity
         current_key = (frozenset(self.live_ids), frozenset(self.disabled_models))
         if (
-            self._coding_candidates_cache is not None
-            and self._coding_candidates_key == current_key
+            self._intent_candidates_cache is not None
+            and self._intent_candidates_key == current_key
+            and intent in self._intent_candidates_cache
         ):
-            return list(self._coding_candidates_cache)
+            return list(self._intent_candidates_cache[intent])
 
         active = self.active_live_ids()
         if not active:
-            self._coding_candidates_cache = []
-            self._coding_candidates_key = current_key
+            self._intent_candidates_cache = {}
+            self._intent_candidates_key = current_key
             return []
         ladder = getattr(self, "ladder", None)
         if ladder is None:
             result = list(active)
         else:
-            result = [m for m in active if ladder.is_coding_capable(m)]
+            result = [m for m in active if ladder.is_coding_capable(m)] if intent == "coding_agentic" else list(active)
 
-        self._coding_candidates_cache = result
-        self._coding_candidates_key = current_key
+        self._intent_candidates_cache[intent] = result
+        self._intent_candidates_key = current_key
         return result
+
+    def coding_candidates(self) -> list[str]:
+        """Deprecated shim. Use intent_candidates('coding_agentic')."""
+        return self.intent_candidates("coding_agentic")
 
     def load_rankings_cache(self) -> bool:
         if self._db is None:
@@ -621,6 +624,105 @@ class ModelRegistry:
         }
         logger.info("best models precomputed: %s", best)
         return best
+
+    # ------------------------------------------------------------------
+    # Intel fetcher + score cache lifecycle (NMK-G804)
+    # ------------------------------------------------------------------
+
+    def bind_intel_fetcher(self, fetcher: Any, settings: Any) -> None:
+        """Attach IntelFetcher and do a blocking cold-start from disk cache."""
+        self._intel_fetcher = fetcher
+        self._intel_settings = settings
+        self._yaml_scoring_config = self._load_yaml_scoring_config()
+        self._sync_score_cache_once()
+
+    def _load_yaml_scoring_config(self) -> dict:
+        """Load the scoring section from the YAML catalog file."""
+        if self._yaml_path is None or not self._yaml_path.is_file():
+            return {}
+        try:
+            with self._yaml_path.open(encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            return data
+        except Exception:
+            logger.exception("yaml scoring config load failed")
+            return {}
+
+    def _sync_score_cache_once(self) -> None:
+        """Blocking cold-start: build score cache from disk-cached intel bundles."""
+        try:
+            from nimmakai.catalog.score_cache import ModelScoreCache, recompute
+
+            bundles = self._intel_fetcher._load_disk_cache() or {}
+            cache = recompute(
+                live_ids=self.active_live_ids(),
+                intel_bundles=bundles,
+                health=self.health,
+                learning=self.learning,
+                yaml_cfg=self._yaml_scoring_config,
+                provider_ids=getattr(self.ladder, "provider_ids", set()),
+            )
+            ModelScoreCache.install(cache)
+            logger.info("score cache cold-start: %d models from disk", len(cache.scores))
+        except Exception:
+            logger.exception("score cache cold-start failed")
+
+    async def start_intel_refresh_loop(self) -> None:
+        """Background loop: fetch live intel, recompute scores, rebuild ladders."""
+        import asyncio
+
+        from nimmakai.catalog.score_cache import ModelScoreCache, recompute
+
+        interval = float(
+            getattr(self._intel_settings, "score_recompute_interval_seconds", 300.0)
+        )
+        while True:
+            try:
+                bundles = await self._intel_fetcher.fetch_all()
+                cache = recompute(
+                    live_ids=self.active_live_ids(),
+                    intel_bundles=bundles,
+                    health=self.health,
+                    learning=self.learning,
+                    yaml_cfg=self._yaml_scoring_config,
+                    provider_ids=getattr(self.ladder, "provider_ids", set()),
+                )
+                ModelScoreCache.install(cache)
+                self.ladder.rebuild(self.active_live_ids(), freeze=True)
+                self._sync_chains_from_ladder()
+                logger.info("intel refresh v%d: %d models", cache.version, len(cache.scores))
+            except Exception:
+                logger.exception("intel refresh loop failed")
+            await asyncio.sleep(interval)
+
+    async def trigger_intel_refresh(self) -> dict:
+        """Admin endpoint: manual refresh (fire-and-forget)."""
+        import asyncio
+
+        from nimmakai.catalog.score_cache import ModelScoreCache
+
+        asyncio.get_running_loop().create_task(self._do_single_refresh())
+        curr = ModelScoreCache.current()
+        return {"status": "refresh_queued", "current_version": curr.version if curr else 0}
+
+    async def _do_single_refresh(self) -> None:
+        from nimmakai.catalog.score_cache import ModelScoreCache, recompute
+
+        try:
+            bundles = await self._intel_fetcher.fetch_all()
+            cache = recompute(
+                live_ids=self.active_live_ids(),
+                intel_bundles=bundles,
+                health=self.health,
+                learning=self.learning,
+                yaml_cfg=self._yaml_scoring_config,
+                provider_ids=getattr(self.ladder, "provider_ids", set()),
+            )
+            ModelScoreCache.install(cache)
+            self.ladder.rebuild(self.active_live_ids(), freeze=True)
+            self._sync_chains_from_ladder()
+        except Exception:
+            logger.exception("manual intel refresh failed")
 
     def _sync_chains_from_ladder(self) -> None:
         intents = list(self.catalog.intents.keys()) or [

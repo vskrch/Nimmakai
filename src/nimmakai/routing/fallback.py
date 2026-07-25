@@ -394,6 +394,24 @@ class FallbackExecutor:
             logger.exception("provider availability check failed for model %s", model)
             return False
 
+    def _make_deadline(self) -> float:
+        """Shared request deadline — both execute_json and execute_stream use this."""
+        base = float(getattr(self.settings, "request_deadline_seconds", 120.0) or 120.0)
+        return time.monotonic() + base
+
+    def _max_n_for_intent(self, intent: str) -> int:
+        """Per-intent fallback cap from config (replaces coding_max_fallbacks)."""
+        limits = getattr(self.settings, "intent_max_fallbacks", {}) or {}
+        default = int(getattr(self.settings, "max_model_fallbacks", 10) or 10)
+        return int(limits.get(intent, default))
+
+    def _attempt_budget_for(self, intent: str, remaining: float) -> float:
+        """Per-intent attempt budget (replaces hardcoded 45.0)."""
+        _intent_budgets = getattr(self.settings, "intent_attempt_budget_seconds", {}) or {}
+        _default_budget = float(getattr(self.settings, "per_attempt_budget_seconds", 30.0))
+        _per_attempt = float(_intent_budgets.get(intent, _default_budget))
+        return max(1.0, min(remaining, _per_attempt))
+
     def _is_auto_decision(self, decision: RouteDecision) -> bool:
         """True when the client asked for auto routing (nimmakai/auto etc.)."""
         mode = str(decision.mode or "")
@@ -433,7 +451,6 @@ class FallbackExecutor:
             variant=variant,
             max_n=max(max_n * 2, 16),
             include_related=True,
-            expand_coding_pool=True,
         )
         available = [
             m
@@ -462,13 +479,8 @@ class FallbackExecutor:
         return available
 
     def _chain(self, decision: RouteDecision, *, had_tools: bool = False) -> list[str]:
-        max_n = int(getattr(self.settings, "max_model_fallbacks", 10) or 10)
+        max_n = self._max_n_for_intent(decision.intent.value)
         is_auto = self._is_auto_decision(decision)
-        if decision.intent.value == "coding_agentic" or is_auto:
-            max_n = max(
-                max_n,
-                int(getattr(self.settings, "coding_max_fallbacks", 12) or 12),
-            )
         # Auto gets a longer attempt budget so intent can always be served
         if is_auto:
             max_n = max(max_n, 12)
@@ -500,8 +512,6 @@ class FallbackExecutor:
                         variant=getattr(decision, "variant", None) or "default",
                         max_n=max(max_n * 2, 20),
                         include_related=True,
-                        expand_coding_pool=decision.intent.value
-                        in {"coding_agentic", "reasoning", "long_horizon"},
                     )
                     if expanded:
                         seen = {m.lower() for m in raw}
@@ -796,9 +806,7 @@ class FallbackExecutor:
 
         from nimmakai.compat import openai_error
 
-        deadline = time.monotonic() + float(
-            getattr(self.settings, "request_deadline_seconds", 180.0) or 180.0
-        )
+        deadline = self._make_deadline()
 
         for idx, model in enumerate(chain):
             remaining = deadline - time.monotonic()
@@ -866,7 +874,7 @@ class FallbackExecutor:
             try:
                 import asyncio as _aio
 
-                attempt_budget = max(1.0, min(remaining, 45.0))
+                attempt_budget = self._attempt_budget_for(decision.intent.value, remaining)
                 status, resp_body, headers, key = await _aio.wait_for(
                     client.request_json(
                         "POST",
@@ -1118,9 +1126,11 @@ class FallbackExecutor:
                 return last
 
             if _is_retryable_model_error(status, resp_body) and idx < len(chain) - 1:
-                # 504 = upstream gateway timeout — no point backoff, advance now.
+                # 504 = upstream gateway timeout — already timed out, advance now (no sleep).
                 # 503 = transient overload — tiny backoff then advance.
-                if status == 429:
+                if status == 504:
+                    pass  # no backoff — advance immediately
+                elif status == 429:
                     ra = parse_retry_after(
                         headers.get("Retry-After") or headers.get("retry-after")
                     )
@@ -1179,10 +1189,7 @@ class FallbackExecutor:
                     try:
                         retry_chain = self._heal_empty_chain(
                             decision,
-                            max_n=int(
-                                getattr(self.settings, "coding_max_fallbacks", 12)
-                                or 12
-                            ),
+                            max_n=self._max_n_for_intent(decision.intent.value),
                             disabled=getattr(self.registry, "disabled_models", None)
                             or set(),
                             had_tools=had_tools,
@@ -1193,10 +1200,7 @@ class FallbackExecutor:
                         retry_chain = emergency_chain(
                             self.registry,
                             intent=decision.intent.value,
-                            max_n=int(
-                                getattr(self.settings, "coding_max_fallbacks", 5)
-                                or 5
-                            ),
+                            max_n=self._max_n_for_intent(decision.intent.value),
                         )
                 tried = {m.lower() for m in chain}
                 fresh = [
@@ -1234,7 +1238,7 @@ class FallbackExecutor:
                         pid2 = self._provider_id_for(model2)
                         t2 = time.perf_counter()
                         try:
-                            budget2 = max(1.0, min(rem2, 45.0))
+                            budget2 = self._attempt_budget_for(decision.intent.value, rem2)
                             s2, rb2, hd2, k2 = await _aio2.wait_for(
                                 client2.request_json(
                                     "POST",
@@ -1406,9 +1410,7 @@ class FallbackExecutor:
         last_pid: str | None = None
         saw_ttft_stall = False
         saw_deadline = False
-        deadline = time.monotonic() + float(
-            getattr(self.settings, "request_deadline_seconds", 180.0) or 180.0
-        )
+        deadline = self._make_deadline()
 
         def _error_bytes(
             message: str,
@@ -1423,7 +1425,7 @@ class FallbackExecutor:
 
         for idx, model in enumerate(chain):
             remaining = deadline - time.monotonic()
-            if remaining < 3.0 and idx > 0:
+            if remaining < getattr(self.settings, "deadline_guard_seconds", 3.0) and idx > 0:
                 last_status, last_model = 504, model
                 saw_deadline = True
                 logger.warning(
@@ -1463,7 +1465,7 @@ class FallbackExecutor:
             try:
                 import asyncio as _aio
 
-                attempt_budget = max(1.0, min(remaining, 45.0))
+                attempt_budget = self._attempt_budget_for(decision.intent.value, remaining)
                 status, byte_iter, headers, key = await _aio.wait_for(
                     client.stream(
                         "POST",
@@ -2010,7 +2012,9 @@ class FallbackExecutor:
             )
             if retryable and idx < len(chain) - 1:
                 # 504 = gateway timeout — advance immediately, no backoff
-                if status == 429:
+                if status == 504:
+                    pass  # no backoff — advance immediately
+                elif status == 429:
                     ra = parse_retry_after(
                         headers.get("Retry-After") or headers.get("retry-after")
                     )
@@ -2063,10 +2067,7 @@ class FallbackExecutor:
                 try:
                     retry_chain = self._heal_empty_chain(
                         decision,
-                        max_n=int(
-                            getattr(self.settings, "coding_max_fallbacks", 12)
-                            or 12
-                        ),
+                        max_n=self._max_n_for_intent(decision.intent.value),
                         disabled=getattr(self.registry, "disabled_models", None)
                         or set(),
                         had_tools=had_tools,
@@ -2077,10 +2078,7 @@ class FallbackExecutor:
                     retry_chain = emergency_chain(
                         self.registry,
                         intent=decision.intent.value,
-                        max_n=int(
-                            getattr(self.settings, "coding_max_fallbacks", 5)
-                            or 5
-                        ),
+                        max_n=self._max_n_for_intent(decision.intent.value),
                     )
             tried = {m.lower() for m in chain}
             fresh = [
