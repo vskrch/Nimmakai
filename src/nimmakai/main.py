@@ -279,18 +279,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         hub._on_capacity_change = lambda: guard.resize_gate(hub.gate_capacity())
 
-        # Load user preferences (SQLite + legacy JSON)
+        # Load user preferences & custom model ladders (SQLite)
+        from nimmakai.catalog.db import get_db
+        from nimmakai.catalog.model_ladders import ModelLadderStore
+
+        _db = get_db(settings.sqlite_path)
         preferences = UserPreferences(
             path=Path(".nimmakai/user_preferences.json"),
             db_path=Path(settings.sqlite_path),
         )
         preferences.load()
 
+        model_ladders = ModelLadderStore(_db)
+        model_ladders.load()
+
         # Bind sticky ranking cache (SQLite) as early as possible
         try:
-            from nimmakai.catalog.db import get_db
-
-            _db = get_db(settings.sqlite_path)
             if registry is not None:
                 registry.rankings_sticky = True
                 registry.bind_db(_db)
@@ -299,7 +303,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         if registry is not None:
             registry.ladder.provider_ids = set(hub.provider_ids)
-            selector = ModelSelector(registry, settings, preferences=preferences)
+            selector = ModelSelector(
+                registry, settings, preferences=preferences, model_ladders=model_ladders
+            )
             fallback = FallbackExecutor(
                 upstream, registry, settings, stats=routing_stats, hub=hub
             )
@@ -453,6 +459,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.guard = guard
         app.state.routing_stats = routing_stats
         app.state.preferences = preferences
+        app.state.model_ladders = model_ladders
 
         _init_accounts(app, settings)
         _init_analytics(app, settings)

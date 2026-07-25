@@ -1092,6 +1092,85 @@ async def clear_all_preferences(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "preferences": []})
 
 
+# ── Custom Model Ladders (NMK-LAD-101) ──────────────────────────────────
+
+
+@router.get("/admin/model-ladders")
+async def list_model_ladders(request: Request) -> JSONResponse:
+    """List custom model-specific fallback chains."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    ladders_store = getattr(request.app.state, "model_ladders", None)
+    if ladders_store is None:
+        return JSONResponse({"ok": True, "ladders": []})
+    ladders = [l.to_dict() for l in ladders_store.ladders.values()]
+    return JSONResponse({"ok": True, "ladders": ladders})
+
+
+@router.post("/admin/model-ladders")
+async def set_model_ladder(request: Request) -> JSONResponse:
+    """
+    Set or update a custom model ladder.
+    Body: {model_id, chain[], note?}
+    """
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    ladders_store = getattr(request.app.state, "model_ladders", None)
+    if ladders_store is None:
+        return JSONResponse(
+            {
+                "error": {
+                    "message": "Model ladders store not ready",
+                    "code": "nimmakai_no_ladders",
+                }
+            },
+            status_code=503,
+        )
+    body_or_err = await _safe_json(request)
+    if isinstance(body_or_err, JSONResponse):
+        return body_or_err
+    body: dict[str, Any] = body_or_err
+    model_id = str(body.get("model_id") or "").strip()
+    chain = body.get("chain") if isinstance(body.get("chain"), list) else None
+    if not model_id or chain is None:
+        return JSONResponse(
+            {
+                "error": {
+                    "message": "model_id and chain (list) are required",
+                    "code": "invalid_request",
+                }
+            },
+            status_code=400,
+        )
+    if len(chain) == 0:
+        ladders_store.clear(model_id)
+        return JSONResponse({"ok": True, "ladder": None, "cleared": True})
+    try:
+        lad = ladders_store.set(
+            model_id,
+            chain,
+            note=str(body.get("note") or ""),
+        )
+    except ValueError as exc:
+        return JSONResponse(
+            {"error": {"message": str(exc), "code": "invalid_model_id"}},
+            status_code=400,
+        )
+    return JSONResponse({"ok": True, "ladder": lad.to_dict()})
+
+
+@router.delete("/admin/model-ladders/{model_id:path}")
+async def delete_model_ladder(request: Request, model_id: str) -> JSONResponse:
+    """Delete a custom model ladder."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    ladders_store = getattr(request.app.state, "model_ladders", None)
+    if ladders_store is None:
+        return JSONResponse({"ok": True, "cleared": False})
+    ok = ladders_store.clear(model_id)
+    return JSONResponse({"ok": True, "cleared": ok})
+
+
 # ── Real-time Events (SSE) & Provider Health (NMK-504, 505) ─────────────
 
 

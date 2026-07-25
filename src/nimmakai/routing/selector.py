@@ -61,10 +61,12 @@ class ModelSelector:
         registry: ModelRegistry,
         settings: Settings,
         preferences: Any | None = None,
+        model_ladders: Any | None = None,
     ) -> None:
         self.registry = registry
         self.settings = settings
         self.preferences = preferences
+        self.model_ladders = model_ladders
 
     def _max_n_for_intent(self, intent: str) -> int:
         """Per-intent fallback cap from config (replaces coding_max_fallbacks)."""
@@ -121,6 +123,31 @@ class ModelSelector:
         requested_live = self.registry.resolve_live_id(raw, include_disabled=True)
         if requested_live in self.registry.disabled_models:
             raise ValueError("model_disabled")
+
+        # Custom model ladder check (e.g. nimmakai/coding)
+        if self.model_ladders is not None and (raw or model_field):
+            target_id = raw if raw else str(model_field or "")
+            lad = self.model_ladders.get(target_id)
+            if lad is not None and lad.chain:
+                chain = self._finalize_chain(
+                    list(lad.chain),
+                    intent_key=intent_key,
+                    variant=variant,
+                    free_only=tier == "free",
+                    allowed=opts.allowed_models,
+                    preferred_model=preferred_model if tier else None,
+                    models_fallback=opts.models_fallback,
+                )
+                return RouteDecision(
+                    chain=chain,
+                    mode="passthrough_with_fallback",
+                    intent=intent,
+                    rule_id=f"custom_ladder:{target_id}",
+                    requested_model=model_field,
+                    auto_tier=tier,
+                    variant=variant,
+                    allowed_models=list(opts.allowed_models),
+                )
 
         # User preferences first
         if self.preferences is not None and self.preferences.has_preference(intent_key):

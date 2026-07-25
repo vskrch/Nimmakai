@@ -39,16 +39,21 @@ export default function ModelLaddersPage() {
 
   const loadLadders = useCallback(async () => {
     const r = await api<{ ladders: ModelLadder[] }>('/admin/model-ladders')
-    if (r) setLadders(r.ladders)
+    if (r && Array.isArray(r.ladders)) {
+      setLadders(r.ladders)
+    } else {
+      setLadders([])
+    }
   }, [])
 
   useEffect(() => { loadLadders() }, [loadLadders])
 
   // Load selected model's existing chain into the editor
   useEffect(() => {
-    const existing = ladders.find(l => l.model_id === selectedModel)
+    const safeLadders = Array.isArray(ladders) ? ladders : []
+    const existing = safeLadders.find(l => l?.model_id === selectedModel)
     if (existing) {
-      setChain(existing.chain)
+      setChain(Array.isArray(existing.chain) ? existing.chain : [])
       setNote(existing.note || '')
     } else {
       setChain([])
