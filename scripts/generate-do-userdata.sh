@@ -14,7 +14,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT_FILE="${ROOT}/potato-droplet-userdata.sh"
-DEFAULT_REPO="https://github.com/vskrch/Potato.git"
+DEFAULT_REPO="https://github.com/vskrch/potato-gateway.git"
 DEFAULT_BRANCH="main"
 
 usage() {

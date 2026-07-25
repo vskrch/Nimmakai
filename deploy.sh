@@ -152,7 +152,7 @@ if [[ ! -f "docker-compose.do.yml" ]]; then
     if [[ ! -d "${INSTALL_DIR}/.git" ]]; then
         log "Cloning Potato repository into ${INSTALL_DIR}..."
         rm -rf "${INSTALL_DIR:?}/"* || true
-        git clone --depth 1 https://github.com/vskrch/Potato.git "${INSTALL_DIR}"
+        git clone --depth 1 https://github.com/vskrch/potato-gateway.git "${INSTALL_DIR}"
         cd "${INSTALL_DIR}"
     else
         log "Repository exists at ${INSTALL_DIR}. Updating to latest release..."

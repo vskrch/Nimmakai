@@ -1,6 +1,6 @@
 # Potato 🥔 — Enterprise LLM Gateway & Adaptive Contextual RL Auto-Router
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/vskrch/Potato)
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com/vskrch/potato-gateway)
 [![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue)](https://python.org)
 [![RL Engine](https://img.shields.io/badge/RL-LinUCB%20Contextual%20Bandit-orange)](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/routing/rl_engine.py)
 [![UI Dashboard](https://img.shields.io/badge/ui-React%2018%20%2B%20Tailwind-purple)](file:///Users/venkatasai/CascadeProjects/Potato/frontend)
@@ -190,7 +190,7 @@ DOMAIN_NAME="api.yourdomain.com" curl -fsSL https://raw.githubusercontent.com/vs
 
 #### 1. Clone & Configure Environment
 ```bash
-git clone https://github.com/vskrch/Potato.git /opt/potato
+git clone https://github.com/vskrch/potato-gateway.git /opt/potato
 cd /opt/potato
 
 cat <<EOF > .env

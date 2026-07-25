@@ -507,7 +507,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             await hub.stop()
 
     app = FastAPI(
-        title="Potato",
+        title="Potato Gateway",
         description=(
             "Self-hosted OpenRouter-style gateway: NVIDIA NIM + any OpenAI-compatible "
             "providers with intelligent model routing."
