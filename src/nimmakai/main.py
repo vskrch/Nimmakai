@@ -293,6 +293,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         model_ladders = ModelLadderStore(_db)
         model_ladders.load()
 
+        # Initialize LinUCB RL Engine (NMK-RL-101)
+        from nimmakai.routing.rl_engine import LinUCBPolicyEngine, ModelLinUCBState
+        rl_engine = LinUCBPolicyEngine()
+        try:
+            saved_rl = _db.load_rl_policy()
+            with rl_engine._lock:
+                for mid, sdict in saved_rl.items():
+                    rl_engine._states[mid] = ModelLinUCBState.from_dict(sdict)
+            if saved_rl:
+                logger.info("loaded %d RL model policies from SQLite", len(saved_rl))
+        except Exception:
+            logger.exception("failed loading RL policies from SQLite")
+
         # Bind sticky ranking cache (SQLite) as early as possible
         try:
             if registry is not None:
@@ -304,7 +317,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if registry is not None:
             registry.ladder.provider_ids = set(hub.provider_ids)
             selector = ModelSelector(
-                registry, settings, preferences=preferences, model_ladders=model_ladders
+                registry,
+                settings,
+                preferences=preferences,
+                model_ladders=model_ladders,
+                rl_engine=rl_engine,
             )
             fallback = FallbackExecutor(
                 upstream, registry, settings, stats=routing_stats, hub=hub
@@ -460,6 +477,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.routing_stats = routing_stats
         app.state.preferences = preferences
         app.state.model_ladders = model_ladders
+        app.state.rl_engine = rl_engine
 
         _init_accounts(app, settings)
         _init_analytics(app, settings)

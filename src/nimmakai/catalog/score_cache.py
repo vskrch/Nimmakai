@@ -256,7 +256,7 @@ def _compute_intent_affinity(
         try:
             alpha, beta_p = learning.thompson_params(intent, model_id)
             posterior_mean = alpha / (alpha + beta_p)
-            posterior_factor = 0.7 + 0.6 * posterior_mean
+            posterior_factor = 0.5 + 1.0 * posterior_mean
         except Exception:
             posterior_factor = 1.0
 
@@ -349,14 +349,35 @@ def _normalize_slug_from_id(model_id: str) -> str:
 def _fuzzy_match_bundle(
     slug: str, bundles: dict[str, IntelBundle]
 ) -> IntelBundle | None:
-    best: tuple[int, IntelBundle] | None = None
-    for bslug, b in bundles.items():
-        n = min(len(slug), len(bslug))
-        common = sum(1 for i in range(n) if slug[i] == bslug[i])
-        # Must share at least 4 chars AND be the best match
-        if common >= 4 and (best is None or common > best[0]):
-            best = (common, b)
-    return best[1] if best else None
+    """
+    Deterministic fuzzy match for model bundles.
+    Ensures model family AND parameter size tokens (e.g., 8b, 70b, 8x7b, 8x22b) match.
+    """
+    slug_tokens = set(re.findall(r"[a-z0-9]+", slug.lower()))
+    slug_nums = set(re.findall(r"\d+[bkm]?", slug.lower()))
+
+    best_bundle: IntelBundle | None = None
+    best_score = 0.0
+
+    for bslug, b in sorted(bundles.items(), key=lambda item: item[0]):
+        btokens = set(re.findall(r"[a-z0-9]+", bslug.lower()))
+        bnums = set(re.findall(r"\d+[bkm]?", bslug.lower()))
+
+        # Parameter sizes/numbers must not conflict (e.g. 7b != 70b, 8x7b != 8x22b)
+        if slug_nums and bnums and slug_nums != bnums:
+            continue
+
+        intersection = slug_tokens & btokens
+        union = slug_tokens | btokens
+        if not union:
+            continue
+        jaccard = len(intersection) / len(union)
+
+        if jaccard >= 0.75 and jaccard > best_score:
+            best_score = jaccard
+            best_bundle = b
+
+    return best_bundle
 
 
 def _glob_match(s: str, pattern: str) -> bool:

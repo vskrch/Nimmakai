@@ -70,17 +70,17 @@ def _quality_prior(
     max_score: precomputed max of ladder_scores (avoids recomputing per model).
     """
     if not ladder_scores:
-        return 0.70
+        return 0.50
     raw = ladder_scores.get(model_id)
     if raw is None:
-        return 0.70
+        return 0.50
     raw = float(raw)
     if raw <= 0 or raw != raw:  # NaN guard: NaN != NaN
         return 0.50
     if max_score is None:
         max_score = max(ladder_scores.values())
     if max_score <= 0:
-        return 0.65
+        return 0.50
     return max(0.35, min(1.0, raw / max_score))
 
 
@@ -111,8 +111,8 @@ def _speed_factor(health: Any, model_id: str) -> float:
     elif h.consecutive_fails >= 2:
         streak = 0.75
 
-    # Blend: throughput + latency + hot streak
-    return (0.50 * tps_f + 0.40 * lat_f + 0.10) * streak
+    # Blend: throughput + latency + hot streak (no arbitrary +0.10 constant bias)
+    return (0.55 * tps_f + 0.45 * lat_f) * streak
 
 
 def _provider_factor(model_id: str, provider_ids: set[str], health: Any = None) -> float:
@@ -152,7 +152,8 @@ def _availability_factor(health: Any, model_id: str) -> float:
         return max(0.1, 0.6 - 0.15 * h.consecutive_fails)
     total = h.success_count + h.error_count
     if total < getattr(health, "min_samples", 3):
-        return 1.0
+        # Bayesian Laplace smoothing for low sample counts: (success + 1) / (total + 2)
+        return max(0.1, min(1.0, (h.success_count + 1.0) / (total + 2.0)))
     return max(0.08, 1.0 - h.error_rate)
 
 

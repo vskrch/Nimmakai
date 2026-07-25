@@ -534,14 +534,14 @@ class LadderService:
     def _cost_multiplier(self, mid_lower: str) -> float:
         """
         Heuristic: smaller models are cheaper.
-        8B gets ~1.6x multiplier, 70B gets ~0.37x, 400B gets ~0.07x.
-        This aggressively promotes smaller models for 'cheap' routing.
+        8B gets ~1.3x multiplier, 70B gets ~0.4x.
+        Self-documenting logarithmic cost curve.
         """
         m = PARAM_RE.search(mid_lower)
         if m:
             try:
                 params_b = int(m.group(1))
-                return max(0.05, 30.0 / (params_b + 10.0))
+                return max(0.05, 1.0 + max(-0.95, math.log2(20.0 / max(1.0, float(params_b)))))
             except ValueError:
                 pass
         return 0.5  # Unknown cost: penalize moderately to favor known-small models
@@ -606,7 +606,8 @@ class LadderService:
             return (mean - 0.5) * self._thompson_scale
         sample = random.betavariate(alpha, beta)
         model_n = self.learning.model_requests(intent, model_id)
-        weight = min(1.0, model_n / float(self._thompson_blend_n))
+        # Recency-weighted Thompson blend factor
+        weight = min(1.0, math.sqrt(model_n / float(self._thompson_blend_n)))
         blended = weight * sample + (1.0 - weight) * mean
         return (blended - 0.5) * self._thompson_scale
 

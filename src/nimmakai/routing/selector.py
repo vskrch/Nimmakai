@@ -62,11 +62,32 @@ class ModelSelector:
         settings: Settings,
         preferences: Any | None = None,
         model_ladders: Any | None = None,
+        rl_engine: Any | None = None,
     ) -> None:
         self.registry = registry
         self.settings = settings
         self.preferences = preferences
         self.model_ladders = model_ladders
+        self.rl_engine = rl_engine
+
+    def rank_chain_with_rl(
+        self, chain: list[str], feature_vector: list[float] | None = None
+    ) -> list[str]:
+        if not self.rl_engine or not chain or not feature_vector or len(chain) <= 1:
+            return chain
+
+        scored: list[tuple[float, str]] = []
+        for idx, mid in enumerate(chain):
+            rl_score, _, _ = self.rl_engine.score(mid, feature_vector)
+            # Multiplicative boost bounded in [0.5, 2.0] so baseline capability is preserved
+            boost = max(0.5, min(2.0, 1.0 + rl_score))
+            # Preserve base candidate order position via subtle tie-breaker
+            position_weight = 1.0 / (1.0 + 0.05 * idx)
+            composite = boost * position_weight
+            scored.append((composite, mid))
+
+        scored.sort(key=lambda item: item[0], reverse=True)
+        return [mid for _, mid in scored]
 
     def _max_n_for_intent(self, intent: str) -> int:
         """Per-intent fallback cap from config (replaces coding_max_fallbacks)."""

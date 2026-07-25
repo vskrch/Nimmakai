@@ -344,6 +344,8 @@ class IntentClassifier:
         if features["has_image"]:
             return self._result(Intent.VISION, 0.95, "vision_parts", features)
 
+        # Note: Deterministic tool short-circuit runs early in classify() before _classify_rules.
+        # This check is preserved for direct _classify_rules calls and feature inspection.
         if (
             features["has_tools"]
             or features["has_tool_choice"]

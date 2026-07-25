@@ -1487,3 +1487,49 @@ async def put_custom_catalog(request: Request) -> JSONResponse:
     db = _ext_db(request)
     db.set_custom_catalog_mappings(cleaned)
     return JSONResponse({"ok": True, "mappings": cleaned})
+
+
+# ── RL Policy Telemetry Endpoints (NMK-RL-101) ──────────────────────
+@router.get("/rl/stats")
+@router.get("/admin/rl/stats")
+async def get_rl_stats(request: Request) -> JSONResponse:
+    """Return live Reinforcement Learning LinUCB bandit stats per model."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    rl_engine = getattr(request.app.state, "rl_engine", None)
+    if rl_engine is None:
+        return JSONResponse({"models": [], "feature_dim": 12, "enabled": False})
+    stats = rl_engine.get_all_stats()
+    from nimmakai.routing.rl_features import FEATURE_NAMES
+    return JSONResponse({
+        "models": stats,
+        "feature_names": FEATURE_NAMES,
+        "feature_dim": 12,
+        "enabled": True,
+    })
+
+
+@router.post("/rl/reset")
+@router.post("/admin/rl/reset")
+async def reset_rl_stats(request: Request) -> JSONResponse:
+    """Reset RL policies for a specific model or all models."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    body = await _safe_json(request)
+    model_id = None
+    if isinstance(body, dict):
+        model_id = body.get("model_id")
+
+    rl_engine = getattr(request.app.state, "rl_engine", None)
+    if rl_engine is not None:
+        if model_id:
+            rl_engine.reset_model(model_id)
+        else:
+            rl_engine.reset_all()
+
+    from nimmakai.catalog.db import get_db
+    if settings:
+        db = get_db(settings.sqlite_path)
+        db.clear_rl_policy(model_id)
+
+    return JSONResponse({"ok": True, "reset_model": model_id or "all"})

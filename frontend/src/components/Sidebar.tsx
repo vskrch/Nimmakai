@@ -56,6 +56,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'models', label: 'Model Catalog', icon: Cpu },
   { id: 'routing', label: 'Routing Engine', icon: GitFork },
   { id: 'ladders', label: 'Model Ladders', icon: Layers },
+  { id: 'rl', label: 'Adaptive RL', icon: Zap },
 ]
 
 export default function Sidebar({ page, onNavigate, isAdmin, email, onLogout }: SidebarProps) {
