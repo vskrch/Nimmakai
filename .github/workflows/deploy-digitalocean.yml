@@ -35,7 +35,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build image (smoke)
-        run: docker build -t nimmakai:ci .
+        run: docker build -t potato:ci .
 
   deploy:
     runs-on: ubuntu-latest
