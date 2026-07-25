@@ -17,7 +17,8 @@ import {
   LogOut,
   Zap,
   ShieldCheck,
-  Key
+  Key,
+  Layers
 } from 'lucide-react'
 
 interface SidebarProps {
@@ -54,6 +55,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'health', label: 'Provider Health', icon: Activity },
   { id: 'models', label: 'Model Catalog', icon: Cpu },
   { id: 'routing', label: 'Routing Engine', icon: GitFork },
+  { id: 'ladders', label: 'Model Ladders', icon: Layers },
 ]
 
 export default function Sidebar({ page, onNavigate, isAdmin, email, onLogout }: SidebarProps) {

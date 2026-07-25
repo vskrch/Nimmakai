@@ -16,6 +16,7 @@ import ProvidersPage from './pages/ProvidersPage'
 import HealthPage from './pages/HealthPage'
 import ModelsPage from './pages/ModelsPage'
 import RoutingPage from './pages/RoutingPage'
+import ModelLaddersPage from './pages/ModelLaddersPage'
 import PlaygroundPage from './pages/PlaygroundPage'
 import UsersPage from './pages/UsersPage'
 import AccountPage from './pages/AccountPage'
@@ -34,6 +35,7 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   health: { title: 'Provider Health', subtitle: 'Latency telemetry, cooldowns & circuit breakers' },
   models: { title: 'Model Catalog', subtitle: 'Live model pool, quality scores & ELO rankings' },
   routing: { title: 'Routing Strategy', subtitle: 'Custom preference chains & ladder configuration' },
+  ladders: { title: 'Model Ladders', subtitle: 'Drag-and-drop custom fallback chains per virtual model' },
 }
 
 export default function App() {
@@ -158,6 +160,7 @@ export default function App() {
           {page === 'health' && isAdmin && <HealthPage />}
           {page === 'models' && isAdmin && <ModelsPage />}
           {page === 'routing' && isAdmin && <RoutingPage />}
+          {page === 'ladders' && isAdmin && <ModelLaddersPage />}
           {page === 'playground' && <PlaygroundPage />}
         </main>
       </div>
