@@ -180,13 +180,13 @@ Potato exposes three primary protocol surfaces:
 Run this single command on any fresh Ubuntu / DigitalOcean Droplet to install Docker, setup secrets, launch containers, configure UFW firewall rules, and verify health automatically:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/vskrch/Potato/main/deploy.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh | sudo bash
 ```
 
 Or pass your domain for automatic SSL HTTPS configuration via Caddy:
 
 ```bash
-DOMAIN_NAME="api.yourdomain.com" curl -fsSL https://raw.githubusercontent.com/vskrch/Potato/main/deploy.sh | sudo bash
+DOMAIN_NAME="api.yourdomain.com" curl -fsSL https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh | sudo bash
 ```
 
 ---
