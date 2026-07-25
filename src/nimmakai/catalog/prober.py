@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import time
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -86,9 +87,17 @@ async def probe_models(
 
 def save_snapshot(path: Path, data: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
-    tmp.replace(path)
+    tmp = path.with_name(f"{path.name}.tmp.{uuid.uuid4().hex}")
+    try:
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        tmp.replace(path)
+    except Exception:
+        logger.exception("failed to save catalog snapshot %s", path)
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except Exception:
+                pass
 
 
 def load_snapshot(path: Path) -> dict[str, Any] | None:
