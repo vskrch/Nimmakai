@@ -77,6 +77,16 @@ CREATE TABLE IF NOT EXISTS model_pool_config (
     note TEXT NOT NULL DEFAULT '',
     updated_at REAL NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS user_provider_keys (
+    account_id TEXT NOT NULL,
+    provider_id TEXT NOT NULL,
+    api_key_ciphertext TEXT NOT NULL,
+    enabled INTEGER DEFAULT 1,
+    note TEXT NOT NULL DEFAULT '',
+    updated_at REAL NOT NULL,
+    PRIMARY KEY (account_id, provider_id)
+);
 """
 
 
@@ -582,6 +592,61 @@ class PotatoDB:
     def delete_model_pool_config(self, model_id: str) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM model_pool_config WHERE model_id = ?", (model_id,))
+
+    # ── User Provider Keys (BYOK Multi-Tenancy) ───────────────────────
+    def load_user_provider_keys(self, account_id: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            if account_id:
+                rows = self._conn.execute(
+                    "SELECT account_id, provider_id, api_key_ciphertext, enabled, note, updated_at FROM user_provider_keys WHERE account_id = ?",
+                    (account_id,),
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT account_id, provider_id, api_key_ciphertext, enabled, note, updated_at FROM user_provider_keys"
+                ).fetchall()
+        return [
+            {
+                "account_id": str(r["account_id"]),
+                "provider_id": str(r["provider_id"]),
+                "api_key_ciphertext": str(r["api_key_ciphertext"]),
+                "enabled": bool(r["enabled"]),
+                "note": str(r["note"] or ""),
+                "updated_at": float(r["updated_at"] or 0.0),
+            }
+            for r in rows
+        ]
+
+    def upsert_user_provider_key(
+        self,
+        account_id: str,
+        provider_id: str,
+        api_key_ciphertext: str,
+        enabled: int,
+        note: str,
+        updated_at: float,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO user_provider_keys (
+                    account_id, provider_id, api_key_ciphertext, enabled, note, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(account_id, provider_id) DO UPDATE SET
+                    api_key_ciphertext=excluded.api_key_ciphertext,
+                    enabled=excluded.enabled,
+                    note=excluded.note,
+                    updated_at=excluded.updated_at
+                """,
+                (account_id, provider_id, api_key_ciphertext, enabled, note, updated_at),
+            )
+
+    def delete_user_provider_key(self, account_id: str, provider_id: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "DELETE FROM user_provider_keys WHERE account_id = ? AND provider_id = ?",
+                (account_id, provider_id),
+            )
 
 
 # Process-wide cache so ProviderStore + UserPreferences share one connection.

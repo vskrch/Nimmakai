@@ -455,3 +455,103 @@ async def admin_suspend_user(user_id: str, request: Request) -> JSONResponse:
         )
     store.delete_sessions_for_user(user_id)
     return JSONResponse({"ok": True, "user": store.public_user(user)})
+
+
+# ── BYOK (Bring Your Own Keys) Multi-Tenant Endpoints ─────────────────
+@router.get("/v1/account/provider-keys")
+async def list_user_provider_keys(request: Request) -> JSONResponse:
+    """List authenticated user's BYOK provider keys (masked)."""
+    user, _ = resolve_auth(request, _store(request))
+    if not user:
+        return JSONResponse({"error": {"message": "Authentication required", "code": "unauthorized"}}, status_code=401)
+
+    from potato.catalog.db import get_db
+    from potato.accounts.byok import decrypt_api_key, mask_key
+    settings = _settings(request)
+    db = get_db(settings.sqlite_path)
+    master_secret = str(getattr(settings, "admin_password", None) or settings.proxy_api_keys[0] if settings.proxy_api_keys else "potato-secret")
+
+    raw_keys = db.load_user_provider_keys(user["id"])
+    out = []
+    for k in raw_keys:
+        masked = ""
+        if k["api_key_ciphertext"]:
+            try:
+                decrypted = decrypt_api_key(k["api_key_ciphertext"], master_secret)
+                masked = mask_key(decrypted)
+            except Exception:
+                masked = "sk-***(error)"
+        out.append({
+            "provider_id": k["provider_id"],
+            "masked_key": masked,
+            "enabled": k["enabled"],
+            "note": k["note"],
+            "updated_at": k["updated_at"],
+        })
+
+    return JSONResponse({"provider_keys": out})
+
+
+@router.post("/v1/account/provider-keys")
+async def save_user_provider_key(request: Request) -> JSONResponse:
+    """Save or update user's BYOK provider key (encrypted at rest)."""
+    user, _ = resolve_auth(request, _store(request))
+    if not user:
+        return JSONResponse({"error": {"message": "Authentication required", "code": "unauthorized"}}, status_code=401)
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": {"message": "Invalid JSON", "code": "invalid_json"}}, status_code=400)
+
+    provider_id = str(body.get("provider_id") or "").strip().lower()
+    raw_api_key = str(body.get("api_key") or "").strip()
+    note = str(body.get("note") or "").strip()
+    enabled = bool(body.get("enabled", True))
+
+    if not provider_id or not raw_api_key:
+        return JSONResponse({"error": {"message": "provider_id and api_key are required", "code": "invalid_request"}}, status_code=400)
+
+    from potato.catalog.db import get_db
+    from potato.accounts.byok import encrypt_api_key, mask_key
+    import time
+    settings = _settings(request)
+    db = get_db(settings.sqlite_path)
+    master_secret = str(getattr(settings, "admin_password", None) or settings.proxy_api_keys[0] if settings.proxy_api_keys else "potato-secret")
+
+    ciphertext = encrypt_api_key(raw_api_key, master_secret)
+    updated_at = time.time()
+    db.upsert_user_provider_key(
+        account_id=user["id"],
+        provider_id=provider_id,
+        api_key_ciphertext=ciphertext,
+        enabled=1 if enabled else 0,
+        note=note,
+        updated_at=updated_at,
+    )
+
+    return JSONResponse({
+        "ok": True,
+        "provider_key": {
+            "provider_id": provider_id,
+            "masked_key": mask_key(raw_api_key),
+            "enabled": enabled,
+            "note": note,
+            "updated_at": updated_at,
+        }
+    })
+
+
+@router.delete("/v1/account/provider-keys/{provider_id}")
+async def delete_user_provider_key(provider_id: str, request: Request) -> JSONResponse:
+    """Delete user's BYOK provider key."""
+    user, _ = resolve_auth(request, _store(request))
+    if not user:
+        return JSONResponse({"error": {"message": "Authentication required", "code": "unauthorized"}}, status_code=401)
+
+    from potato.catalog.db import get_db
+    settings = _settings(request)
+    db = get_db(settings.sqlite_path)
+    db.delete_user_provider_key(user["id"], provider_id.lower())
+
+    return JSONResponse({"ok": True, "deleted_provider": provider_id.lower()})

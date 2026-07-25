@@ -224,3 +224,48 @@ class ProviderHub:
 
     def namespace(self, provider_id: str, upstream_model_id: str) -> str:
         return namespace_model(provider_id, upstream_model_id)
+
+    def get_byok_upstream(
+        self,
+        provider_id: str,
+        account_id: str | None = None,
+        db: Any = None,
+        master_secret: str = "",
+        allow_shared_fallback: bool = True,
+    ) -> UpstreamClient | None:
+        """
+        BYOK Key Resolution:
+        1. User's encrypted API key in db for (account_id, provider_id)
+        2. Admin's shared key pool (if allow_shared_fallback is True)
+        """
+        pid = provider_id.lower()
+        if account_id and db and master_secret:
+            try:
+                from potato.accounts.byok import decrypt_api_key
+                user_keys = db.load_user_provider_keys(account_id)
+                for k in user_keys:
+                    if k["provider_id"].lower() == pid and k["enabled"] and k["api_key_ciphertext"]:
+                        raw_key = decrypt_api_key(k["api_key_ciphertext"], master_secret)
+                        if raw_key:
+                            rt = self.runtimes.get(pid)
+                            base_url = rt.config.base_url if rt else self.settings.nim_base_url
+                            pool = KeyPool(
+                                api_keys=[raw_key],
+                                rpm_limit=self.settings.nim_rpm_limit,
+                                cooldown_seconds=self.settings.nim_cooldown_seconds,
+                            )
+                            return UpstreamClient(
+                                base_url=base_url,
+                                pool=pool,
+                                timeout=self.settings.upstream_timeout,
+                                user_agent=self.settings.upstream_user_agent,
+                                proxy_url=self.settings.egress_proxy_url(),
+                            )
+            except Exception:
+                logger.exception("BYOK key resolution failed for user %s provider %s", account_id, pid)
+
+        # Fallback to global shared admin key pool
+        if allow_shared_fallback and self.has_runtime(pid):
+            return self.runtimes[pid].upstream
+
+        return None

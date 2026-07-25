@@ -155,6 +155,55 @@ export default function AccountPage({ session, onRefresh }: AccountPageProps) {
         </CardBody>
       </Card>
 
+      {/* BYOK Upstream API Key Management */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Key className="w-4 h-4 text-emerald-400" />
+            <h3 className="text-sm font-semibold text-white">Bring Your Own Keys (BYOK Upstream Keys)</h3>
+          </div>
+          <Badge variant="ok">Encrypted AES-256</Badge>
+        </CardHeader>
+        <CardBody className="space-y-4 text-xs">
+          <p className="text-zinc-400 text-xs">
+            Add your private upstream provider API keys (OpenAI, Anthropic, Groq, NVIDIA NIM). Requests will route using your private keys first.
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            <input
+              type="text"
+              placeholder="provider_id (e.g. groq, nim, openai)"
+              id="byok_provider"
+              className="bg-zinc-950 border border-white/[0.1] text-white px-3 py-2 rounded-xl text-xs font-mono focus:outline-none focus:border-violet-500"
+            />
+            <input
+              type="password"
+              placeholder="Upstream API Key (gsk_..., nvapi-...)"
+              id="byok_key"
+              className="bg-zinc-950 border border-white/[0.1] text-white px-3 py-2 rounded-xl text-xs font-mono focus:outline-none focus:border-violet-500"
+            />
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={async () => {
+                const p = (document.getElementById('byok_provider') as HTMLInputElement)?.value
+                const k = (document.getElementById('byok_key') as HTMLInputElement)?.value
+                if (!p || !k) return
+                const r = await ap('/v1/account/provider-keys', { provider_id: p, api_key: k })
+                if (okBody(r)) {
+                  setMsg(`Saved encrypted BYOK key for ${p}`)
+                  onRefresh()
+                } else {
+                  setMsg(errMsg(r, 'Failed saving BYOK key'))
+                }
+              }}
+            >
+              Save BYOK Key
+            </Button>
+          </div>
+        </CardBody>
+      </Card>
+
       {/* Code Snippet integration example */}
       <Card>
         <CardHeader>
