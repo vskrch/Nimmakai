@@ -85,6 +85,24 @@ class Settings(BaseSettings):
     strict_catalog: bool = False
     inject_auto_model: bool = True
     fallback_on_pool_exhaust: bool = True
+    # Universal system prompt prepended to every chat request (empty = off).
+    # Forces response language to match the user's input and forbids
+    # hallucinated CJK output from non-Chinese open models.
+    default_system_prompt: str = (
+        "You are a knowledgeable, precise, and helpful assistant.\n"
+        "- Respond in the same language as the user's most recent message. "
+        "If the user writes in English, reply in English.\n"
+        "- Never emit Chinese, Japanese, or Korean characters unless the user "
+        "explicitly requests them. If unsure of the output language, default to English.\n"
+        "- Be accurate and grounded. If you do not know something, say so rather "
+        "than fabricating.\n"
+        "- Be concise by default; expand only when the task requires detail or "
+        "step-by-step reasoning.\n"
+        "- When tools are available, prefer calling a tool over guessing when "
+        "real-time or factual data is needed.\n"
+        "- Preserve code, identifiers, and file paths exactly; do not translate "
+        "or transliterate them."
+    )
     catalog_docs_url: str = "https://build.nvidia.com/models.md"
     catalog_snapshot_path: str = ".nimmakai/catalog_snapshot.json"
     probe_budget_per_hour: int = 8

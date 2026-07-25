@@ -7,6 +7,7 @@ import json
 import pytest
 
 from nimmakai.compat import (
+    inject_system_prompt,
     normalize_completion_json,
     normalize_sse_stream,
     sanitize_chat_body,
@@ -99,3 +100,53 @@ def test_transform_sse_keeps_tool_calls_empty_content() -> None:
     delta = payload["choices"][0]["delta"]
     assert delta["content"] == ""
     assert "tool_calls" in delta
+
+
+# ── Universal system prompt injection ────────────────────────────────
+
+
+def test_inject_system_prompt_inserts_when_absent() -> None:
+    body = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+    out = inject_system_prompt(body, "RULES")
+    assert out["messages"][0] == {"role": "system", "content": "RULES"}
+    assert out["messages"][1]["role"] == "user"
+
+
+def test_inject_system_prompt_merges_with_existing_string_system() -> None:
+    body = {
+        "model": "m",
+        "messages": [
+            {"role": "system", "content": "BE NICE"},
+            {"role": "user", "content": "hi"},
+        ],
+    }
+    out = inject_system_prompt(body, "RULES")
+    assert len(out["messages"]) == 2
+    assert out["messages"][0]["role"] == "system"
+    assert out["messages"][0]["content"].startswith("RULES")
+    assert "BE NICE" in out["messages"][0]["content"]
+
+
+def test_inject_system_prompt_skips_empty_prompt() -> None:
+    body = {"model": "m", "messages": [{"role": "user", "content": "hi"}]}
+    assert inject_system_prompt(body, "") is body
+    assert inject_system_prompt(body, None) is body
+
+
+def test_inject_system_prompt_skips_when_no_messages() -> None:
+    # embeddings-style body — no messages key; leave untouched
+    body = {"model": "m", "input": "x"}
+    assert inject_system_prompt(body, "RULES") is body
+
+
+def test_inject_system_prompt_inserts_before_multimodal_system() -> None:
+    body = {
+        "model": "m",
+        "messages": [
+            {"role": "system", "content": [{"type": "text", "text": "img-rules"}]},
+            {"role": "user", "content": "hi"},
+        ],
+    }
+    out = inject_system_prompt(body, "RULES")
+    assert out["messages"][0] == {"role": "system", "content": "RULES"}
+    assert out["messages"][1]["content"] == [{"type": "text", "text": "img-rules"}]

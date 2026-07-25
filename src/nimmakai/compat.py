@@ -62,6 +62,36 @@ def wrap_upstream_error(body: Any, *, status: int = 502) -> dict[str, Any]:
     )
 
 
+def inject_system_prompt(body: dict[str, Any], prompt: str | None) -> dict[str, Any]:
+    """Prepend a universal system prompt to ``body["messages"]``.
+
+    No-op when ``prompt`` is empty. When the first message is already a
+    ``system`` message with string content, the prompt is merged into the
+    front of that content (keeps a single system turn). Otherwise a new
+    ``system`` message is inserted at index 0. Multimodal system content
+    (list of parts) is left untouched and a new system message is inserted
+    before it — providers honor multiple system messages in order.
+    """
+    if not prompt:
+        return body
+    msgs = body.get("messages")
+    if not isinstance(msgs, list) or not msgs:
+        # Nothing to attach to; let the caller's body flow as-is rather than
+        # fabricating a messages array for endpoints that don't use it.
+        return body
+    first = msgs[0]
+    if (
+        isinstance(first, dict)
+        and first.get("role") == "system"
+        and isinstance(first.get("content"), str)
+    ):
+        merged = {**first, "content": f"{prompt}\n\n{first['content']}"}
+        body = {**body, "messages": [merged, *msgs[1:]]}
+    else:
+        body = {**body, "messages": [{"role": "system", "content": prompt}, *msgs]}
+    return body
+
+
 def sanitize_chat_body(body: dict[str, Any]) -> dict[str, Any]:
     """Normalize client request for OpenAI-compatible upstreams (Cursor-safe).
 

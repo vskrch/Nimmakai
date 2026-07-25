@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from nimmakai.auth import require_active_user
 from nimmakai.catalog import ModelRegistry
 from nimmakai.compat import (
+    inject_system_prompt,
     normalize_completion_json,
     normalize_sse_stream,
     openai_error,
@@ -661,6 +662,10 @@ async def _chat_like(
                 status_code=400,
             )
         raise
+
+    # Universal system prompt — applied to all chat-style requests (anti-CJK-hallucination).
+    sys_prompt = getattr(_settings(request), "default_system_prompt", "")
+    body = inject_system_prompt(body, sys_prompt)
 
     timing: dict[str, Any] = {}
     proxy_token: str | None = None
