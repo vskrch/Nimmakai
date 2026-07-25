@@ -65,11 +65,12 @@ function Waterfall({ spans }: { spans: TraceSpan[] }) {
 }
 
 export default function RequestsPage() {
-  const [range, setRange] = useState('1h')
+  const [range, setRange] = useState('24h')
   const [search, setSearch] = useState('')
   const [searchDebounced, setSearchDebounced] = useState('')
   const [status, setStatus] = useState('')
   const [intent, setIntent] = useState('')
+  const [model, setModel] = useState('')
   const [offset, setOffset] = useState(0)
   const [selected, setSelected] = useState<string | null>(null)
   const [exportError, setExportError] = useState<string | null>(null)
@@ -87,11 +88,23 @@ export default function RequestsPage() {
       search: searchDebounced || undefined,
       status: status || undefined,
       intent: intent || undefined,
+      model: model || undefined,
     }),
-    [range, offset, searchDebounced, status, intent],
+    [range, offset, searchDebounced, status, intent, model],
   )
   const { data, loading, error, reload } = useTraces(filters)
   const { detail, loading: detailLoading, error: detailError } = useTraceDetail(selected)
+
+  const hasActiveFilters = search || status || intent || model
+
+  function clearFilters() {
+    setSearch('')
+    setSearchDebounced('')
+    setStatus('')
+    setIntent('')
+    setModel('')
+    setOffset(0)
+  }
 
   async function exportCsv() {
     setExportError(null)
@@ -145,31 +158,51 @@ export default function RequestsPage() {
       )}
 
       {/* Filter toolbar */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
         <div className="relative">
           <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <Input
-            placeholder="Search Trace ID, Model, or Error message..."
+            placeholder="Search Trace ID or Keywords..."
             value={search}
             onChange={e => { setSearch(e.target.value); setOffset(0) }}
             className="pl-9"
           />
         </div>
-        <Select
-          value={status}
-          onChange={e => { setStatus(e.target.value); setOffset(0) }}
-        >
-          <option value="">All Status Codes</option>
-          <option value="success">Success (2xx)</option>
-          <option value="error">Errors</option>
-          <option value="4xx">Client Errors (4xx)</option>
-          <option value="5xx">Upstream Errors (5xx)</option>
-        </Select>
         <Input
-          placeholder="Filter by Intent (e.g. coding_agentic)"
+          placeholder="Filter by Model (e.g. potato/coding, qwen...)"
+          value={model}
+          onChange={e => { setModel(e.target.value); setOffset(0) }}
+        />
+        <Select
           value={intent}
           onChange={e => { setIntent(e.target.value); setOffset(0) }}
-        />
+        >
+          <option value="">All Intents</option>
+          <option value="coding_agentic">coding_agentic (potato/coding)</option>
+          <option value="chat_fast">chat_fast (potato/auto-fast)</option>
+          <option value="reasoning">reasoning (potato/best)</option>
+          <option value="long_horizon">long_horizon</option>
+          <option value="vision">vision</option>
+          <option value="embeddings">embeddings</option>
+        </Select>
+        <div className="flex gap-2">
+          <Select
+            value={status}
+            onChange={e => { setStatus(e.target.value); setOffset(0) }}
+            className="flex-1"
+          >
+            <option value="">All Status Codes</option>
+            <option value="success">Success (2xx)</option>
+            <option value="error">Errors</option>
+            <option value="4xx">Client Errors (4xx)</option>
+            <option value="5xx">Upstream Errors (5xx)</option>
+          </Select>
+          {hasActiveFilters && (
+            <Button size="sm" variant="secondary" onClick={clearFilters}>
+              <X className="w-3.5 h-3.5" />
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Main Request Traces Table */}

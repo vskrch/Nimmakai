@@ -149,11 +149,11 @@ class AnalyticsStore:
         params: list[Any] = []
 
         if intent:
-            where.append("intent = ?")
-            params.append(intent)
+            where.append("(intent = ? OR intent LIKE ?)")
+            params.extend([intent, f"%{intent}%"])
         if model:
-            where.append("model_routed = ?")
-            params.append(model)
+            where.append("(model_routed LIKE ? OR model_requested LIKE ?)")
+            params.extend([f"%{model}%", f"%{model}%"])
         if provider:
             where.append("provider_id = ?")
             params.append(provider)
