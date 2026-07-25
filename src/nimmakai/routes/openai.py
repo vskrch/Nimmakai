@@ -189,6 +189,72 @@ def _routing_disabled(request: Request, settings: Settings) -> bool:
     return flag in {"1", "true", "yes"}
 
 
+async def _run_pre_router_interceptors(
+    request: Request,
+    body: dict[str, Any],
+    *,
+    intent: Any,
+    registry: Any,
+) -> dict[str, Any]:
+    """NMK-EXT-200: Run the pre-router interceptor chain before core routing.
+
+    Interceptors may mutate body["model"] from "auto" to a specific model.
+    On any failure, body is returned unchanged (core router handles it).
+    """
+    model = str(body.get("model") or "").strip().lower()
+    # Only run for auto-routed requests
+    if model and model not in ("auto", ""):
+        return body
+    try:
+        from nimmakai.routing.interceptors import (
+            CustomCatalogInterceptor,
+            PromptUnderstandingInterceptor,
+            run_interceptor_chain,
+        )
+
+        db = getattr(request.app.state, "_ext_db", None)
+        if db is None:
+            # Lazily get the DB for extensibility features
+            try:
+                from nimmakai.catalog.db import get_db
+
+                settings = _settings(request)
+                db = get_db(settings.sqlite_path)
+                request.app.state._ext_db = db
+            except Exception:
+                db = None
+
+        interceptors: list = []
+        # Interceptor 1: Custom Catalog Override
+        if db is not None:
+            features = {}
+            try:
+                features = db.get_extensibility_features()
+            except Exception:
+                features = {}
+            if features.get("custom_catalog_enabled"):
+                interceptors.append(CustomCatalogInterceptor(db=db))
+            # Interceptor 2: Prompt-Understanding Router
+            if features.get("prompt_understanding_enabled"):
+                upstream = _upstream(request)
+                understanding_model = features.get("prompt_understanding_model", "")
+                interceptors.append(
+                    PromptUnderstandingInterceptor(
+                        db=db,
+                        upstream=upstream,
+                        understanding_model=understanding_model,
+                    )
+                )
+        if not interceptors:
+            return body
+        return await run_interceptor_chain(
+            body, intent=intent, registry=registry, interceptors=interceptors
+        )
+    except Exception as exc:
+        logger.debug("pre-router interceptor chain failed: %s — core router handles", exc)
+        return body
+
+
 async def _prepare_routed(
     request: Request,
     body: dict[str, Any],
@@ -293,6 +359,12 @@ async def _prepare_routed(
     )
     # Auto-router session model pin (OpenRouter sticky model selection)
     preferred_model = getattr(ctx, "preferred_model", None)
+
+    # ── Pre-Router Interceptor Chain (NMK-EXT-200) ──────────────
+    # Runs before core routing; may mutate body["model"] from "auto" to a
+    # specific model. Core router stays completely unchanged.
+    body = await _run_pre_router_interceptors(request, body, intent=intent, registry=registry)
+
     t_route = time.perf_counter()
     try:
         decision = selector.resolve(

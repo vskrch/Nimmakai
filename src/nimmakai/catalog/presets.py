@@ -231,6 +231,39 @@ PROVIDER_PRESETS: list[dict[str, Any]] = [
         "builtin": True,
     },
     {
+        "id": "ollama",
+        "name": "Ollama Cloud",
+        "base_url": "https://api.ollama.com/v1",
+        "api_keys_env": "OLLAMA_CLOUD_API_KEYS",
+        "rpm_limit": 60,
+        "rpd_limit": 10000,
+        "max_in_flight_per_key": 4,
+        "free_tier": True,
+        "speed_tier": "fast",
+        "signup_url": "https://docs.ollama.com/cloud",
+        "description": "Ollama Cloud — hosted open models with OpenAI-compatible API.",
+        "tags": ["free", "fast", "openai-compatible"],
+    },
+    {
+        "id": "opencode_go",
+        "name": "OpenCode Go",
+        "base_url": "https://opencode.ai/go/v1",
+        "api_keys_env": "OPENCODE_GO_API_KEYS",
+        "rpm_limit": 60,
+        "rpd_limit": 50000,
+        "max_in_flight_per_key": 6,
+        "free_tier": True,
+        "speed_tier": "fast",
+        "signup_url": "https://opencode.ai/auth",
+        "description": (
+            "OpenCode Go — curated fast inference. "
+            "If a model is not available, see "
+            "opencode.ai/docs/troubleshooting/#model-not-available"
+        ),
+        "tags": ["free", "coding", "opencode", "openai-compatible"],
+        "coding_priority": True,
+    },
+    {
         "id": "custom",
         "name": "Custom OpenAI-compatible",
         "base_url": "",
@@ -266,6 +299,8 @@ PROVIDER_SPEED_PRIOR_COLDSTART: dict[str, float] = {
     "github": 1.00,
     "cloudflare": 1.00,
     "nim": 1.05,  # slight bump — deepseek-v4 / qwen live here often
+    "ollama": 1.15,
+    "opencode_go": 1.28,
 }
 
 # Env var → preset id for auto-registration at boot
@@ -285,6 +320,8 @@ ENV_PROVIDER_BOOTSTRAP: list[tuple[str, str]] = [
     ("GITHUB_MODELS_API_KEYS", "github"),
     ("MISTRAL_API_KEYS", "mistral"),
     ("HYPERBOLIC_API_KEYS", "hyperbolic"),
+    ("OLLAMA_CLOUD_API_KEYS", "ollama"),
+    ("OPENCODE_GO_API_KEYS", "opencode_go"),
 ]
 
 # Extra env names accepted by resolved_keys() per provider id

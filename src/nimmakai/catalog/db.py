@@ -374,6 +374,50 @@ class NimmakaiDB:
             else:
                 self._conn.execute("DELETE FROM ranking_cache")
 
+    # ── extensibility features (NMK-EXT-501) ──────────────────────
+
+    def get_extensibility_features(self) -> dict[str, Any]:
+        """Read the extensibility feature toggles from meta."""
+        raw = self.get_meta("extensibility_features")
+        if not raw:
+            return {
+                "prompt_understanding_enabled": False,
+                "prompt_understanding_model": "",
+                "custom_catalog_enabled": False,
+                "ollama_enabled": True,
+                "opencode_go_enabled": True,
+            }
+        try:
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                return {}
+            return data
+        except json.JSONDecodeError:
+            return {}
+
+    def set_extensibility_features(self, features: dict[str, Any]) -> None:
+        """Persist extensibility feature toggles to meta."""
+        self.set_meta("extensibility_features", json.dumps(features))
+
+    # ── custom catalog mappings (NMK-EXT-301) ──────────────────────
+
+    def get_custom_catalog_mappings(self) -> dict[str, str]:
+        """Read intent → model_id mappings for the custom catalog override."""
+        raw = self.get_meta("custom_catalog_mappings")
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                return {}
+            return {str(k): str(v) for k, v in data.items() if v}
+        except json.JSONDecodeError:
+            return {}
+
+    def set_custom_catalog_mappings(self, mappings: dict[str, str]) -> None:
+        """Persist intent → model_id mappings to meta."""
+        self.set_meta("custom_catalog_mappings", json.dumps(mappings))
+
 
 # Process-wide cache so ProviderStore + UserPreferences share one connection.
 _DB_CACHE: dict[str, NimmakaiDB] = {}

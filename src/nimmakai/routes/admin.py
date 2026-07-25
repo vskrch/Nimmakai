@@ -1344,3 +1344,85 @@ async def get_model_score(model_id: str, request: Request) -> JSONResponse:
         "sources": ms.sources,
         "computed_at": ms.computed_at,
     })
+
+
+# ---------------------------------------------------------------------------
+# Extensibility features — toggles + custom catalog (NMK-EXT-501/502)
+# ---------------------------------------------------------------------------
+
+
+def _ext_db(request: Request):
+    """Get the SQLite DB for extensibility features."""
+    from nimmakai.catalog.db import get_db
+
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    return get_db(settings.sqlite_path)
+
+
+@router.get("/admin/extensibility")
+async def get_extensibility(request: Request) -> JSONResponse:
+    """Current extensibility feature toggles + custom catalog mappings."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    db = _ext_db(request)
+    features = db.get_extensibility_features()
+    mappings = db.get_custom_catalog_mappings()
+    return JSONResponse({
+        "features": features,
+        "custom_catalog_mappings": mappings,
+    })
+
+
+@router.put("/admin/extensibility")
+async def put_extensibility(request: Request) -> JSONResponse:
+    """Update extensibility feature toggles."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    body = await _safe_json(request)
+    if isinstance(body, JSONResponse):
+        return body
+    db = _ext_db(request)
+    current = db.get_extensibility_features()
+    # Merge: only update provided keys
+    for key in (
+        "prompt_understanding_enabled",
+        "prompt_understanding_model",
+        "custom_catalog_enabled",
+        "ollama_enabled",
+        "opencode_go_enabled",
+    ):
+        if key in body:
+            current[key] = body[key]
+    db.set_extensibility_features(current)
+    return JSONResponse({"ok": True, "features": current})
+
+
+@router.get("/admin/extensibility/catalog")
+async def get_custom_catalog(request: Request) -> JSONResponse:
+    """Get intent → model_id custom catalog mappings."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    db = _ext_db(request)
+    mappings = db.get_custom_catalog_mappings()
+    return JSONResponse({"mappings": mappings})
+
+
+@router.put("/admin/extensibility/catalog")
+async def put_custom_catalog(request: Request) -> JSONResponse:
+    """Set intent → model_id custom catalog mappings."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    body = await _safe_json(request)
+    if isinstance(body, JSONResponse):
+        return body
+    mappings = body.get("mappings") or body
+    if not isinstance(mappings, dict):
+        return JSONResponse(
+            {"error": {"message": "mappings must be a dict", "code": "invalid_request"}},
+            status_code=400,
+        )
+    # Validate: values are non-empty strings
+    cleaned = {str(k): str(v) for k, v in mappings.items() if str(v).strip()}
+    db = _ext_db(request)
+    db.set_custom_catalog_mappings(cleaned)
+    return JSONResponse({"ok": True, "mappings": cleaned})
