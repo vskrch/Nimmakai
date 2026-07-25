@@ -197,17 +197,19 @@ ok "Nimmakai Gateway container is running and HEALTHY!"
 
 # 8. Firewall Configuration (Linux Only)
 if [[ "$OS" == "Linux" ]]; then
-    log "Configuring firewall rules (22, 80, 443)..."
+    log "Configuring firewall rules (22, 80, 443, 8080)..."
     if command -v ufw &>/dev/null; then
         ufw allow 22/tcp >/dev/null 2>&1 || true
         ufw allow 80/tcp >/dev/null 2>&1 || true
         ufw allow 443/tcp >/dev/null 2>&1 || true
+        ufw allow 8080/tcp >/dev/null 2>&1 || true
         ufw --force enable >/dev/null 2>&1 || true
         log "UFW configured."
     elif command -v firewall-cmd &>/dev/null; then
         firewall-cmd --permanent --add-port=22/tcp >/dev/null 2>&1 || true
         firewall-cmd --permanent --add-port=80/tcp >/dev/null 2>&1 || true
         firewall-cmd --permanent --add-port=443/tcp >/dev/null 2>&1 || true
+        firewall-cmd --permanent --add-port=8080/tcp >/dev/null 2>&1 || true
         firewall-cmd --reload >/dev/null 2>&1 || true
         log "firewalld configured."
     else
@@ -217,70 +219,77 @@ else
     log "Skipping firewall configuration on macOS/Non-Linux."
 fi
 
-# 9. Automatic SSL / Caddy Setup (Optional / Auto)
+# 9. Automatic Reverse Proxy / Caddy Setup
 PUBLIC_IP=$(curl -fsS http://checkip.amazonaws.com 2>/dev/null || curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address 2>/dev/null || echo "127.0.0.1")
 
+log "Setting up reverse proxy (Caddy)..."
+if ! command -v caddy &>/dev/null; then
+    case $PM in
+        apt)
+            apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https >/dev/null 2>&1 || true
+            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg >/dev/null 2>&1 || true
+            curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null 2>&1 || true
+            apt-get update -qq >/dev/null 2>&1 || true
+            apt-get install -y -qq caddy >/dev/null 2>&1 || true
+            ;;
+        dnf)
+            dnf install -y 'dnf-command(copr)' >/dev/null 2>&1 || true
+            dnf copr enable -y @caddy/caddy >/dev/null 2>&1 || true
+            dnf install -y caddy >/dev/null 2>&1 || true
+            ;;
+        yum)
+            yum install -y yum-plugin-copr >/dev/null 2>&1 || true
+            yum copr enable -y @caddy/caddy >/dev/null 2>&1 || true
+            yum install -y caddy >/dev/null 2>&1 || true
+            ;;
+        pacman)
+            pacman -Sy --noconfirm caddy >/dev/null 2>&1 || true
+            ;;
+        brew)
+            brew install caddy >/dev/null 2>&1 || true
+            ;;
+        *)
+            warn "Could not automatically install Caddy using ${PM}."
+            ;;
+    esac
+fi
+
+# Determine Caddyfile location
+if [[ "$OS" == "Darwin" ]]; then
+    CADDY_FILE="/usr/local/etc/Caddyfile"
+    if command -v brew &>/dev/null && [[ -d "$(brew --prefix 2>/dev/null)/etc" ]]; then
+        CADDY_FILE="$(brew --prefix)/etc/Caddyfile"
+    fi
+else
+    CADDY_FILE="/etc/caddy/Caddyfile"
+fi
+
 if [[ -n "${DOMAIN_NAME}" ]]; then
-    log "Configuring Caddy for automatic Let's Encrypt SSL on ${DOMAIN_NAME}..."
-    if ! command -v caddy &>/dev/null; then
-        case $PM in
-            apt)
-                apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https >/dev/null
-                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
-                apt-get update -qq && apt-get install -y -qq caddy >/dev/null
-                ;;
-            dnf)
-                dnf install -y 'dnf-command(copr)' >/dev/null
-                dnf copr enable -y @caddy/caddy >/dev/null
-                dnf install -y caddy >/dev/null
-                ;;
-            yum)
-                yum install -y yum-plugin-copr >/dev/null
-                yum copr enable -y @caddy/caddy >/dev/null
-                yum install -y caddy >/dev/null
-                ;;
-            pacman)
-                pacman -Sy --noconfirm caddy >/dev/null
-                ;;
-            brew)
-                brew install caddy >/dev/null
-                ;;
-            *)
-                err "Could not automatically install Caddy using ${PM}. Please install Caddy manually."
-                ;;
-        esac
-    fi
+    CADDY_SERVER_NAME="${DOMAIN_NAME}"
+    PUBLIC_URL="https://${DOMAIN_NAME}"
+else
+    CADDY_SERVER_NAME=":80"
+    PUBLIC_URL="http://${PUBLIC_IP}"
+fi
 
-    # Determine Caddyfile location
-    if [[ "$OS" == "Darwin" ]]; then
-        CADDY_FILE="/usr/local/etc/Caddyfile"
-        if command -v brew &>/dev/null && [[ -d "$(brew --prefix)/etc" ]]; then
-            CADDY_FILE="$(brew --prefix)/etc/Caddyfile"
-        fi
-    else
-        CADDY_FILE="/etc/caddy/Caddyfile"
-    fi
-
+if command -v caddy &>/dev/null; then
     cat <<EOF > "${CADDY_FILE}"
-${DOMAIN_NAME} {
+${CADDY_SERVER_NAME} {
     reverse_proxy 127.0.0.1:8080
 }
 EOF
-
     if command -v systemctl &>/dev/null; then
-        systemctl enable --now caddy
-        systemctl reload caddy || systemctl restart caddy
+        systemctl enable --now caddy >/dev/null 2>&1 || true
+        systemctl reload caddy >/dev/null 2>&1 || systemctl restart caddy >/dev/null 2>&1 || true
     elif command -v brew &>/dev/null && [[ "$OS" == "Darwin" ]]; then
-        brew services restart caddy
+        brew services restart caddy >/dev/null 2>&1 || true
     else
-        warn "Could not restart Caddy daemon automatically via systemd/brew. Attempting manual start..."
-        caddy start --config "${CADDY_FILE}" || warn "Manual start failed. Please run: caddy start --config \"${CADDY_FILE}\""
+        caddy start --config "${CADDY_FILE}" >/dev/null 2>&1 || true
     fi
-    
-    PUBLIC_URL="https://${DOMAIN_NAME}"
 else
-    PUBLIC_URL="http://${PUBLIC_IP}"
+    if [[ -z "${DOMAIN_NAME}" ]]; then
+        PUBLIC_URL="http://${PUBLIC_IP}:8080"
+    fi
 fi
 
 # 10. Completion Summary Display
