@@ -125,18 +125,27 @@ ok "Docker & Docker Compose are ready."
 
 # 4. Clone / Prepare Workspace
 if [[ ! -f "docker-compose.do.yml" ]]; then
-    log "Cloning Nimmakai repository into ${INSTALL_DIR}..."
+    log "Preparing workspace at ${INSTALL_DIR}..."
     if [[ ! -d "${INSTALL_DIR}" ]]; then
         mkdir -p "${INSTALL_DIR}"
     fi
-    # Use a clean clone if it's not already a repository
     if [[ ! -d "${INSTALL_DIR}/.git" ]]; then
+        log "Cloning Nimmakai repository into ${INSTALL_DIR}..."
         rm -rf "${INSTALL_DIR:?}/"* || true
         git clone --depth 1 https://github.com/vskrch/Nimmakai.git "${INSTALL_DIR}"
+        cd "${INSTALL_DIR}"
     else
-        log "Repository already cloned in ${INSTALL_DIR}."
+        log "Repository exists at ${INSTALL_DIR}. Updating to latest release..."
+        cd "${INSTALL_DIR}"
+        git fetch origin main >/dev/null 2>&1 || true
+        git reset --hard origin/main >/dev/null 2>&1 || true
     fi
-    cd "${INSTALL_DIR}"
+else
+    if [[ -d ".git" ]]; then
+        log "Updating current workspace to latest release..."
+        git fetch origin main >/dev/null 2>&1 || true
+        git reset --hard origin/main >/dev/null 2>&1 || true
+    fi
 fi
 
 # 5. Interactive / Default Secret Generation
