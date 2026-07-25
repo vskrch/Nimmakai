@@ -109,7 +109,9 @@ class ModelSelector:
         if routing_disabled:
             chain = [raw] if raw else []
             if not chain and self.settings.default_model:
-                chain = [self.settings.default_model]
+                # ponytail: unreachable — raw is populated from default_model at
+                # line 91-92, so `not raw` implies no default_model. Defensive.
+                chain = [self.settings.default_model]  # pragma: no cover
             return RouteDecision(
                 chain=chain or ["auto"],
                 mode="disabled",
@@ -197,7 +199,10 @@ class ModelSelector:
                         raw, include_disabled=True
                     )
                     if disabled_hit in self.registry.disabled_models:
-                        raise ValueError("model_disabled")
+                        # ponytail: unreachable — a disabled model that's in
+                        # live_ids is rejected at line 123-125 before reaching
+                        # here; one not in live_ids yields disabled_hit=None.
+                        raise ValueError("model_disabled")  # pragma: no cover
                     chain = [raw]
             elif not chain and raw and looks_like_nim_id(raw):
                 chain = [raw]
@@ -295,14 +300,13 @@ class ModelSelector:
             if self.settings.enable_fallback_on_explicit:
                 siblings = self.registry.chain_for_intent(intent_key, variant=variant)
                 chain = chain + [m for m in siblings if m != target_model]
-                head = chain[0] if chain else target_model
-                rest = [m for m in optimized if m != head]
-            else:
-                optimized = self.registry.health_reorder(
-                    chain, intent=intent_key, variant=variant
-                )
-                head = target_model
-                rest = [m for m in optimized if m != head]
+            # Health-reorder once for both branches; pin the alias target first
+            # so the client never sees a surprise head model (F-08 invariant).
+            optimized = self.registry.health_reorder(
+                chain, intent=intent_key, variant=variant
+            )
+            head = target_model
+            rest = [m for m in optimized if m != head]
             return RouteDecision(
                 chain=[head] + rest,
                 mode="alias_model",
@@ -322,10 +326,15 @@ class ModelSelector:
                     raw, include_disabled=True
                 )
                 if disabled_hit in self.registry.disabled_models:
-                    raise ValueError("model_disabled")
+                    # ponytail: unreachable — disabled live models are rejected
+                    # at line 123-125; non-live models yield disabled_hit=None.
+                    raise ValueError("model_disabled")  # pragma: no cover
                 if not looks_like_nim_id(raw):
                     # Fall through to auto below
-                    resolved = None
+                    # ponytail: unreachable — entering this branch via is_known
+                    # requires resolve_live_id to return non-None (catalog model
+                    # with empty live_ids), so resolved is never None here.
+                    resolved = None  # pragma: no cover
                 else:
                     resolved = raw
             if resolved is not None:
@@ -456,9 +465,13 @@ class ModelSelector:
             )
             if not chain and not opts.allowed_models and not free_only:
                 # Absolute last resort — any active model, no free/allowed constraints
-                try:
+                # ponytail: unreachable — when live_ids is empty, _filter_available
+                # fail-opens to the static YAML chain, so the finalized chain is
+                # never empty here. Kept as a defensive guarantee against future
+                # changes to _filter_available.
+                try:  # pragma: no cover
                     chain = sorted(self.registry.active_live_ids())[:max_n]
-                except Exception:
+                except Exception:  # pragma: no cover
                     chain = []
 
         return RouteDecision(
