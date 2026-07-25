@@ -466,7 +466,7 @@ class FallbackExecutor:
             tool_ok = [
                 m
                 for m in available
-                if not (caps.get(m) or {}).get("supports_tools") is False
+                if (caps.get(m) or {}).get("supports_tools") is not False
             ]
             if tool_ok:
                 available = tool_ok
@@ -886,7 +886,7 @@ class FallbackExecutor:
                     ),
                     timeout=attempt_budget,
                 )
-            except TimeoutError as exc:
+            except TimeoutError:
                 self._circuit_fail(pid)
                 self._emit_span(
                     self._make_upstream_span(
@@ -1376,7 +1376,12 @@ class FallbackExecutor:
             or body.get("tool_choice") not in (None, "none", "None")
         )
         chain = self._chain(decision, had_tools=had_tools)
-        from nimmakai.compat import frame_sse_error, json_body_to_sse, openai_error, wrap_upstream_error
+        from nimmakai.compat import (
+            frame_sse_error,
+            json_body_to_sse,
+            openai_error,
+            wrap_upstream_error,
+        )
 
         if not chain:
             payload = frame_sse_error(

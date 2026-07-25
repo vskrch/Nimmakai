@@ -1350,6 +1350,4 @@ async def embeddings(request: Request) -> JSONResponse:
         raise
 
 
-@router.post("/responses", response_model=None)
-async def responses_api(request: Request) -> JSONResponse | StreamingResponse:
-    return await _chat_like(request, upstream_path="/responses")
+# /v1/responses is owned by routes/responses.py (Responses→Chat translator).
