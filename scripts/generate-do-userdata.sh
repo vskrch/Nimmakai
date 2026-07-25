@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./scripts/generate-do-userdata.sh
-#   ./scripts/generate-do-userdata.sh -o /tmp/nimmakai-userdata.sh
+#   ./scripts/generate-do-userdata.sh -o /tmp/potato-userdata.sh
 #   NONINTERACTIVE=1 REPO_URL=... PROXY_API_KEYS=sk-... ./scripts/generate-do-userdata.sh -o out.sh
 #
 # Security: the generated script embeds your keys (base64). Anyone with DO
@@ -13,8 +13,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT_FILE="${ROOT}/nimmakai-droplet-userdata.sh"
-DEFAULT_REPO="https://github.com/vskrch/Nimmakai.git"
+OUT_FILE="${ROOT}/potato-droplet-userdata.sh"
+DEFAULT_REPO="https://github.com/vskrch/Potato.git"
 DEFAULT_BRANCH="main"
 
 usage() {
@@ -22,7 +22,7 @@ usage() {
 generate-do-userdata.sh — build a paste-into-DO Droplet user-data bootstrap
 
 Options:
-  -o FILE   Output path (default: ./nimmakai-droplet-userdata.sh)
+  -o FILE   Output path (default: ./potato-droplet-userdata.sh)
   -h        Help
 
 Env (non-interactive when NONINTERACTIVE=1):
@@ -78,7 +78,7 @@ append_env() {
 
 echo
 echo "═══════════════════════════════════════════════════════════"
-echo "  Nimmakai — DigitalOcean Droplet one-click userdata"
+echo "  Potato — DigitalOcean Droplet one-click userdata"
 echo "═══════════════════════════════════════════════════════════"
 echo "  Answer the prompts. You'll get one shell script to paste"
 echo "  into Create Droplet → Advanced options → User data."
@@ -101,7 +101,7 @@ if [[ "${NONINTERACTIVE:-0}" != "1" ]]; then
   echo "Client auth — Cursor / agents use this as Bearer API key."
   prompt PROXY_API_KEYS "PROXY_API_KEYS (empty = auto-generate)" ""
   if [[ -z "$PROXY_API_KEYS" ]]; then
-    PROXY_API_KEYS="sk-nimmakai-$(openssl rand -hex 16)"
+    PROXY_API_KEYS="sk-potato-$(openssl rand -hex 16)"
     echo "  → generated: $PROXY_API_KEYS"
   fi
 
@@ -174,16 +174,16 @@ fi
 # shellcheck disable=SC2016
 cat >"$OUT_FILE" <<EOF
 #!/bin/bash
-# Nimmakai Droplet bootstrap — generated $(date -u +%Y-%m-%dT%H:%MZ)
+# Potato Droplet bootstrap — generated $(date -u +%Y-%m-%dT%H:%MZ)
 # Paste into DigitalOcean → Create Droplet → Advanced → User data
 # Image: Docker on Ubuntu  |  Size: s-1vcpu-1gb  |  Firewall: 22,80
 # Do not enable xtrace: this script contains base64-encoded credentials.
 set -euo pipefail
-exec > >(tee -a /var/log/nimmakai-bootstrap.log) 2>&1
+exec > >(tee -a /var/log/potato-bootstrap.log) 2>&1
 
 export DEBIAN_FRONTEND=noninteractive
-INSTALL_DIR=/opt/nimmakai
-READY_FILE=/root/NIMMAKAI-READY.txt
+INSTALL_DIR=/opt/potato
+READY_FILE=/root/POTATO-READY.txt
 
 echo "==> waiting for apt locks"
 # User data runs inside cloud-final. Calling cloud-init status --wait here
@@ -267,14 +267,14 @@ IP=\$(curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/addr
 IP=\${IP:-UNKNOWN}
 
 if [[ "\$ok" != "1" ]]; then
-  echo "ERROR: Nimmakai did not become ready" >&2
+  echo "ERROR: Potato did not become ready" >&2
   docker compose -f docker-compose.do.yml ps >&2 || true
   docker compose -f docker-compose.do.yml logs --tail=200 >&2 || true
   exit 1
 fi
 
 {
-  echo "Nimmakai is live (bootstrap finished: \$(date -u +%Y-%m-%dT%H:%MZ))"
+  echo "Potato is live (bootstrap finished: \$(date -u +%Y-%m-%dT%H:%MZ))"
   echo
   echo "Readiness: OK"
   echo
@@ -285,9 +285,9 @@ fi
   echo "Cursor / OpenAI-compatible clients:"
   echo "  Base URL:  http://\${IP}/v1"
   echo "  API Key:   use the PROXY_API_KEYS value saved during generation"
-  echo "  Model:     nimmakai/auto"
+  echo "  Model:     potato/auto"
   echo
-  echo "Logs:        /var/log/nimmakai-bootstrap.log"
+  echo "Logs:        /var/log/potato-bootstrap.log"
   echo "App dir:     \$INSTALL_DIR"
   echo "Update later:"
   echo "  cd \$INSTALL_DIR && git pull && docker compose -f docker-compose.do.yml up -d --build"
@@ -312,7 +312,7 @@ echo "  3. Size: Basic s-1vcpu-1gb (~\$6)"
 echo "  4. Auth: your SSH key"
 echo "  5. Advanced → User data → paste the ENTIRE file contents"
 echo "  6. Create → wait 5–10 min for first Docker build"
-echo "  7. SSH in:  cat /root/NIMMAKAI-READY.txt"
+echo "  7. SSH in:  cat /root/POTATO-READY.txt"
 echo "     or open: http://YOUR_DROPLET_IP/health"
 echo
 echo "Your PROXY_API_KEYS (save now):"
@@ -321,7 +321,7 @@ echo
 echo "Cursor:"
 echo "  Base URL: http://YOUR_DROPLET_IP/v1"
 echo "  API Key:  $PROXY_API_KEYS"
-echo "  Model:    nimmakai/auto"
+echo "  Model:    potato/auto"
 echo
 echo "⚠  User data embeds secrets (readable via DO API/metadata). Rotate if leaked."
 echo "   File is mode 600. Do not commit $OUT_FILE to git."

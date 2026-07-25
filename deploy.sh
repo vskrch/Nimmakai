@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Nimmakai (🍋) All-in-One Deployment & Setup Script
+# Potato (🥔) All-in-One Deployment & Setup Script
 # Cross-Platform: Linux (Debian, Ubuntu, Mint, Fedora, CentOS, Arch) & macOS
 #
 # Usage:
@@ -17,14 +17,14 @@ YELLOW='\033[1;33m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
-log() { echo -e "${CYAN}${BOLD}[Nimmakai Deploy]${NC} $1"; }
+log() { echo -e "${CYAN}${BOLD}[Potato Deploy]${NC} $1"; }
 ok()  { echo -e "${GREEN}${BOLD}[SUCCESS]${NC} $1"; }
 warn(){ echo -e "${YELLOW}${BOLD}[WARNING]${NC} $1"; }
 err() { echo -e "${RED}${BOLD}[ERROR]${NC} $1"; exit 1; }
 
 echo -e "${BOLD}"
 echo "=============================================================================="
-echo "                   🍋 NIMMAKAI (API GATEWAY) DEPLOYMENT                      "
+echo "                   🥔 POTATO (API GATEWAY) DEPLOYMENT                      "
 echo "=============================================================================="
 echo -e "${NC}"
 
@@ -42,11 +42,11 @@ else
     warn "Unsupported OS detected: $OS. Attempting to proceed anyway..."
 fi
 
-INSTALL_DIR="${INSTALL_DIR:-/opt/nimmakai}"
+INSTALL_DIR="${INSTALL_DIR:-/opt/potato}"
 if [[ "$OS" == "Darwin" ]]; then
     # On macOS, use a user-local directory if they can't write to /opt
     if [[ ! -w "/opt" && $EUID -ne 0 ]]; then
-        INSTALL_DIR="${HOME}/.nimmakai"
+        INSTALL_DIR="${HOME}/.potato"
         log "Using local install dir on macOS: ${INSTALL_DIR}"
     fi
 fi
@@ -150,9 +150,9 @@ if [[ ! -f "docker-compose.do.yml" ]]; then
         mkdir -p "${INSTALL_DIR}"
     fi
     if [[ ! -d "${INSTALL_DIR}/.git" ]]; then
-        log "Cloning Nimmakai repository into ${INSTALL_DIR}..."
+        log "Cloning Potato repository into ${INSTALL_DIR}..."
         rm -rf "${INSTALL_DIR:?}/"* || true
-        git clone --depth 1 https://github.com/vskrch/Nimmakai.git "${INSTALL_DIR}"
+        git clone --depth 1 https://github.com/vskrch/Potato.git "${INSTALL_DIR}"
         cd "${INSTALL_DIR}"
     else
         log "Repository exists at ${INSTALL_DIR}. Updating to latest release..."
@@ -194,7 +194,7 @@ fi
 
 if [[ -z "${PROXY_KEY}" ]]; then
     RAND_KEY=$(openssl rand -hex 16)
-    PROXY_KEY="sk-nimmakai-${RAND_KEY}"
+    PROXY_KEY="sk-potato-${RAND_KEY}"
 fi
 
 if [[ -z "${ADMIN_PASS}" ]]; then
@@ -226,11 +226,11 @@ chmod 600 .env
 ok "Production credentials configured in .env"
 
 # 6. Build & Launch Docker Container
-log "Building and starting Nimmakai Gateway container..."
+log "Building and starting Potato Gateway container..."
 docker compose -f docker-compose.do.yml up -d --build
 
 # 7. Health Check Verification Loop
-log "Waiting for Nimmakai container healthcheck (/ready)..."
+log "Waiting for Potato container healthcheck (/ready)..."
 READY=0
 for i in $(seq 1 60); do
     if curl -fsS http://127.0.0.1:8080/ready &>/dev/null; then
@@ -241,11 +241,11 @@ for i in $(seq 1 60); do
 done
 
 if [[ ${READY} -ne 1 ]]; then
-    warn "Nimmakai did not respond on /ready within 120s. Checking logs:"
+    warn "Potato did not respond on /ready within 120s. Checking logs:"
     docker compose -f docker-compose.do.yml logs --tail=50
     err "Deployment health check failed."
 fi
-ok "Nimmakai Gateway container is running and HEALTHY!"
+ok "Potato Gateway container is running and HEALTHY!"
 
 # 8. Firewall Configuration (Linux Only)
 if [[ "$OS" == "Linux" ]]; then
@@ -347,7 +347,7 @@ fi
 # 10. Completion Summary Display
 echo -e "\n${GREEN}${BOLD}"
 echo "=============================================================================="
-echo "                 🎉 NIMMAKAI DEPLOYMENT COMPLETE!                             "
+echo "                 🎉 POTATO DEPLOYMENT COMPLETE!                             "
 echo "=============================================================================="
 echo -e "${NC}"
 echo -e "🔗 ${BOLD}Dashboard URL:${NC}       ${PUBLIC_URL}/dashboard"
@@ -355,14 +355,14 @@ echo -e "🔑 ${BOLD}Admin Password:${NC}      ${ADMIN_PASS}"
 echo -e "⚡ ${BOLD}OpenAI API Base:${NC}     ${PUBLIC_URL}/v1"
 echo -e "💬 ${BOLD}Anthropic API Base:${NC}  ${PUBLIC_URL}/v1"
 echo -e "🔑 ${BOLD}Proxy API Key:${NC}       ${PROXY_KEY}"
-echo -e "🎯 ${BOLD}Default Model:${NC}       nimmakai/auto"
+echo -e "🎯 ${BOLD}Default Model:${NC}       potato/auto"
 echo "------------------------------------------------------------------------------"
 echo -e "${BOLD}Integration Snippets:${NC}"
 echo
 echo "1. Cursor IDE / OpenAI Compatible:"
 echo "   Base URL: ${PUBLIC_URL}/v1"
 echo "   API Key:  ${PROXY_KEY}"
-echo "   Model:    nimmakai/auto"
+echo "   Model:    potato/auto"
 echo
 echo "2. Claude Code CLI:"
 echo "   export ANTHROPIC_BASE_URL=\"${PUBLIC_URL}/v1\""

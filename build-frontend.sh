@@ -4,4 +4,4 @@ cd "$(dirname "$0")/frontend"
 npm install --production=false
 npx tsc --noEmit
 npx vite build
-echo "Frontend built → src/nimmakai/static/dist/"
+echo "Frontend built → src/potato/static/dist/"

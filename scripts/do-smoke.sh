@@ -30,7 +30,7 @@ echo "==> Validating app.yaml has deploy_on_push"
 grep -q 'deploy_on_push: true' .do/app.yaml
 
 echo "==> Dockerfile build (may take a few minutes)"
-docker build -t nimmakai:smoke .
+docker build -t potato:smoke .
 
 echo "==> Starting container"
 cid=$(docker run -d --rm -p 18080:8080 \
@@ -38,7 +38,7 @@ cid=$(docker run -d --rm -p 18080:8080 \
   -e ALLOW_INSECURE_AUTH=false \
   -e NIM_API_KEYS= \
   -e SQLITE_SEED_FREE_PRESETS=true \
-  nimmakai:smoke)
+  potato:smoke)
 
 cleanup() { docker stop "$cid" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
