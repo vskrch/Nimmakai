@@ -25,7 +25,7 @@ from nimmakai.catalog.preferences import UserPreferences
 from nimmakai.catalog.providers import ProviderStore
 from nimmakai.config import Settings, get_settings
 from nimmakai.logging_setup import new_request_id, request_logs, setup_logging
-from nimmakai.routes import accounts, admin, analytics, claude, openai
+from nimmakai.routes import accounts, admin, analytics, claude, openai, responses
 from nimmakai.routing import FallbackExecutor, IntentClassifier, ModelSelector, RoutingStats
 from nimmakai.safety import AccountGuard
 from nimmakai.upstream import UpstreamClient
@@ -596,6 +596,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(openai.router)
     app.include_router(analytics.router)
     app.include_router(claude.router)
+    app.include_router(responses.router)
 
     def _dashboard_html() -> HTMLResponse:
         """Serve the compiled React TypeScript dashboard bundle."""

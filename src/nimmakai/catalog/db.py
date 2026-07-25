@@ -55,6 +55,13 @@ CREATE TABLE IF NOT EXISTS ranking_cache (
     payload_json TEXT NOT NULL DEFAULT '{}',
     updated_at REAL NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS model_ladders (
+    model_id TEXT PRIMARY KEY,
+    chain_json TEXT NOT NULL DEFAULT '[]',
+    note TEXT NOT NULL DEFAULT '',
+    updated_at REAL NOT NULL DEFAULT 0
+);
 """
 
 
@@ -417,6 +424,59 @@ class NimmakaiDB:
     def set_custom_catalog_mappings(self, mappings: dict[str, str]) -> None:
         """Persist intent → model_id mappings to meta."""
         self.set_meta("custom_catalog_mappings", json.dumps(mappings))
+
+    # ── model ladders (NMK-LAD-101) ─────────────────────────────
+
+    def list_model_ladders(self) -> list[dict[str, Any]]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT model_id, chain_json, note, updated_at FROM model_ladders ORDER BY model_id"
+            )
+            out: list[dict[str, Any]] = []
+            for r in cur.fetchall():
+                try:
+                    chain = json.loads(str(r["chain_json"] or "[]"))
+                    if not isinstance(chain, list):
+                        chain = []
+                except json.JSONDecodeError:
+                    chain = []
+                out.append(
+                    {
+                        "model_id": str(r["model_id"]),
+                        "chain": chain,
+                        "note": str(r["note"] or ""),
+                        "updated_at": float(r["updated_at"] or 0.0),
+                    }
+                )
+            return out
+
+    def upsert_model_ladder(self, data: dict[str, Any]) -> None:
+        model_id = str(data.get("model_id") or "").strip()
+        if not model_id:
+            return
+        chain_json = json.dumps(list(data.get("chain") or []))
+        note = str(data.get("note") or "")
+        updated_at = float(data.get("updated_at") or time.time())
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO model_ladders (model_id, chain_json, note, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(model_id) DO UPDATE SET
+                    chain_json=excluded.chain_json,
+                    note=excluded.note,
+                    updated_at=excluded.updated_at
+                """,
+                (model_id, chain_json, note, updated_at),
+            )
+
+    def delete_model_ladder(self, model_id: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM model_ladders WHERE model_id = ?", (model_id,))
+
+    def clear_model_ladders(self) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM model_ladders")
 
 
 # Process-wide cache so ProviderStore + UserPreferences share one connection.
