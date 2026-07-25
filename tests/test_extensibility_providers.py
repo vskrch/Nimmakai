@@ -23,10 +23,10 @@ def test_ollama_cloud_preset():
 def test_opencode_go_preset():
     p = get_preset("opencode_go")
     assert p is not None
-    assert p["base_url"] == "https://opencode.ai/go/v1"
+    assert p["base_url"] == "https://opencode.ai/zen/go/v1"
     assert p["api_keys_env"] == "OPENCODE_GO_API_KEYS"
     assert p["free_tier"] is True
-    assert "troubleshooting" in p["description"]
+    assert "https://opencode.ai/zen/go/v1" in p["description"]
     assert "openai-compatible" in p["tags"]
 
 
