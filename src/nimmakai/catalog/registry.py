@@ -1225,6 +1225,11 @@ class ModelRegistry:
             "owned_by": "nimmakai",
             "permission": [],
             "parent": None,
+            "context_length": 131072,
+            "max_model_len": 131072,
+            "max_output_tokens": 8192,
+            "supports_tools": True,
+            "supports_vision": True,
         }
         owned = {
             "openrouter/auto": "openrouter",

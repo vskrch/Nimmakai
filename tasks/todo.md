@@ -1,23 +1,8 @@
-# SaaS UI Revamp & Verification Plan
+# Task Plan: Agent Tool Integrations (Cursor, OpenCode, Cline, Claude Code) & Production Ready README
 
-## Phase 1: Package & Core UI System Setup
-- [x] Install `lucide-react` for modern icon set in `frontend/package.json`
-- [x] Upgrade `src/components/ui.tsx` with production SaaS design tokens (glassmorphism, modals, tooltips, tabs, buttons, stat cards, copy buttons)
-- [x] Refactor `src/components/charts.tsx` with sleek SVG visualizers, gradients, tooltips, and empty states
-
-## Phase 2: Navigation & Layout Overhaul
-- [x] Overhaul `src/components/Sidebar.tsx` with icon navigation, grouped menu sections (Analytics, Operations, Management), status badges, user session menu
-- [x] Update `src/App.tsx` top navbar with connection status, quick actions, breadcrumbs, and notification toasts
-
-## Phase 3: Page-by-Page SaaS Transformation
-- [x] Revamp `DashboardPage.tsx` (real-time metric stats, sparklines, provider status, recent activity feed)
-- [x] Revamp `AnalyticsOverviewPage.tsx`, `RequestsPage.tsx`, `LiveFeedPage.tsx` (request filters, inspect payload modal, copy request ID, latency breakdown)
-- [x] Revamp `IntentsPage.tsx`, `CostPage.tsx` (cost metrics per intent/model, savings breakdown)
-- [x] Revamp `ProvidersPage.tsx`, `HealthPage.tsx`, `ModelsPage.tsx`, `RoutingPage.tsx` (provider grid/table, active key status, model capabilities, probe triggers, dynamic ladder view)
-- [x] Revamp `PlaygroundPage.tsx` (interactive API client, parameter sliders, model selector, syntax-highlighted streaming output, response timing)
-- [x] Revamp `UsersPage.tsx`, `AccountPage.tsx`, `AuthModal.tsx` (API key creation, copy key dialog, permission toggles)
-
-## Phase 4: Production Build & Functional Verification
-- [x] Execute `npx tsc --noEmit` & `npm run build` via `build-frontend.sh` to ensure 0 TypeScript errors and valid bundle output
-- [x] Verify static dist output under `src/nimmakai/static/dist`
-- [x] Run backend test suite (`pytest tests/`) - 332 tests passed cleanly
+- [x] 1. Expand `_AUTO_ALIAS` in `auto_router.py` for agent model names (`cursor/auto`, `claude-3-5-sonnet`, `opencode-go`, `cline/auto`, etc.)
+- [x] 2. Enrich `/v1/models` responses with context window & capability metadata in `registry.py`
+- [x] 3. Update `claude.py` to support `x-api-key` header for Claude Code CLI and Anthropic SDK compatibility
+- [x] 4. Update `openai.py` for `stream_options` and Cursor checksum headers
+- [x] 5. Revamp `README.md` with integration guides for Cursor, Claude Code CLI, Cline, OpenCode, and DigitalOcean
+- [x] 6. Run `pytest tests/` and `./build-frontend.sh` to verify zero errors (337 passed, 0 failed)

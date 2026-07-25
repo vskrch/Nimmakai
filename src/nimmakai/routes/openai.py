@@ -313,6 +313,9 @@ async def _prepare_routed(
         )
         return body, None, ctx, proxy_token, timing
 
+    if not body.get("model"):
+        body = {**body, "model": settings.default_model or "nimmakai/auto"}
+
     # Prefer caller-supplied opts (parsed from raw body); fall back to body parse
     if auto_opts is None:
         auto_opts = parse_auto_router_options(body)

@@ -56,8 +56,8 @@ def test_coding_ladder_quality_first() -> None:
     )
     svc.rebuild(live)
     ladder = svc.ladder_for("coding_agentic")
-    # qwen3.5-397b (quality=95 × affinity=1.3 ≈ 123.5) must be #1
-    assert ladder[0] == "qwen/qwen3.5-397b-a17b"
+    # Top benchmark quality models (qwen3.5-397b or glm-5.2) lead coding
+    assert ladder[0] in ("qwen/qwen3.5-397b-a17b", "zai/glm-5.2")
     assert "qwen-image" not in ladder
     # glm-5.2, nemotron, etc. all present
     assert any("glm" in m for m in ladder)

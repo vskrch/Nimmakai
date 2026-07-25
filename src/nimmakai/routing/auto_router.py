@@ -53,6 +53,24 @@ _AUTO_ALIAS: dict[str, AutoTier] = {
     "kilo-auto/balanced": "balanced",
     "kilo-auto/efficient": "efficient",
     "kilo-auto/free": "free",
+    # Cursor / Agentic Tool Aliases
+    "cursor/auto": "coding",
+    # Anthropic / Claude Code Aliases
+    "claude-3-5-sonnet": "coding",
+    "claude-3-5-sonnet-20241022": "coding",
+    "claude-3-5-sonnet-20240620": "coding",
+    "claude-3-opus": "frontier",
+    "claude-3-opus-20240229": "frontier",
+    "claude-3-haiku": "fast",
+    "claude-3-haiku-20240307": "fast",
+    "claude-3-5-haiku": "fast",
+    "claude-3-5-haiku-20241022": "fast",
+    # OpenCode & Cline Aliases
+    "opencode/zen-free": "free",
+    "opencode-go": "coding",
+    "opencode/go": "coding",
+    "cline/auto": "coding",
+    "cline/coding": "coding",
 }
 
 # Free-ish provider prefixes (best-effort; free filter also matches *free* in id)

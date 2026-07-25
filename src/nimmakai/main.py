@@ -25,7 +25,7 @@ from nimmakai.catalog.preferences import UserPreferences
 from nimmakai.catalog.providers import ProviderStore
 from nimmakai.config import Settings, get_settings
 from nimmakai.logging_setup import new_request_id, request_logs, setup_logging
-from nimmakai.routes import accounts, admin, analytics, openai
+from nimmakai.routes import accounts, admin, analytics, claude, openai
 from nimmakai.routing import FallbackExecutor, IntentClassifier, ModelSelector, RoutingStats
 from nimmakai.safety import AccountGuard
 from nimmakai.upstream import UpstreamClient
@@ -586,6 +586,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin.router)
     app.include_router(openai.router)
     app.include_router(analytics.router)
+    app.include_router(claude.router)
 
     def _dashboard_html() -> HTMLResponse:
         # Serve Vite build if available, fall back to legacy single-file dashboard

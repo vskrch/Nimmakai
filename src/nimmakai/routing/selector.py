@@ -268,12 +268,6 @@ class ModelSelector:
             if self.settings.enable_fallback_on_explicit:
                 siblings = self.registry.chain_for_intent(intent_key, variant=variant)
                 chain = chain + [m for m in siblings if m != target_model]
-            # For coding, always rank all candidates — the best coder leads,
-            # the user-requested model stays as fallback.
-            if intent_key == "coding_agentic":
-                optimized = self.registry.health_reorder(
-                    chain, intent=intent_key, variant=variant
-                )
                 head = chain[0] if chain else target_model
                 rest = [m for m in optimized if m != head]
             else:
