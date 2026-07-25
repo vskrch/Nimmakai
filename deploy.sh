@@ -148,7 +148,20 @@ else
     fi
 fi
 
-# 5. Interactive / Default Secret Generation
+# 5. Secret Preservation & Generation
+if [[ -f .env ]]; then
+    log "Existing .env configuration found. Preserving your credentials..."
+    if [[ -z "${PROXY_KEY}" ]]; then
+        PROXY_KEY=$(grep -E "^PROXY_API_KEYS=" .env | cut -d'=' -f2- || true)
+    fi
+    if [[ -z "${ADMIN_PASS}" ]]; then
+        ADMIN_PASS=$(grep -E "^ADMIN_PASSWORD=" .env | cut -d'=' -f2- || true)
+    fi
+    if [[ -z "${NIM_KEY}" ]]; then
+        NIM_KEY=$(grep -E "^NIM_API_KEYS=" .env | cut -d'=' -f2- || true)
+    fi
+fi
+
 if [[ -z "${PROXY_KEY}" ]]; then
     RAND_KEY=$(openssl rand -hex 16)
     PROXY_KEY="sk-nimmakai-${RAND_KEY}"
@@ -171,7 +184,7 @@ HOST=0.0.0.0
 PORT=8080
 EOF
 chmod 600 .env
-ok "Generated production credentials saved to .env"
+ok "Production credentials configured in .env"
 
 # 6. Build & Launch Docker Container
 log "Building and starting Nimmakai Gateway container..."
