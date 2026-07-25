@@ -305,6 +305,8 @@ PROVIDER_SPEED_PRIOR_COLDSTART: dict[str, float] = {
 
 # Env var → preset id for auto-registration at boot
 ENV_PROVIDER_BOOTSTRAP: list[tuple[str, str]] = [
+    # Builtin NIM — same convention as other providers; env overrides sqlite-cached keys
+    ("NIM_API_KEYS", "nim"),
     ("OPENCODE_ZEN_API_KEYS", "zen"),
     ("OPENCODE_API_KEYS", "zen"),  # alias
     ("ZEN_API_KEYS", "zen"),
@@ -324,8 +326,12 @@ ENV_PROVIDER_BOOTSTRAP: list[tuple[str, str]] = [
     ("OPENCODE_GO_API_KEYS", "opencode_go"),
 ]
 
-# Extra env names accepted by resolved_keys() per provider id
+# Extra env names accepted by resolved_keys() per provider id.
+# These are checked in addition to api_keys_env so the env is always
+# honoured even when a stale SQLite row omits the env reference.
 _PROVIDER_ENV_ALIASES: dict[str, tuple[str, ...]] = {
+    # builtin: env key is the canonical source of truth on DigitalOcean / DO App Platform
+    "nim": ("NIM_API_KEYS",),
     "zen": ("OPENCODE_ZEN_API_KEYS", "OPENCODE_API_KEYS", "ZEN_API_KEYS"),
 }
 

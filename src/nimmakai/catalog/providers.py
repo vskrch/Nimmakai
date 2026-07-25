@@ -238,6 +238,9 @@ class ProviderStore:
                 name="NVIDIA NIM",
                 base_url=nim_base_url,
                 api_keys=list(nim_api_keys or []),
+                # Always wire the env alias so resolved_keys() picks up NIM_API_KEYS
+                # even when SQLite row is stale or pre-dates this field.
+                api_keys_env="NIM_API_KEYS",
                 enabled=True,
                 rpm_limit=nim_rpm,
                 rpd_limit=nim_rpd,
@@ -248,6 +251,12 @@ class ProviderStore:
         else:
             nim.builtin = True
             nim.base_url = nim_base_url or nim.base_url
+            # Always ensure the env alias is present (may be missing in older
+            # SQLite rows that predate the api_keys_env field for nim).
+            if not nim.api_keys_env:
+                nim.api_keys_env = "NIM_API_KEYS"
+            # Override api_keys only when explicitly provided so that
+            # keys already loaded from the admin UI / SQLite are preserved.
             if nim_api_keys:
                 nim.api_keys = list(nim_api_keys)
             nim.rpm_limit = nim_rpm

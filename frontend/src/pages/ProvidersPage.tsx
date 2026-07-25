@@ -79,6 +79,16 @@ export default function ProvidersPage() {
     }
   }
 
+  async function handleToggleEnable(pid: string, currentEnabled: boolean) {
+    const r = await ap('/admin/providers', { id: pid, enabled: !currentEnabled })
+    if (r && (r as Record<string, unknown>).ok !== false) {
+      reload()
+      setMsg({ text: `Provider ${!currentEnabled ? 'enabled' : 'disabled'}`, ok: true })
+    } else {
+      setMsg({ text: errMsg(r, 'Update failed'), ok: false })
+    }
+  }
+
   return (
     <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
       {/* Header controls */}
@@ -267,6 +277,9 @@ export default function ProvidersPage() {
                           <div className="flex gap-2">
                             <Button size="xs" variant="default" onClick={() => { setForm({ id: p.id, name: p.name, base_url: p.base_url, api_keys: '', rpm_limit: p.rpm_limit, rpd_limit: p.rpd_limit }); setShowAdd(true) }}>Edit</Button>
                             <Button size="xs" variant="secondary" onClick={() => handleTest(p.id)}>Test</Button>
+                            <Button size="xs" variant={p.enabled ? 'default' : 'secondary'} onClick={() => handleToggleEnable(p.id, !!p.enabled)}>
+                              {p.enabled ? 'Disable' : 'Enable'}
+                            </Button>
                             {!p.builtin && (
                               <Button size="xs" variant="danger" onClick={() => handleDelete(p.id)}>
                                 <Trash2 className="w-3 h-3" />

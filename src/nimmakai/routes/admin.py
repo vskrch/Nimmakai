@@ -507,6 +507,9 @@ async def test_provider(request: Request) -> JSONResponse:
     """
     Probe an OpenAI-compatible base URL + key without saving.
     Body: {base_url, api_keys: [str], ...} or {id} to test an existing provider.
+
+    Always creates a fresh client — never re-uses the live pool so that cooled-down
+    keys (503/429 backoff) don't cause false failures.
     """
     settings = getattr(request.app.state, "settings", None) or get_settings()
     require_admin(request, settings)
@@ -522,45 +525,21 @@ async def test_provider(request: Request) -> JSONResponse:
         keys = [k.strip() for k in keys.split(",") if k.strip()]
     keys = [str(k).strip() for k in keys if str(k).strip()]
 
-    # Test existing provider by id (runtime or stored config)
+    # Resolve provider by id — use stored config for base_url + keys.
+    # We always create a *fresh* client (not the live pool) so cooldown/503
+    # backoff state on the live runtime doesn't poison the test result.
     pid = str(body.get("id") or "").strip().lower()
     if pid and hub is not None:
-        if pid in hub.runtimes:
-            rt = hub.runtimes[pid]
-            try:
-                status, resp, _h, _k = await rt.upstream.request_json("GET", "/models")
-                n = 0
-                sample: list[str] = []
-                if isinstance(resp, dict) and isinstance(resp.get("data"), list):
-                    n = len(resp["data"])
-                    for item in resp["data"][:8]:
-                        if isinstance(item, dict) and item.get("id"):
-                            sample.append(str(item["id"]))
-                ok = status < 400
-                return JSONResponse(
-                    {
-                        "ok": ok,
-                        "status_code": status,
-                        "model_count": n,
-                        "sample_models": sample,
-                        "message": (
-                            f"OK — {n} models from {pid}"
-                            if ok
-                            else f"HTTP {status} from {pid}"
-                        ),
-                    },
-                    status_code=200 if ok else 502,
-                )
-            except Exception as exc:
-                return JSONResponse(
-                    {"ok": False, "message": f"Connection failed: {exc}"},
-                    status_code=502,
-                )
         cfg = hub.store.providers.get(pid)
         if cfg is not None:
-            base_url = base_url or cfg.base_url
+            if not base_url:
+                base_url = cfg.base_url
             if not keys:
                 keys = cfg.resolved_keys()
+        elif not base_url:
+            # Provider id unknown and no base_url — try runtime as last resort
+            if pid in hub.runtimes:
+                base_url = hub.runtimes[pid].config.base_url or settings.nim_base_url
 
     if not base_url:
         return JSONResponse(
@@ -571,8 +550,11 @@ async def test_provider(request: Request) -> JSONResponse:
         return JSONResponse(
             {
                 "error": {
-                    "message": "At least one API key is required to test",
-                    "code": "invalid_request",
+                    "message": (
+                        "No API keys found for this provider. "
+                        "Add keys via the form or set the env var."
+                    ),
+                    "code": "no_keys",
                 }
             },
             status_code=400,

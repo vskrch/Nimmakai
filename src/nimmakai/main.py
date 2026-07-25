@@ -213,10 +213,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception:
             logger.exception("provider hub startup failed — running degraded")
 
-        if not settings.nim_api_keys:
+        # Check actual resolved keys (covers env alias, admin UI / SQLite, and NIM_API_KEYS)
+        nim_cfg = hub.store.providers.get("nim")
+        _nim_has_keys = bool(nim_cfg and nim_cfg.resolved_keys())
+        _any_provider_has_keys = bool(hub.active_provider_ids())
+        if not _nim_has_keys and not _any_provider_has_keys:
             logger.error(
-                "No NIM_API_KEYS configured. Copy .env.example → .env and add your keys "
-                "(or add other providers via /admin/providers)."
+                "No upstream API keys configured. Set NIM_API_KEYS in the environment "
+                "or add a provider with keys via /admin/providers."
+            )
+        elif not _nim_has_keys:
+            logger.info(
+                "NIM_API_KEYS not set — routing through other configured provider(s): %s",
+                sorted(hub.active_provider_ids()),
             )
         if not settings.proxy_api_keys and not settings.allow_insecure_auth:
             logger.warning(
@@ -589,20 +598,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(claude.router)
 
     def _dashboard_html() -> HTMLResponse:
-        # Serve Vite build if available, fall back to legacy single-file dashboard
+        """Serve the compiled React TypeScript dashboard bundle."""
         dist_index = Path(__file__).parent / "static" / "dist" / "index.html"
         if dist_index.is_file():
             return HTMLResponse(
                 content=dist_index.read_text(encoding="utf-8"),
                 headers={"Cache-Control": "no-cache"},
             )
-        html_path = Path(__file__).parent / "static" / "index.html"
-        if html_path.is_file():
-            return HTMLResponse(
-                content=html_path.read_text(encoding="utf-8"),
-                headers={"Cache-Control": "no-cache"},
-            )
-        return HTMLResponse(content="<h1>Dashboard not found</h1>", status_code=404)
+        return HTMLResponse(
+            content="<h1>Nimmakai Dashboard Assets Not Found</h1><p>Please run <code>cd frontend && npm run build</code> to generate the React bundle.</p>",
+            status_code=404,
+        )
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:
