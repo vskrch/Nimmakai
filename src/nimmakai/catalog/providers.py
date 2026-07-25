@@ -55,6 +55,21 @@ class ProviderConfig:
     model_whitelist: list[str] = field(default_factory=list)
     model_blacklist: list[str] = field(default_factory=list)
 
+    # Keys that are obviously not real credentials (placeholders saved by seed
+    # templates, tests, or deploy scripts before a real key is added).
+    # Filtered from resolved_keys() so they never burn auth-failure budget.
+    _PLACEHOLDER_KEYS: frozenset[str] = frozenset({
+        "dummy-key",
+        "nvapi-key-1",
+        "nvapi-key-2",
+        "nvapi-key-3",
+        "nvapi-key-4",
+        "placeholder",
+        "your-api-key",
+        "your_api_key",
+        "xxx",
+    })
+
     def resolved_keys(self) -> list[str]:
         keys = [k.strip() for k in self.api_keys if k and str(k).strip()]
         env_names: list[str] = []
@@ -73,13 +88,16 @@ class ProviderConfig:
         for env_name in env_names:
             raw = os.environ.get(env_name, "")
             keys.extend(p.strip() for p in raw.split(",") if p.strip())
-        # de-dupe preserve order
+        # de-dupe preserve order, filtering placeholder keys
         seen: set[str] = set()
         out: list[str] = []
         for k in keys:
-            if k not in seen:
-                seen.add(k)
-                out.append(k)
+            if k in seen:
+                continue
+            if k.lower() in self._PLACEHOLDER_KEYS:
+                continue
+            seen.add(k)
+            out.append(k)
         return out
 
     def mask(self) -> dict[str, Any]:
@@ -255,10 +273,14 @@ class ProviderStore:
             # SQLite rows that predate the api_keys_env field for nim).
             if not nim.api_keys_env:
                 nim.api_keys_env = "NIM_API_KEYS"
-            # Override api_keys only when explicitly provided so that
-            # keys already loaded from the admin UI / SQLite are preserved.
+            # Env keys MERGE with admin-UI-saved keys — never overwrite the
+            # saved key with an empty/stale env value. resolved_keys()
+            # deduplicates at read time.
             if nim_api_keys:
-                nim.api_keys = list(nim_api_keys)
+                merged = list(nim.api_keys) + [
+                    k for k in nim_api_keys if k not in nim.api_keys
+                ]
+                nim.api_keys = merged
             nim.rpm_limit = nim_rpm
             nim.rpd_limit = nim_rpd
             nim.max_in_flight_per_key = nim_max_in_flight

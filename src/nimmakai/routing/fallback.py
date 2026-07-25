@@ -394,6 +394,145 @@ class FallbackExecutor:
             logger.exception("provider availability check failed for model %s", model)
             return False
 
+    def _any_available_live_models(self, *, had_tools: bool = False) -> list[str]:
+        """Every live model whose provider has a runtime — widest possible net.
+
+        Used by the graceful fallback when the intent-aware chain is exhausted.
+        Prefers models that support tools when tools were requested, but falls
+        back to all live models rather than returning empty (serving > 503).
+        """
+        registry = self.registry
+        active = list(
+            getattr(registry, "active_live_ids", lambda: set())() or set()
+        )
+        if not active:
+            active = list(getattr(registry, "live_ids", set()) or set())
+        available = [m for m in active if self._provider_available(m)]
+        if not available:
+            return []
+        if had_tools and hasattr(registry, "ladder"):
+            caps = getattr(registry.ladder, "capabilities", {})
+            tool_ok = [
+                m for m in available
+                if (caps.get(m) or {}).get("supports_tools") is not False
+            ]
+            non_ok = [m for m in available if m not in set(tool_ok)]
+            return tool_ok + non_ok
+        return available
+
+    async def _try_models(
+        self,
+        models: list[str],
+        *,
+        body: dict[str, Any],
+        path: str,
+        decision: RouteDecision,
+        deadline: float,
+        forward_headers: dict[str, str] | None,
+        preferred_key_id: str | None,
+        had_tools: bool,
+        chain_len: int,
+        start_idx: int,
+        last: UpstreamResult,
+    ) -> UpstreamResult:
+        """Try a list of models sequentially; return first success or last failure."""
+        import asyncio as _aio
+
+        import httpx
+
+        from nimmakai.compat import wrap_upstream_error as _wue
+
+        for offset, model in enumerate(models):
+            remaining = deadline - time.monotonic()
+            if remaining < 3.0:
+                break
+            try:
+                client, upstream_mid = self._client_for(model)
+            except RuntimeError:
+                continue
+            attempt_body = {**body, "model": upstream_mid}
+            if hasattr(self.registry, "ladder"):
+                rec = self.registry.ladder.model_recommendations(model)
+                if rec:
+                    ml = rec.get("max_tokens_limit")
+                    if ml and not attempt_body.get("max_tokens"):
+                        attempt_body["max_tokens"] = ml
+                    elif ml and attempt_body.get("max_tokens"):
+                        attempt_body["max_tokens"] = min(
+                            attempt_body["max_tokens"], ml
+                        )
+            pid = self._provider_id_for(model)
+            t_attempt = time.perf_counter()
+            try:
+                budget = self._attempt_budget_for(decision.intent.value, remaining)
+                status, resp_body, headers, key = await _aio.wait_for(
+                    client.request_json(
+                        "POST",
+                        path,
+                        json_body=attempt_body,
+                        forward_headers=forward_headers,
+                        preferred_key_id=preferred_key_id,
+                        max_retries=1,
+                    ),
+                    timeout=budget,
+                )
+            except (TimeoutError, RuntimeError, httpx.HTTPError, OSError):
+                self._circuit_fail(pid)
+                self.registry.record_outcome(
+                    model, None, success=False, status_code=503,
+                    intent=decision.intent.value,
+                )
+                continue
+
+            lat = (time.perf_counter() - t_attempt) * 1000
+            success = 200 <= status < 300
+            if success:
+                self._circuit_succeed(pid)
+                pt = ct = cached = 0
+                if isinstance(resp_body, dict):
+                    usage = resp_body.get("usage") or {}
+                    pt = int(usage.get("prompt_tokens") or 0)
+                    ct = int(usage.get("completion_tokens") or 0)
+                    cached = int(
+                        usage.get("cached_tokens")
+                        or (usage.get("prompt_tokens_details") or {}).get(
+                            "cached_tokens", 0
+                        )
+                        or 0
+                    )
+                self.registry.record_outcome(
+                    model, key.key_id if key else None,
+                    success=True, latency=lat / 1000, tokens=pt + ct,
+                    status_code=status, intent=decision.intent.value,
+                )
+                self.stats.record(decision.intent.value, model, advanced=True)
+                self.stats.record_tokens(model, key.key_id if key else None, pt, ct)
+                if isinstance(resp_body, dict) and "model" in resp_body:
+                    resp_body = {**resp_body, "model": model}
+                return UpstreamResult(
+                    status_code=status, body=resp_body, headers=headers,
+                    key=key, model=model,
+                    fallback_index=chain_len + offset,
+                    decision=decision, prompt_tokens=pt,
+                    completion_tokens=ct, cached_tokens=cached,
+                    upstream_ms=lat, provider_id=pid,
+                )
+            self._circuit_fail(pid)
+            self.registry.record_outcome(
+                model, key.key_id if key else None,
+                success=False, status_code=status,
+                intent=decision.intent.value,
+            )
+            last = UpstreamResult(
+                status_code=status,
+                body=_wue(resp_body, status=status),
+                headers=headers, key=key, model=model,
+                fallback_index=start_idx + offset,
+                decision=decision, upstream_ms=lat,
+                provider_id=pid,
+            )
+        return last
+
     def _make_deadline(self) -> float:
         """Shared request deadline — both execute_json and execute_stream use this."""
         base = float(getattr(self.settings, "request_deadline_seconds", 120.0) or 120.0)
@@ -1171,9 +1310,10 @@ class FallbackExecutor:
                 continue
 
             self.stats.record(decision.intent.value, model, advanced=idx > 0)
-            return last
+            break  # don't return — fall through to last-resort + graceful fallback
 
         assert last is not None
+        fresh: list[str] = []
         if last.status_code >= 400:
             # ── Last-resort: clear cooldowns, force-allow providers, retry fresh models ──
             remaining = deadline - time.monotonic()
@@ -1339,23 +1479,66 @@ class FallbackExecutor:
                             provider_id=pid2,
                         )
 
-            last = UpstreamResult(
-                status_code=503,
-                body={
-                    "error": {
-                        "message": "All models in routing chain failed.",
-                        "type": "server_error",
-                        "code": "nimmakai_models_exhausted",
-                        "last_status": last.status_code,
-                        "last_body": last.body,
-                    }
-                },
-                headers=last.headers,
-                key=last.key,
-                model=last.model,
-                fallback_index=last.fallback_index,
-                decision=decision,
-            )
+            # ── Graceful fallback: try ANY live model from ANY provider ──
+            # When the intent-aware chain and fresh retries are exhausted,
+            # cast the widest net: every live model whose provider has a
+            # runtime. Better to serve with a "wrong-intent" model than 503.
+            if last.status_code >= 400:
+                remaining = deadline - time.monotonic()
+                if remaining >= 3.0:
+                    try:
+                        any_live = self._any_available_live_models(
+                            had_tools=had_tools
+                        )
+                        already = {m.lower() for m in chain} | {
+                            m.lower() for m in fresh
+                        }
+                        untried_any = [
+                            m for m in any_live if m.lower() not in already
+                        ]
+                        if untried_any:
+                            logger.warning(
+                                "graceful fallback: trying %s any-provider "
+                                "live models (intent=%s, chain exhausted)",
+                                len(untried_any),
+                                decision.intent.value,
+                            )
+                            last = await self._try_models(
+                                untried_any,
+                                body=body,
+                                path=path,
+                                decision=decision,
+                                deadline=deadline,
+                                forward_headers=forward_headers,
+                                preferred_key_id=preferred_key_id,
+                                had_tools=had_tools,
+                                chain_len=len(chain),
+                                start_idx=len(chain),
+                                last=last,
+                            )
+                    except Exception:
+                        logger.exception("graceful fallback failed")
+
+            # Only build the 503 envelope if the graceful fallback didn't
+            # produce a success (last was overwritten by _try_models on success).
+            if last.status_code >= 400:
+                last = UpstreamResult(
+                    status_code=503,
+                    body={
+                        "error": {
+                            "message": "All models in routing chain failed.",
+                            "type": "server_error",
+                            "code": "nimmakai_models_exhausted",
+                            "last_status": last.status_code,
+                            "last_body": last.body,
+                        }
+                    },
+                    headers=last.headers,
+                    key=last.key,
+                    model=last.model,
+                    fallback_index=last.fallback_index,
+                    decision=decision,
+                )
         self.stats.record(decision.intent.value, last.model, advanced=True)
         return last
 

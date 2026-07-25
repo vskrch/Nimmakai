@@ -55,6 +55,26 @@ DOMAIN_NAME="${DOMAIN_NAME:-}"
 PROXY_KEY="${PROXY_API_KEYS:-}"
 ADMIN_PASS="${ADMIN_PASSWORD:-}"
 NIM_KEY="${NIM_API_KEYS:-}"
+# All provider env keys that deploy.sh must preserve across redeploys.
+_PROVIDER_ENV_VARS=(
+    NIM_API_KEYS
+    GROQ_API_KEYS
+    CEREBRAS_API_KEYS
+    OPENROUTER_API_KEYS
+    GEMINI_API_KEYS
+    TOGETHER_API_KEYS
+    FIREWORKS_API_KEYS
+    SAMBANOVA_API_KEYS
+    DEEPSEEK_API_KEYS
+    DEEPINFRA_API_KEYS
+    GITHUB_MODELS_API_KEYS
+    MISTRAL_API_KEYS
+    HYPERBOLIC_API_KEYS
+    OLLAMA_CLOUD_API_KEYS
+    OPENCODE_ZEN_API_KEYS
+    OPENCODE_API_KEYS
+    OPENCODE_GO_API_KEYS
+)
 
 # 2. Package Manager Detection & Dependency Installation
 detect_pm() {
@@ -149,6 +169,9 @@ else
 fi
 
 # 5. Secret Preservation & Generation
+#    Capture every provider key from the existing .env so redeploy never
+#    wipes keys the user set via the admin UI or .env directly.
+declare -A SAVED_PROVIDER_KEYS
 if [[ -f .env ]]; then
     log "Existing .env configuration found. Preserving your credentials..."
     if [[ -z "${PROXY_KEY}" ]]; then
@@ -160,6 +183,13 @@ if [[ -f .env ]]; then
     if [[ -z "${NIM_KEY}" ]]; then
         NIM_KEY=$(grep -E "^NIM_API_KEYS=" .env | cut -d'=' -f2- || true)
     fi
+    # Preserve every provider env var present in the old .env.
+    for var in "${_PROVIDER_ENV_VARS[@]}"; do
+        val=$(grep -E "^${var}=" .env | cut -d'=' -f2- || true)
+        if [[ -n "${val}" ]]; then
+            SAVED_PROVIDER_KEYS["${var}"]="${val}"
+        fi
+    done
 fi
 
 if [[ -z "${PROXY_KEY}" ]]; then
@@ -172,17 +202,26 @@ if [[ -z "${ADMIN_PASS}" ]]; then
 fi
 
 log "Writing production configuration (.env)..."
-cat <<EOF > .env
-PROXY_API_KEYS=${PROXY_KEY}
-ALLOW_INSECURE_AUTH=false
-SQLITE_SEED_FREE_PRESETS=true
-ANALYTICS_ENABLED=true
-ROUTING_ENABLED=true
-ADMIN_PASSWORD=${ADMIN_PASS}
-NIM_API_KEYS=${NIM_KEY}
-HOST=0.0.0.0
-PORT=8080
-EOF
+{
+    echo "PROXY_API_KEYS=${PROXY_KEY}"
+    echo "ALLOW_INSECURE_AUTH=false"
+    echo "SQLITE_SEED_FREE_PRESETS=true"
+    echo "ANALYTICS_ENABLED=true"
+    echo "ROUTING_ENABLED=true"
+    echo "ADMIN_PASSWORD=${ADMIN_PASS}"
+    echo "NIM_API_KEYS=${NIM_KEY}"
+    echo "HOST=0.0.0.0"
+    echo "PORT=8080"
+    # Write every preserved provider key (Groq, Cerebras, OpenRouter, ...).
+    for var in "${_PROVIDER_ENV_VARS[@]}"; do
+        [[ "${var}" == "NIM_API_KEYS" ]] && continue
+        val="${SAVED_PROVIDER_KEYS[$var]:-}"
+        [[ -z "${val}" ]] && val="${!var:-}"
+        if [[ -n "${val}" ]]; then
+            echo "${var}=${val}"
+        fi
+    done
+} > .env
 chmod 600 .env
 ok "Production credentials configured in .env"
 

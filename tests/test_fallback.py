@@ -673,3 +673,48 @@ async def test_stream_json_content_type_converted_to_sse() -> None:
     joined = b"".join([c async for c in result.byte_iter])
     assert b"data:" in joined and b"[DONE]" in joined
     assert b"hello" in joined
+
+
+# ── Graceful fallback: any live model from any provider ─────────────
+
+
+@pytest.mark.asyncio
+async def test_graceful_fallback_tries_any_live_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When the entire intent chain fails, graceful fallback casts the
+    widest net: any live model whose provider has a runtime."""
+    settings = Settings(
+        nim_api_keys=["k"], max_model_fallbacks=2, request_deadline_seconds=10.0
+    )
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b", "model-c"}
+
+    async def fake_json(method, path, **kwargs):
+        body = kwargs.get("json_body") or {}
+        model = body.get("model", "")
+        if model in ("model-a", "model-b"):
+            return 503, {"error": {"message": "unavailable"}}, {}, _key()
+        if model == "model-c":
+            return (
+                200,
+                {"id": "ok", "model": model, "choices": [{"message": {"content": "ok"}}]},
+                {},
+                _key(2),
+            )
+        return 500, {"error": {"message": "???"}}, {}, _key()
+
+    upstream = AsyncMock()
+    upstream.request_json = fake_json
+    decision = RouteDecision(
+        chain=["model-a", "model-b"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    monkeypatch.setattr(ex, "_provider_available", lambda _m: True)
+    result = await ex.execute_json("/chat/completions", {"messages": []}, decision)
+    assert result.status_code == 200
+    assert result.model == "model-c"
