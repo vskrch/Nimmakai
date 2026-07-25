@@ -62,6 +62,12 @@ CREATE TABLE IF NOT EXISTS model_ladders (
     note TEXT NOT NULL DEFAULT '',
     updated_at REAL NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS rl_policy (
+    model_id TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    updated_at REAL NOT NULL DEFAULT 0
+);
 """
 
 
@@ -477,6 +483,40 @@ class NimmakaiDB:
     def clear_model_ladders(self) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM model_ladders")
+
+    # ── RL Policy Storage (NMK-RL-101) ──────────────────────────────────
+    def load_rl_policy(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT model_id, payload_json FROM rl_policy"
+            ).fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            try:
+                out[str(r["model_id"])] = json.loads(str(r["payload_json"] or "{}"))
+            except Exception:
+                continue
+        return out
+
+    def upsert_rl_policy(self, model_id: str, payload_json: str, updated_at: float) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO rl_policy (model_id, payload_json, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(model_id) DO UPDATE SET
+                    payload_json=excluded.payload_json,
+                    updated_at=excluded.updated_at
+                """,
+                (model_id, payload_json, updated_at),
+            )
+
+    def clear_rl_policy(self, model_id: str | None = None) -> None:
+        with self._lock:
+            if model_id:
+                self._conn.execute("DELETE FROM rl_policy WHERE model_id = ?", (model_id,))
+            else:
+                self._conn.execute("DELETE FROM rl_policy")
 
 
 # Process-wide cache so ProviderStore + UserPreferences share one connection.
