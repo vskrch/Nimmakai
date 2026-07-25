@@ -68,6 +68,15 @@ CREATE TABLE IF NOT EXISTS rl_policy (
     payload_json TEXT NOT NULL DEFAULT '{}',
     updated_at REAL NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS model_pool_config (
+    model_id TEXT PRIMARY KEY,
+    allowed_intents_json TEXT NOT NULL DEFAULT '[]',
+    excluded_intents_json TEXT NOT NULL DEFAULT '[]',
+    allow_auto_router INTEGER NOT NULL DEFAULT 1,
+    note TEXT NOT NULL DEFAULT '',
+    updated_at REAL NOT NULL DEFAULT 0
+);
 """
 
 
@@ -517,6 +526,62 @@ class PotatoDB:
                 self._conn.execute("DELETE FROM rl_policy WHERE model_id = ?", (model_id,))
             else:
                 self._conn.execute("DELETE FROM rl_policy")
+
+    # ── Model Pool Gating Config Storage ──────────────────────────────
+    def load_model_pool_configs(self) -> dict[str, dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT model_id, allowed_intents_json, excluded_intents_json, allow_auto_router, note, updated_at FROM model_pool_config"
+            ).fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            mid = str(r["model_id"])
+            try:
+                allowed = json.loads(str(r["allowed_intents_json"] or "[]"))
+            except Exception:
+                allowed = []
+            try:
+                excluded = json.loads(str(r["excluded_intents_json"] or "[]"))
+            except Exception:
+                excluded = []
+            out[mid] = {
+                "model_id": mid,
+                "allowed_intents": allowed if isinstance(allowed, list) else [],
+                "excluded_intents": excluded if isinstance(excluded, list) else [],
+                "allow_auto_router": bool(r["allow_auto_router"]),
+                "note": str(r["note"] or ""),
+                "updated_at": float(r["updated_at"] or 0.0),
+            }
+        return out
+
+    def upsert_model_pool_config(
+        self,
+        model_id: str,
+        allowed_intents_json: str,
+        excluded_intents_json: str,
+        allow_auto_router: int,
+        note: str,
+        updated_at: float,
+    ) -> None:
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO model_pool_config (
+                    model_id, allowed_intents_json, excluded_intents_json, allow_auto_router, note, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(model_id) DO UPDATE SET
+                    allowed_intents_json=excluded.allowed_intents_json,
+                    excluded_intents_json=excluded.excluded_intents_json,
+                    allow_auto_router=excluded.allow_auto_router,
+                    note=excluded.note,
+                    updated_at=excluded.updated_at
+                """,
+                (model_id, allowed_intents_json, excluded_intents_json, allow_auto_router, note, updated_at),
+            )
+
+    def delete_model_pool_config(self, model_id: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM model_pool_config WHERE model_id = ?", (model_id,))
 
 
 # Process-wide cache so ProviderStore + UserPreferences share one connection.

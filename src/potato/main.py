@@ -293,6 +293,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         model_ladders = ModelLadderStore(_db)
         model_ladders.load()
 
+        from potato.catalog.model_pools import ModelPoolStore
+        model_pools = ModelPoolStore(_db)
+        model_pools.load()
+
         # Initialize LinUCB RL Engine (NMK-RL-101)
         from potato.routing.rl_engine import LinUCBPolicyEngine, ModelLinUCBState
         rl_engine = LinUCBPolicyEngine()
@@ -322,6 +326,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 preferences=preferences,
                 model_ladders=model_ladders,
                 rl_engine=rl_engine,
+                model_pools=model_pools,
             )
             fallback = FallbackExecutor(
                 upstream, registry, settings, stats=routing_stats, hub=hub
@@ -478,6 +483,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.preferences = preferences
         app.state.model_ladders = model_ladders
         app.state.rl_engine = rl_engine
+        app.state.model_pools = model_pools
 
         _init_accounts(app, settings)
         _init_analytics(app, settings)

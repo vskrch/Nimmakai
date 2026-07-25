@@ -63,12 +63,14 @@ class ModelSelector:
         preferences: Any | None = None,
         model_ladders: Any | None = None,
         rl_engine: Any | None = None,
+        model_pools: Any | None = None,
     ) -> None:
         self.registry = registry
         self.settings = settings
         self.preferences = preferences
         self.model_ladders = model_ladders
         self.rl_engine = rl_engine
+        self.model_pools = model_pools
 
     def rank_chain_with_rl(
         self, chain: list[str], feature_vector: list[float] | None = None
@@ -544,6 +546,14 @@ class ModelSelector:
                     self.registry.resolve_live_id(m, include_disabled=True) or m
                 )
                 not in self.registry.disabled_models
+            ]
+
+        # Granular Model Pool & Intent Gating Filtering
+        if self.model_pools and chain:
+            is_auto = bool(variant in ("auto", "default") or intent_key == "auto")
+            chain = [
+                m for m in chain
+                if self.model_pools.is_allowed(m, intent_key, is_auto_router=is_auto)
             ]
         # Session model pin (OpenRouter sticky routing) — pin once after ranking
         preferred_live = (

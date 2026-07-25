@@ -83,7 +83,7 @@
         "empty_replies": 0,
         "ewma_quality": 0.3,
         "failures": 0,
-        "last_updated": 1785015854.572448,
+        "last_updated": 1785016006.228127,
         "score_delta": 3.6,
         "successes": 1,
         "thompson_alpha": 2.0,
@@ -125,7 +125,7 @@
         "empty_replies": 0,
         "ewma_quality": 0.657,
         "failures": 0,
-        "last_updated": 1785015856.145895,
+        "last_updated": 1785016007.8699572,
         "score_delta": 7.88,
         "successes": 3,
         "thompson_alpha": 4.0,
@@ -295,5 +295,5 @@
       }
     }
   },
-  "saved_at": 1785015856.146129
+  "saved_at": 1785016007.8701298
 }

@@ -1533,3 +1533,54 @@ async def reset_rl_stats(request: Request) -> JSONResponse:
         db.clear_rl_policy(model_id)
 
     return JSONResponse({"ok": True, "reset_model": model_id or "all"})
+
+
+# ── Model Pool & Intent Gating Endpoints ────────────────────────────
+@router.get("/admin/model-pools")
+async def get_model_pools(request: Request) -> JSONResponse:
+    """Return all per-model intent gating & pool inclusion configs."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    model_pools = getattr(request.app.state, "model_pools", None)
+    if model_pools is None:
+        return JSONResponse({"model_pools": []})
+    return JSONResponse({"model_pools": model_pools.to_dict_list()})
+
+
+@router.put("/admin/model-pools/{model_id:path}")
+async def put_model_pool_config(request: Request, model_id: str) -> JSONResponse:
+    """Upsert intent gating config for a specific model."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    body = await _safe_json(request)
+    if isinstance(body, JSONResponse):
+        return body
+    if not isinstance(body, dict):
+        return JSONResponse(
+            {"error": {"message": "request body must be a JSON object", "code": "invalid_request"}},
+            status_code=400,
+        )
+
+    model_pools = getattr(request.app.state, "model_pools", None)
+    if model_pools is None:
+        return JSONResponse({"error": {"message": "model_pools store uninitialized"}}, status_code=500)
+
+    cfg = model_pools.set_config(
+        model_id=model_id,
+        allowed_intents=body.get("allowed_intents") or [],
+        excluded_intents=body.get("excluded_intents") or [],
+        allow_auto_router=bool(body.get("allow_auto_router", True)),
+        note=str(body.get("note") or ""),
+    )
+    return JSONResponse({"ok": True, "config": cfg.to_dict()})
+
+
+@router.delete("/admin/model-pools/{model_id:path}")
+async def delete_model_pool_config(request: Request, model_id: str) -> JSONResponse:
+    """Delete intent gating config for a model (resets to unrestricted pooling)."""
+    settings = getattr(request.app.state, "settings", None) or get_settings()
+    require_admin(request, settings)
+    model_pools = getattr(request.app.state, "model_pools", None)
+    if model_pools is not None:
+        model_pools.delete_config(model_id)
+    return JSONResponse({"ok": True, "deleted_model": model_id})
