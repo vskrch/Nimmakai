@@ -247,7 +247,7 @@ PROVIDER_PRESETS: list[dict[str, Any]] = [
     {
         "id": "opencode_go",
         "name": "OpenCode Go",
-        "base_url": "https://opencode.ai/go/v1",
+        "base_url": "https://opencode.ai/zen/go/v1",
         "api_keys_env": "OPENCODE_GO_API_KEYS",
         "rpm_limit": 60,
         "rpd_limit": 50000,
@@ -256,11 +256,11 @@ PROVIDER_PRESETS: list[dict[str, Any]] = [
         "speed_tier": "fast",
         "signup_url": "https://opencode.ai/auth",
         "description": (
-            "OpenCode Go — curated fast inference. "
-            "If a model is not available, see "
-            "opencode.ai/docs/troubleshooting/#model-not-available"
+            "OpenCode Go (https://opencode.ai/zen/go/v1) — Models: "
+            "Grok 4.5, GLM-5.2, Kimi K3, Kimi K2.7 Code, DeepSeek V4 Pro, "
+            "MiMo-V2.5, MiniMax M3, Qwen3.7 Max, Hy3."
         ),
-        "tags": ["free", "coding", "opencode", "openai-compatible"],
+        "tags": ["free", "coding", "opencode", "opencode-go", "openai-compatible"],
         "coding_priority": True,
     },
     {

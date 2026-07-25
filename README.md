@@ -66,7 +66,12 @@ Nimmakai automatically advertises context window sizes (`128,000` tokens) and to
 
 ---
 
-### 4. OpenCode CLI Setup
+### 4. OpenCode CLI Setup (Zen & Go Integration)
+
+Nimmakai natively aggregates both **OpenCode Zen** and **OpenCode Go** backends:
+
+- **OpenCode Zen** (`https://opencode.ai/zen/v1`): Free & freemium coding agent models (`opencode/zen-free`, `mimo-v2.5-free`, `deepseek-v4-flash-free`).
+- **OpenCode Go** (`https://opencode.ai/zen/go/v1`): High-performance Go endpoints (`opencode-go/grok-4.5`, `opencode-go/glm-5.2`, `opencode-go/kimi-k3`, `opencode-go/deepseek-v4-pro`, `opencode-go/mimo-v2.5-pro`, `opencode-go/minimax-m3`, `opencode-go/qwen3.7-max`, `opencode-go/hy3`).
 
 Configure `opencode` to route through Nimmakai:
 
@@ -76,7 +81,7 @@ provider:
   name: custom
   api_base: https://your-nimmakai-domain.com/v1
   api_key: sk-nimmakai-YOUR-KEY
-  model: nimmakai/auto
+  model: opencode-go/kimi-k3  # Or opencode-go/grok-4.5, opencode-go/deepseek-v4-pro, nimmakai/auto
 ```
 
 ---
