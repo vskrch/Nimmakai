@@ -55,7 +55,7 @@ export default function RoutingPage() {
             <h2 className="text-lg font-bold text-white tracking-tight">Intent-Based Dynamic Routing Engine</h2>
           </div>
           <p className="text-zinc-400 text-xs mt-1 max-w-[620px]">
-            Nimmakai dynamically ranks available models for each task intent based on benchmark capability, measured tokens/sec, and real-time provider health.
+            Potato dynamically ranks available models for each task intent based on benchmark capability, measured tokens/sec, and real-time provider health.
           </p>
         </div>
         <Button variant="secondary" onClick={handleRefreshRankings}>

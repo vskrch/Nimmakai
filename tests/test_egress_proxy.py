@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from nimmakai.balancer import KeyPool
-from nimmakai.config import Settings
-from nimmakai.upstream import UpstreamClient
+from potato.balancer import KeyPool
+from potato.config import Settings
+from potato.upstream import UpstreamClient
 
 
 def test_egress_proxy_from_list() -> None:

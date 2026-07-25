@@ -16,7 +16,7 @@
 # ephemeral (wiped on redeploy). Put all API keys in env vars so providers
 # rehydrate. For durable SQLite, use the Droplet path in docs/digitalocean.md.
 
-name: nimmakai
+name: potato
 region: nyc
 
 features:
@@ -39,7 +39,7 @@ services:
     dockerfile_path: Dockerfile
     github:
       # REPLACE with your fork / repo
-      repo: YOUR_GITHUB_USER/Nimmakai
+      repo: YOUR_GITHUB_USER/Potato
       branch: main
       # CI creates deployments only after tests pass.
       deploy_on_push: false
@@ -105,7 +105,7 @@ services:
         value: "true"
       - key: SQLITE_PATH
         scope: RUN_TIME
-        value: "/data/nimmakai.db"
+        value: "/data/potato.db"
       - key: CATALOG_SNAPSHOT_PATH
         scope: RUN_TIME
         value: "/data/catalog_snapshot.json"

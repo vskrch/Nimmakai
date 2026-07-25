@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import pytest
-from nimmakai.routing.rl_engine import LinUCBPolicyEngine, ModelLinUCBState
-from nimmakai.routing.rl_features import FEATURE_DIM
+from potato.routing.rl_engine import LinUCBPolicyEngine, ModelLinUCBState
+from potato.routing.rl_features import FEATURE_DIM
 
 
 def test_linucb_init_and_score():

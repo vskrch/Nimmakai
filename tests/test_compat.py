@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from nimmakai.compat import (
+from potato.compat import (
     inject_system_prompt,
     normalize_completion_json,
     normalize_sse_stream,

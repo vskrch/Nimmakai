@@ -1,4 +1,4 @@
-# Nimmakai (`nimmakai/auto`) — Production-Readiness Audit
+# Potato (`potato/auto`) — Production-Readiness Audit
 
 **Auditor:** Staff-engineer two-pass audit (structural + adversarial)
 **Date:** 2026-07-19
@@ -28,7 +28,7 @@ client → FastAPI /v1/{chat/completions|completions|responses|embeddings}
       _chain(decision) [availability filter + optimize_chain AGAIN + hot/cold split]
       per model: hub.client_for_model → KeyPool.acquire → httpx (retries/backoff) → advance on failure
   → normalize_sse_stream / normalize_completion_json  [compat rewrite]
-  → StreamingResponse/JSONResponse + X-Nimmakai-* headers
+  → StreamingResponse/JSONResponse + X-Potato-* headers
   → finally: guard.after_request (gate release + sticky pin), trace enqueue
 ```
 
@@ -49,15 +49,15 @@ Severity honors the audit constraint: *anything returning OpenAI-incompatible er
 
 | ID | Area | Finding | Issue (root cause) | Suggested Fix | Severity | Effort |
 |----|------|---------|--------------------|---------------|----------|--------|
-| F-01 | routing | Every non-streaming `/v1/completions` and `/v1/responses` request fans out to the full chain and returns the last model's output. **Repro:** POST `/v1/completions` `{"model":"auto","prompt":"hi"}` against a ≥2-model chain; observe N upstream spans, `X-Nimmakai-Fallback-Index: N-1`, and `empty_replies` incremented for every model in `learning.json`. | `_analyze_success_body` (`fallback.py:176-197`) requires `choices[0].message` to be a dict. Text completions have `choices[0].text`; Responses API bodies have `output` and no `choices` → `empty_reply=True` → soft-fail advance at `fallback.py:561-571` on every success. Learning store records false failures (`registry.py:549-558` → `learning.py:99-119`). | Make `_analyze_success_body` schema-aware: accept `choices[0].text` (completions) and `output[*].content` / `output_text` (responses); only apply the tool-call soft-fail check when the response schema is chat. | Critical | S |
+| F-01 | routing | Every non-streaming `/v1/completions` and `/v1/responses` request fans out to the full chain and returns the last model's output. **Repro:** POST `/v1/completions` `{"model":"auto","prompt":"hi"}` against a ≥2-model chain; observe N upstream spans, `X-Potato-Fallback-Index: N-1`, and `empty_replies` incremented for every model in `learning.json`. | `_analyze_success_body` (`fallback.py:176-197`) requires `choices[0].message` to be a dict. Text completions have `choices[0].text`; Responses API bodies have `output` and no `choices` → `empty_reply=True` → soft-fail advance at `fallback.py:561-571` on every success. Learning store records false failures (`registry.py:549-558` → `learning.py:99-119`). | Make `_analyze_success_body` schema-aware: accept `choices[0].text` (completions) and `output[*].content` / `output_text` (responses); only apply the tool-call soft-fail check when the response schema is chat. | Critical | S |
 | F-02 | routing | OpenRouter/Kilo body controls (`session_id`, `plugins.allowed_models`, `cost_quality_tradeoff`, `models[]` partially) are dead — parsed after they've been stripped. **Repro:** POST with `{"session_id":"s1","plugins":[{"id":"auto-router","allowed_models":["deepseek/*"]}]}`; chain is unfiltered and no sticky binding is created from the body. | `sanitize_chat_body` runs first (`openai.py:519`) and `_STRIP_BODY_KEYS` (`compat.py:20-34`) removes `session_id`/`sessionId`/`plugins` before `parse_auto_router_options` (`openai.py:239`) and `sticky.resolve_session_id(body=…)` (`sticky.py:121-124`) ever see them. The comment "parse before strip" at `openai.py:238` documents the violated intent. | Parse `AutoRouterOptions` and resolve the session id from the **raw** body in `_chat_like` before `sanitize_chat_body`; pass both into `_prepare_routed`. Keep `strip_router_client_fields` as the single stripper. | High | S |
 | F-03 | routing + compat | Transport exceptions bypass model fallback and return FastAPI's default 500 shape. **Repro:** point one provider's `base_url` at a black-holed host; send a request that routes to its model → ~90s of connect retries (30s connect × 3), then `{"detail":"Internal Server Error"}`; chain never advances; circuit breaker untouched. | `UpstreamClient` re-raises the original `httpx` exception after retries (`upstream.py:200-201`, `359-360`); `FallbackExecutor` catches only `RuntimeError` (`fallback.py:435`, `727`); `_chat_like` re-raises unknown exceptions (`openai.py:858-871`) → Starlette 500. | Catch `httpx.HTTPError` (and `OSError`) alongside `RuntimeError` in both `execute_json` and `execute_stream`, record the outcome, and advance the chain; add a global exception handler that emits `{"error":{"message","type":"server_error","code"}}`. | Critical | S |
 | F-04 | compat | All auth failures return `{"detail": {"error": {...}}}` — the OpenAI error object is nested under `detail`, so OpenAI SDKs/Cursor can't read `error.message`. **Repro:** `curl /v1/chat/completions` with no key → body starts `{"detail":`. | `validate_proxy_token` raises `HTTPException(detail={"error": ...})` (`auth.py:29-69`); FastAPI wraps `detail` verbatim. No custom exception handler exists (verified by grep). | Register an `HTTPException` handler that unwraps dict details into the top-level body (and add `WWW-Authenticate`); one handler fixes every auth/HTTP error site. | Critical | S |
 | F-05 | routing + compat | If every chain model opens a stream but stalls past TTFT (or errors at open), the client receives **HTTP 200 with a zero-byte body**. **Repro:** stub upstreams that return 200 + never send bytes; POST `stream:true` → 200, immediate EOF. Cursor spins on an empty response. | `last_status` is set to the 2xx status at `fallback.py:746`; TTFT-timeout and open-failure paths `continue` (`fallback.py:767-822`); after the loop the terminal return reuses `last_status` with an empty iterator (`fallback.py:1022-1030`). | In the terminal return, force `status_code=504` (or 502) with an OpenAI error JSON body when no stream was successfully relayed. | Critical | S |
 | F-06 | compat | Streaming requests that exhaust retries on 429/401/403 return that status with an **empty body** (no `{"error": ...}`). **Repro:** force 429 from all keys on all chain models with `stream:true`. | `upstream.stream` returns empty iterators for terminal 429/401 (`upstream.py:269-299`); `execute_stream` relays `err_raw=b""` (`fallback.py:953-1015`). | Synthesize an OpenAI error body (include `Retry-After` when present) whenever the upstream error body is empty. | Critical | S |
 | F-07 | routing | Key `in_flight` slots leak permanently when header construction fails after a stream opens; 3 leaks make a key unusable until restart. **Repro (race):** open circuit for a provider (5 concurrent failures) while another request has just opened a stream on it → `routing_headers` → `hub.client_for_model` raises (`hub.py:179-181`) → `except RuntimeError` (`openai.py:845`) returns without ever consuming `result.byte_iter`, so `pool.release` in the iterator's `finally` (`upstream.py:343-352`) never runs; `_is_available` blocks the key at `in_flight >= max_in_flight_per_key` (`balancer.py:118`). | `routing_headers` (`fallback.py:383-385`) calls the raising `client_for_model` between stream-open (`openai.py:577`) and response start (`openai.py:667`). | Make `routing_headers` non-raising (reuse the provider id already resolved during `execute_stream`, stored on the result), and wrap the post-open section in `try/except` that closes `result.byte_iter` on any failure. | Critical | S |
-| F-08 | routing | Sticky-session model pins and explicit/requested-model head ordering are silently discarded, so multi-turn Cursor sessions hop models and explicit model requests can be served by a different healthy model. **Repro:** two identical multi-turn requests with `x-session-id`; inspect `X-Nimmakai-Model` — changes whenever live scores shift; or request a known healthy low-score model and observe a different `X-Nimmakai-Model` with `fallback_index=0`. | Selector pins after ranking (`selector.py:356-359`, `auto_router.py:248-260`) and places explicit models at head (`selector.py:270-297`), but `FallbackExecutor._chain` re-runs `optimize_chain` over the whole chain (`fallback.py:339-353`), a pure score sort. | Carry `pinned_head: str | None` on `RouteDecision`; in `_chain`, re-rank only the tail and keep the pinned head first unless it is unhealthy/in-cooldown (then log + demote). Honors "never surprise an explicit model request" and restores OpenRouter-style stickiness. | High | S |
-| F-09 | compat | Global concurrency-gate exhaustion returns a generic FastAPI 500 instead of the intended 503 `nimmakai_pool_exhausted`; the gate is also sized only to the default provider's pool, throttling multi-provider deployments. **Repro:** `GLOBAL_MAX_IN_FLIGHT=1`, two concurrent slow requests → second gets `{"detail":"Internal Server Error"}` after 30s. | `gate.acquire` raises `RuntimeError` (`concurrency.py:28-32`) inside `_prepare_routed`, whose catch-all re-raises non-HTTP exceptions (`openai.py:527-540`) — the friendly 503 handler only wraps the later phase (`openai.py:845-857`). Sizing at `guard.py:29-31` uses `len(pool)` of the default pool only. | Catch `RuntimeError` from `_prepare_routed` and return `guard.pool_exhausted_error()` with 503 + `Retry-After`; size the gate from the sum of active provider pools (recompute on provider upsert). | Critical (shape) | S |
+| F-08 | routing | Sticky-session model pins and explicit/requested-model head ordering are silently discarded, so multi-turn Cursor sessions hop models and explicit model requests can be served by a different healthy model. **Repro:** two identical multi-turn requests with `x-session-id`; inspect `X-Potato-Model` — changes whenever live scores shift; or request a known healthy low-score model and observe a different `X-Potato-Model` with `fallback_index=0`. | Selector pins after ranking (`selector.py:356-359`, `auto_router.py:248-260`) and places explicit models at head (`selector.py:270-297`), but `FallbackExecutor._chain` re-runs `optimize_chain` over the whole chain (`fallback.py:339-353`), a pure score sort. | Carry `pinned_head: str | None` on `RouteDecision`; in `_chain`, re-rank only the tail and keep the pinned head first unless it is unhealthy/in-cooldown (then log + demote). Honors "never surprise an explicit model request" and restores OpenRouter-style stickiness. | High | S |
+| F-09 | compat | Global concurrency-gate exhaustion returns a generic FastAPI 500 instead of the intended 503 `potato_pool_exhausted`; the gate is also sized only to the default provider's pool, throttling multi-provider deployments. **Repro:** `GLOBAL_MAX_IN_FLIGHT=1`, two concurrent slow requests → second gets `{"detail":"Internal Server Error"}` after 30s. | `gate.acquire` raises `RuntimeError` (`concurrency.py:28-32`) inside `_prepare_routed`, whose catch-all re-raises non-HTTP exceptions (`openai.py:527-540`) — the friendly 503 handler only wraps the later phase (`openai.py:845-857`). Sizing at `guard.py:29-31` uses `len(pool)` of the default pool only. | Catch `RuntimeError` from `_prepare_routed` and return `guard.pool_exhausted_error()` with 503 + `Retry-After`; size the gate from the sum of active provider pools (recompute on provider upsert). | Critical (shape) | S |
 | F-10 | routing | Gate slot leaks permanently if anything between `before_request` and `_prepare_routed`'s return raises (e.g. `strict_catalog` `RuntimeError` at `registry.py:504-505`, selector bugs). Each leak permanently shrinks capacity. | `guard.before_request` acquires the gate at `openai.py:278`; exceptions from `selector.resolve`/span collection (`openai.py:283-307`) propagate without any `after_request`. | Wrap post-acquire logic in `try/except` that releases the gate on failure (or acquire the gate last, after routing decision). | High | S |
 | F-11 | routing | No end-to-end deadline: worst case = 30s gate wait + per-model (30s pool acquire + 3 retries with backoff + 30s connects) × 12 models — minutes. Behind Heroku (`Procfile`) the router kills the connection at 30s with no response bytes (H12), so clients see a reset, not an error. | `request_deadline_seconds=180` exists (`config.py:97`) but has zero call sites (verified by grep). `KeyPool.acquire` defaults `max_wait=30` per call (`balancer.py:143`), multiplied across chain hops. | Thread a monotonic deadline through `_prepare_routed` → `FallbackExecutor` → `pool.acquire(max_wait=remaining)`; stop advancing the chain when < ~8s remain and return a 504 OpenAI error. | High | M |
 | F-12 | routing | Pre-first-byte fallback cascades sleep up to ~45s+ with zero bytes to the client: inter-model backoff scales with **chain index**, not per-provider retry count (hop 5 sleeps ~8–19s), and headers aren't sent until a stream opens. | `sleep_backoff(idx, …)` between different models (`fallback.py:617-650` JSON, `983-999` stream); `StreamingResponse` created only after `execute_stream` returns (`openai.py:667`). | For streams: skip inter-model backoff when the next candidate is a different provider (rate-limit domains are independent) and cap same-provider backoff at 2s; combined with F-11's deadline this bounds TTFB. (OpenRouter-style early-200 + heartbeat comments is not needed once hunting is bounded to <20s.) | High | S |
@@ -85,7 +85,7 @@ Severity honors the audit constraint: *anything returning OpenAI-incompatible er
 Today's only caches: LLM-classify LRU (`classifier.py:56-77`, off by default), SQLite sticky-rankings cache (no TTL — F-22), catalog disk snapshot, and the sticky-session store (defeated — F-08). There is **no** caching of route plans, `/v1/models` payloads, embeddings, or admin-config reads, and nothing that promotes **upstream** prompt-cache hits — the largest real latency lever for Cursor's multi-turn tool loops.
 
 ### Storage layer: in-process TTL-LRU dicts (one shared `TTLCache` utility), SQLite only for what must survive restart
-Justification: the deployment is a **single uvicorn worker** (`Procfile: web: uvicorn nimmakai.main:app` — no `--workers`), so in-process memory gives ~100ns lookups with zero coherence problems. Redis/memcached would add a network RTT larger than everything being saved, plus an ops dependency, for a single-node gateway. The rankings cache already persists in SQLite and stays there (with the F-22 age fix). Nothing else needs durability: route plans and catalog payloads rebuild in milliseconds at boot.
+Justification: the deployment is a **single uvicorn worker** (`Procfile: web: uvicorn potato.main:app` — no `--workers`), so in-process memory gives ~100ns lookups with zero coherence problems. Redis/memcached would add a network RTT larger than everything being saved, plus an ops dependency, for a single-node gateway. The rankings cache already persists in SQLite and stays there (with the F-22 age fix). Nothing else needs durability: route plans and catalog payloads rebuild in milliseconds at boot.
 
 ### What gets cached, keys, TTLs
 
@@ -120,11 +120,11 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Problem:** `_analyze_success_body` only understands chat-completion bodies, so every successful non-streaming `/v1/completions` and `/v1/responses` call is marked `empty_reply` and soft-failed. Every such request fans out across the entire chain (up to 12 upstream calls), returns the last model's output, and records false failures for every model in the learning store, corrupting future rankings.
 **Fix:** In `fallback.py`, detect the response schema: chat (`choices[0].message`), text (`choices[0].text`), responses (`output` / `output_text`). Compute `empty_reply`/`tool_ok` per schema; apply tool-call checks only for chat/responses schemas. Pass the request path (already available as `path`) into the analysis to disambiguate.
 **Acceptance criteria:**
-- Non-streaming `/v1/completions` with a 2-model chain makes exactly 1 upstream call on success; `X-Nimmakai-Fallback-Index: 0`.
+- Non-streaming `/v1/completions` with a 2-model chain makes exactly 1 upstream call on success; `X-Potato-Fallback-Index: 0`.
 - Same for `/v1/responses` with an `output`-shaped body.
 - Chat soft-fail behavior (empty content + no tool_calls → advance) unchanged; `tests/test_fallback.py::test_soft_fail_empty_reply_advances` still passes.
 - Learning store shows no `empty_replies` increment for successful text/responses calls.
-**Files likely affected:** `src/nimmakai/routing/fallback.py`, `tests/test_fallback.py`
+**Files likely affected:** `src/potato/routing/fallback.py`, `tests/test_fallback.py`
 
 ### TICKET-2: Parse auto-router/session fields from the raw body, before sanitization
 **Priority:** High
@@ -135,7 +135,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 - A request with `plugins:[{id:"auto-router",allowed_models:["deepseek/*"]}]` produces a chain containing only matching models (header-verifiable).
 - `session_id` in the body creates a sticky binding: two sequential requests with the same `session_id` route to the same model (with TICKET-8).
 - Upstream still never receives `plugins`/`session_id`/`models`.
-**Files likely affected:** `src/nimmakai/routes/openai.py`, `src/nimmakai/compat.py`, `tests/test_auto_router.py`
+**Files likely affected:** `src/potato/routes/openai.py`, `src/potato/compat.py`, `tests/test_auto_router.py`
 
 ### TICKET-3: Advance the chain on transport errors; wire the circuit breaker to real outcomes
 **Priority:** Critical
@@ -146,7 +146,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 - With model A's provider unreachable (connect refused), a 2-model chain serves from model B; response headers show `fallback_index=1`.
 - After 5 consecutive transport failures, the provider's breaker is OPEN and `client_for_model` skips it (existing behavior); a later success closes it.
 - No raw `httpx` exception escapes `_chat_like`.
-**Files likely affected:** `src/nimmakai/routing/fallback.py`, `src/nimmakai/catalog/hub.py`, `tests/test_fallback.py`, `tests/test_hub.py`
+**Files likely affected:** `src/potato/routing/fallback.py`, `src/potato/catalog/hub.py`, `tests/test_fallback.py`, `tests/test_hub.py`
 
 ### TICKET-4: OpenAI-shaped error envelope on every non-2xx path
 **Priority:** Critical
@@ -158,7 +158,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 - Kill switch test: all-429 streaming request returns 429 with non-empty OpenAI error JSON.
 - Upstream HTML error page → 502 with `{"error":{...}}`, never a JSON string body.
 - `openai` Python SDK raises typed errors with populated `.message` for all of the above.
-**Files likely affected:** `src/nimmakai/main.py`, `src/nimmakai/routes/openai.py`, `src/nimmakai/routing/fallback.py`, `src/nimmakai/upstream.py`
+**Files likely affected:** `src/potato/main.py`, `src/potato/routes/openai.py`, `src/potato/routing/fallback.py`, `src/potato/upstream.py`
 
 ### TICKET-5: Never return 2xx for a stream that produced no bytes
 **Priority:** Critical
@@ -168,7 +168,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Acceptance criteria:**
 - All-models-stall test (stub 200 + no bytes): response is 504 with `{"error":{"code":"upstream_timeout"}}`.
 - Mixed test (model A stalls, model B streams): 200 with B's stream, `fallback_index=1`.
-**Files likely affected:** `src/nimmakai/routing/fallback.py`, `tests/test_fallback.py`
+**Files likely affected:** `src/potato/routing/fallback.py`, `tests/test_fallback.py`
 
 ### TICKET-6: Terminate broken streams with finish_reason + error event, not bare `[DONE]`
 **Priority:** High
@@ -178,7 +178,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Acceptance criteria:**
 - Simulated mid-stream disconnect during a tool-call delta: client receives an error event + finish chunk + `[DONE]`; the OpenAI SDK stream iterator raises/completes with an error rather than yielding a truncated tool call silently.
 - Healthy streams are byte-identical to today.
-**Files likely affected:** `src/nimmakai/routing/fallback.py`, `src/nimmakai/routes/openai.py`, `src/nimmakai/compat.py`
+**Files likely affected:** `src/potato/routing/fallback.py`, `src/potato/routes/openai.py`, `src/potato/compat.py`
 
 ### TICKET-7: Eliminate the post-stream-open in_flight leak
 **Priority:** Critical
@@ -188,7 +188,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Acceptance criteria:**
 - Fault-injection test: force `client_for_model` to raise after stream open → key's `in_flight` returns to 0; pool snapshot shows the key available.
 - `routing_headers` has no raising call paths (unit test with open circuit).
-**Files likely affected:** `src/nimmakai/routing/fallback.py`, `src/nimmakai/routes/openai.py`, `tests/test_fallback.py`
+**Files likely affected:** `src/potato/routing/fallback.py`, `src/potato/routes/openai.py`, `tests/test_fallback.py`
 
 ### TICKET-8: Honor pinned heads (sticky session + explicit model) in `_chain`
 **Priority:** High
@@ -196,21 +196,21 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Problem:** The selector carefully places the sticky-pinned or explicitly-requested model at the chain head, but `FallbackExecutor._chain` re-sorts the whole chain by live score, discarding the pin. Sticky sessions don't stick (multi-turn Cursor sessions hop models — losing upstream KV-cache locality and risking strict-provider 400s on foreign `tool_call_id` formats), and explicit model requests can be served by a different model with zero failures.
 **Fix:** Add `pinned_head: str | None` to `RouteDecision` (set for `sticky_model`, explicit passthrough, and alias-to-model modes). In `_chain`, re-rank only the tail; keep the pinned head first unless `health.is_unhealthy(pinned)` — then demote it and log `pin_demoted`.
 **Acceptance criteria:**
-- Two sequential auto requests with the same session id route to the same model while it stays healthy (`X-Nimmakai-Model` stable).
+- Two sequential auto requests with the same session id route to the same model while it stays healthy (`X-Potato-Model` stable).
 - Explicit request for a healthy, live model is always served by that model (`fallback_index=0`).
 - Pinned model in cooldown → served by next-best, and the pin updates to the new model on success (existing `put_both` behavior).
-**Files likely affected:** `src/nimmakai/routing/selector.py`, `src/nimmakai/routing/fallback.py`, `src/nimmakai/routing/auto_router.py`, `tests/test_selector.py`
+**Files likely affected:** `src/potato/routing/selector.py`, `src/potato/routing/fallback.py`, `src/potato/routing/auto_router.py`, `tests/test_selector.py`
 
 ### TICKET-9: Correct concurrency-gate error shape, sizing, and leak-proofing
 **Priority:** High
 **Area:** compat
-**Problem:** Gate exhaustion raises `RuntimeError` inside `_prepare_routed`, which re-raises → generic 500 instead of the intended 503 `nimmakai_pool_exhausted`. The gate is sized from the default provider's pool only, throttling multi-provider deployments. Any exception between gate acquire and `_prepare_routed` return leaks a slot forever.
+**Problem:** Gate exhaustion raises `RuntimeError` inside `_prepare_routed`, which re-raises → generic 500 instead of the intended 503 `potato_pool_exhausted`. The gate is sized from the default provider's pool only, throttling multi-provider deployments. Any exception between gate acquire and `_prepare_routed` return leaks a slot forever.
 **Fix:** Catch `RuntimeError` from `_prepare_routed` in `_chat_like`/`embeddings` and return `guard.pool_exhausted_error()` as 503 with `Retry-After`; size the gate as the sum of `len(pool) × max_in_flight_per_key` across active providers, recomputed on provider upsert/remove; wrap post-acquire logic in `try/except` that releases on failure.
 **Acceptance criteria:**
-- `global_max_in_flight=1` + 2 concurrent slow requests → second gets 503 `{"error":{"code":"nimmakai_pool_exhausted"}}`.
+- `global_max_in_flight=1` + 2 concurrent slow requests → second gets 503 `{"error":{"code":"potato_pool_exhausted"}}`.
 - Injected selector exception → gate `in_flight` returns to 0.
 - Gate capacity reflects all active providers after enabling a second provider at runtime.
-**Files likely affected:** `src/nimmakai/routes/openai.py`, `src/nimmakai/safety/guard.py`, `src/nimmakai/safety/concurrency.py`
+**Files likely affected:** `src/potato/routes/openai.py`, `src/potato/safety/guard.py`, `src/potato/safety/concurrency.py`
 
 ### TICKET-10: End-to-end request deadline + fast connect + stream-aware inter-model backoff
 **Priority:** High
@@ -221,7 +221,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 - With `request_deadline_seconds=20` and all models stalling, the client receives a 504 error body in ≤22s.
 - Stream fallback across two providers inserts no sleep between hops (log-verified).
 - Connect-refused provider consumes ≤~15s before chain advance (5s × 3, minus TICKET-3 making it 1 attempt-class failure).
-**Files likely affected:** `src/nimmakai/routes/openai.py`, `src/nimmakai/routing/fallback.py`, `src/nimmakai/upstream.py`, `src/nimmakai/balancer.py`, `src/nimmakai/config.py`
+**Files likely affected:** `src/potato/routes/openai.py`, `src/potato/routing/fallback.py`, `src/potato/upstream.py`, `src/potato/balancer.py`, `src/potato/config.py`
 
 ### TICKET-11: Move blocking I/O and heavy CPU off the event loop
 **Priority:** High
@@ -231,7 +231,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Acceptance criteria:**
 - No `write_text`/`sqlite3` calls on the event loop during a chat request (asserted via a loop-blocking watchdog test or `asyncio` debug slow-callback log = clean under load).
 - Learning data still persists within 60s of last change; cost overrides reflect admin edits immediately.
-**Files likely affected:** `src/nimmakai/catalog/learning.py`, `src/nimmakai/routes/openai.py`, `src/nimmakai/analytics/store.py`, `src/nimmakai/routes/admin.py`, `src/nimmakai/catalog/registry.py`
+**Files likely affected:** `src/potato/catalog/learning.py`, `src/potato/routes/openai.py`, `src/potato/analytics/store.py`, `src/potato/routes/admin.py`, `src/potato/catalog/registry.py`
 
 ### TICKET-12: Classifier short-circuit + bounded text scan
 **Priority:** Medium
@@ -241,7 +241,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Acceptance criteria:**
 - Classification of a 1MB tools-present body completes in <0.5ms (micro-benchmark).
 - Rule outcomes on `tests/test_classifier.py` corpus unchanged except documented fingerprint tightening.
-**Files likely affected:** `src/nimmakai/routing/classifier.py`, `tests/test_classifier.py`
+**Files likely affected:** `src/potato/routing/classifier.py`, `tests/test_classifier.py`
 
 ### TICKET-13: Context-length-aware chain filtering
 **Priority:** High
@@ -251,7 +251,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Acceptance criteria:**
 - A 150k-char request never attempts a model with a known 16k context (verified via spans).
 - Requests still route when no model's context is known.
-**Files likely affected:** `src/nimmakai/routing/selector.py`, `src/nimmakai/routing/fallback.py`, `src/nimmakai/routes/openai.py`
+**Files likely affected:** `src/potato/routing/selector.py`, `src/potato/routing/fallback.py`, `src/potato/routes/openai.py`
 
 ### TICKET-14: Implement the §3 caching layer
 **Priority:** High
@@ -263,7 +263,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 - `/v1/models` with `If-None-Match` returns 304; payload changes after a provider is added.
 - Repeated identical embeddings request is served from cache (no upstream span) and returns a byte-identical body.
 - `prompt_cache_key` observed in upstream request bodies.
-**Files likely affected:** new `src/nimmakai/cache.py`, `src/nimmakai/routes/openai.py`, `src/nimmakai/routing/fallback.py`, `src/nimmakai/routing/selector.py`, `src/nimmakai/compat.py`
+**Files likely affected:** new `src/potato/cache.py`, `src/potato/routes/openai.py`, `src/potato/routing/fallback.py`, `src/potato/routing/selector.py`, `src/potato/compat.py`
 
 ### TICKET-15: Bound rankings-cache staleness and recompute on catalog delta
 **Priority:** Medium
@@ -273,7 +273,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Acceptance criteria:**
 - Boot with a 25h-old cache → rankings recomputed within one refresh cycle without blocking startup.
 - Adding a provider with new models updates `chat_fast`/`reasoning` ladders within one refresh cycle.
-**Files likely affected:** `src/nimmakai/catalog/registry.py`, `src/nimmakai/main.py`, `tests/test_ranking_cache.py`
+**Files likely affected:** `src/potato/catalog/registry.py`, `src/potato/main.py`, `tests/test_ranking_cache.py`
 
 ### TICKET-16: Convert JSON-downgraded "streams" to SSE
 **Priority:** Medium
@@ -283,7 +283,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Acceptance criteria:**
 - Stubbed JSON-on-stream upstream → client receives valid SSE; `openai` SDK stream iteration yields the full message and terminates cleanly.
 - True SSE upstreams unaffected.
-**Files likely affected:** `src/nimmakai/routing/fallback.py`, `src/nimmakai/compat.py`
+**Files likely affected:** `src/potato/routing/fallback.py`, `src/potato/compat.py`
 
 ### TICKET-17: `/v1/embeddings` parity — guarded parse, auth-first, size cap
 **Priority:** Medium
@@ -294,7 +294,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 - Malformed JSON → 400 `{"error":{"code":"invalid_json"}}`.
 - Missing key → 401 before any body read (verified with a streaming client that delays the body).
 - >20MB body → 413 OpenAI-shaped error.
-**Files likely affected:** `src/nimmakai/routes/openai.py`, `src/nimmakai/main.py`, `src/nimmakai/auth.py`
+**Files likely affected:** `src/potato/routes/openai.py`, `src/potato/main.py`, `src/potato/auth.py`
 
 ### TICKET-18: Stop silently mutating requests (`n`, `prompt_cache_key`)
 **Priority:** Medium
@@ -304,7 +304,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Acceptance criteria:**
 - `n:2` → 400 with clear message (not 1 silent choice).
 - `prompt_cache_key` present in upstream bodies; `cached_tokens` observed non-zero on a supporting provider in multi-turn tests.
-**Files likely affected:** `src/nimmakai/compat.py`, `tests/test_compat.py`
+**Files likely affected:** `src/potato/compat.py`, `tests/test_compat.py`
 
 ### TICKET-19: Vision intent with no vision models must not route blind
 **Priority:** Low
@@ -314,7 +314,7 @@ Full `/v1/chat/completions` responses. Agent traffic is temperature-varied, tool
 **Acceptance criteria:**
 - Image request with zero vision models live → 400 with the above code; no upstream call recorded.
 - Vision routing unchanged when vision models exist.
-**Files likely affected:** `src/nimmakai/routing/selector.py`, `tests/test_selector.py`
+**Files likely affected:** `src/potato/routing/selector.py`, `tests/test_selector.py`
 
 ---
 

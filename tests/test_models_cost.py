@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nimmakai.analytics.cost import estimate_cost, list_default_rates, lookup_rates
-from nimmakai.analytics.models_cost import ModelsDevCostCache
+from potato.analytics.cost import estimate_cost, list_default_rates, lookup_rates
+from potato.analytics.models_cost import ModelsDevCostCache
 
 # ── fixtures ────────────────────────────────────────────────────────
 
@@ -85,7 +85,7 @@ def _make_cache(data: dict = SAMPLE_API_RESPONSE) -> ModelsDevCostCache:
     mock_resp = MagicMock()
     mock_resp.json.return_value = data
     mock_resp.raise_for_status.return_value = None
-    with patch("nimmakai.analytics.models_cost.httpx.get", return_value=mock_resp):
+    with patch("potato.analytics.models_cost.httpx.get", return_value=mock_resp):
         cache._ensure_loaded()
     return cache
 
@@ -115,7 +115,7 @@ class TestModelsDevCostCache:
         assert cache.lookup("microsoft/phi-4-mini") == (0.0, 0.0)
 
     def test_lookup_strips_gateway_namespace(self):
-        """Nimmakai ids like nim/deepseek-chat should resolve via bare name."""
+        """Potato ids like nim/deepseek-chat should resolve via bare name."""
         cache = _make_cache()
         assert cache.lookup("nim/deepseek-chat") == (0.14, 0.28)
         assert cache.lookup("zen/gpt-4o") == (2.5, 10.0)
@@ -153,7 +153,7 @@ class TestModelsDevCostCache:
 
     def test_ttl_expires(self):
         cache = ModelsDevCostCache(url="http://localhost:99999/no-such-url", ttl_seconds=0)
-        with patch("nimmakai.analytics.models_cost.httpx.get") as mock_get:
+        with patch("potato.analytics.models_cost.httpx.get") as mock_get:
             mock_resp = MagicMock()
             mock_resp.json.return_value = SAMPLE_API_RESPONSE
             mock_resp.raise_for_status.return_value = None
@@ -169,7 +169,7 @@ class TestModelsDevCostCache:
             url="http://localhost:99999/no-such-url", ttl_seconds=3600
         )
         err_patch = patch(
-            "nimmakai.analytics.models_cost.httpx.get",
+            "potato.analytics.models_cost.httpx.get",
             side_effect=Exception("network error"),
         )
         with err_patch:
@@ -182,7 +182,7 @@ class TestModelsDevCostCache:
         mock_resp = MagicMock()
         mock_resp.json.return_value = "not a dict"
         mock_resp.raise_for_status.return_value = None
-        with patch("nimmakai.analytics.models_cost.httpx.get", return_value=mock_resp):
+        with patch("potato.analytics.models_cost.httpx.get", return_value=mock_resp):
             cache._ensure_loaded()
         assert not cache.is_loaded
 
@@ -208,13 +208,13 @@ class TestModelsDevCostCache:
 class TestCostIntegration:
     def test_dynamic_primary_source(self):
         cache = _make_cache()
-        with patch("nimmakai.analytics.cost.lookup_dynamic", side_effect=cache.lookup):
+        with patch("potato.analytics.cost.lookup_dynamic", side_effect=cache.lookup):
             rates = lookup_rates("openai/gpt-4o")
             assert rates == (2.5, 10.0)
 
     def test_free_pattern_overrides_dynamic(self):
         cache = _make_cache()
-        with patch("nimmakai.analytics.cost.lookup_dynamic", side_effect=cache.lookup):
+        with patch("potato.analytics.cost.lookup_dynamic", side_effect=cache.lookup):
             # groq/ should be free regardless of models.dev data
             rates = lookup_rates("groq/some-model")
             assert rates == (0.0, 0.0)
@@ -222,35 +222,35 @@ class TestCostIntegration:
     def test_override_overrides_dynamic(self):
         cache = _make_cache()
         overrides = {"openai/gpt-4o": (999.0, 999.0)}
-        with patch("nimmakai.analytics.cost.lookup_dynamic", side_effect=cache.lookup):
+        with patch("potato.analytics.cost.lookup_dynamic", side_effect=cache.lookup):
             rates = lookup_rates("openai/gpt-4o", overrides=overrides)
             assert rates == (999.0, 999.0)
 
     def test_hardcoded_fallback_when_dynamic_misses(self):
-        with patch("nimmakai.analytics.cost.lookup_dynamic", return_value=None):
+        with patch("potato.analytics.cost.lookup_dynamic", return_value=None):
             # Should fall back to hardcoded MODEL_COST_PER_M
             rates = lookup_rates("gpt-4o")
             assert rates == (2.50, 10.0)
 
     def test_hardcoded_fallback_fuzzy_match(self):
-        with patch("nimmakai.analytics.cost.lookup_dynamic", return_value=None):
+        with patch("potato.analytics.cost.lookup_dynamic", return_value=None):
             rates = lookup_rates("gpt-4o-2024-08-06")
             assert rates == (2.50, 10.0)
 
     def test_unknown_model_returns_zero(self):
-        with patch("nimmakai.analytics.cost.lookup_dynamic", return_value=None):
+        with patch("potato.analytics.cost.lookup_dynamic", return_value=None):
             rates = lookup_rates("completely-unknown-model")
             assert rates == (0.0, 0.0)
 
     def test_estimate_cost_uses_dynamic(self):
         cache = _make_cache()
-        with patch("nimmakai.analytics.cost.lookup_dynamic", side_effect=cache.lookup):
+        with patch("potato.analytics.cost.lookup_dynamic", side_effect=cache.lookup):
             cost = estimate_cost("openai/gpt-4o", 1_000_000, 1_000_000)
             assert cost == pytest.approx(2.5 + 10.0)
 
     def test_list_default_rates_includes_dynamic(self):
         cache = _make_cache()
-        with patch("nimmakai.analytics.cost.all_dynamic_rates", side_effect=cache.all_rates):
+        with patch("potato.analytics.cost.all_dynamic_rates", side_effect=cache.all_rates):
             rates = list_default_rates()
             model_ids = {r["model_id"] for r in rates}
             # Should contain models from both sources
@@ -259,7 +259,7 @@ class TestCostIntegration:
 
     def test_list_default_rates_dynamic_overrides_hardcoded(self):
         cache = _make_cache()
-        with patch("nimmakai.analytics.cost.all_dynamic_rates", side_effect=cache.all_rates):
+        with patch("potato.analytics.cost.all_dynamic_rates", side_effect=cache.all_rates):
             rates = list_default_rates()
             by_id = {r["model_id"]: r for r in rates}
             # Dynamic key "deepseek/deepseek-chat" uses models.dev value

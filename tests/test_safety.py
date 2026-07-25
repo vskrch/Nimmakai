@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from nimmakai.balancer import KeyPool
-from nimmakai.safety.jitter import apply_jitter
-from nimmakai.safety.sticky import StickySessionStore
-from nimmakai.upstream import parse_retry_after
+from potato.balancer import KeyPool
+from potato.safety.jitter import apply_jitter
+from potato.safety.sticky import StickySessionStore
+from potato.upstream import parse_retry_after
 
 
 @pytest.mark.asyncio
@@ -85,7 +85,7 @@ def test_sticky_requires_explicit_session() -> None:
     # Shared proxy token alone must NOT create sticky affinity
     assert store.resolve_session_id({}, proxy_token="sk-shared") is None
     assert store.resolve_session_id({"authorization": "Bearer x"}, proxy_token="x") is None
-    sid = store.resolve_session_id({"x-nimmakai-session": "s1"}, proxy_token="x")
+    sid = store.resolve_session_id({"x-potato-session": "s1"}, proxy_token="x")
     assert sid == "s1"
     chat = store.resolve_session_id({"x-cursor-chat-id": "c1"}, proxy_token="tok")
     assert chat is not None and len(chat) == 32

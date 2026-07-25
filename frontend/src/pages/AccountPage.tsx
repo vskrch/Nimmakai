@@ -39,8 +39,8 @@ export default function AccountPage({ session, onRefresh }: AccountPageProps) {
     await onRefresh()
   }
 
-  const sampleCurl = `curl -X POST https://api.nimmakai.ai/v1/chat/completions \\
-  -H "Authorization: Bearer ${newKey || 'YOUR_NIMMAKAI_API_KEY'}" \\
+  const sampleCurl = `curl -X POST https://api.potato.ai/v1/chat/completions \\
+  -H "Authorization: Bearer ${newKey || 'YOUR_POTATO_API_KEY'}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "auto",
@@ -111,7 +111,7 @@ export default function AccountPage({ session, onRefresh }: AccountPageProps) {
         <CardHeader>
           <div className="flex items-center gap-2">
             <Key className="w-4 h-4 text-violet-400" />
-            <h3 className="text-sm font-semibold text-white">Nimmakai Gateway API Tokens</h3>
+            <h3 className="text-sm font-semibold text-white">Potato Gateway API Tokens</h3>
           </div>
           {user?.status === 'active' && (
             <Button size="xs" variant="primary" onClick={rotate}>

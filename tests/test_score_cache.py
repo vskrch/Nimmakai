@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from nimmakai.catalog.health import ModelHealthStore
-from nimmakai.catalog.intel_fetcher import IntelBundle
-from nimmakai.catalog.learning import LearningStore
-from nimmakai.catalog.score_cache import ModelScore, ModelScoreCache, recompute
+from potato.catalog.health import ModelHealthStore
+from potato.catalog.intel_fetcher import IntelBundle
+from potato.catalog.learning import LearningStore
+from potato.catalog.score_cache import ModelScore, ModelScoreCache, recompute
 
 
 def test_recompute_empty_bundles():

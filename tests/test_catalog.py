@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from nimmakai.catalog import ModelRegistry, latest_in_family
-from nimmakai.catalog.families import matches_family
-from nimmakai.catalog.health import ModelHealthStore
-from nimmakai.catalog.schema import parse_alias_value
+from potato.catalog import ModelRegistry, latest_in_family
+from potato.catalog.families import matches_family
+from potato.catalog.health import ModelHealthStore
+from potato.catalog.schema import parse_alias_value
 
 ROOT = Path(__file__).resolve().parents[1]
 YAML = ROOT / "config" / "models.yaml"

@@ -4,12 +4,12 @@ import json
 import time
 from pathlib import Path
 import pytest
-from nimmakai.catalog.db import NimmakaiDB
+from potato.catalog.db import PotatoDB
 
 
 def test_rl_policy_crud(tmp_path: Path):
     db_path = tmp_path / "test_rl.db"
-    db = NimmakaiDB(db_path)
+    db = PotatoDB(db_path)
     
     # Empty initially
     policies = db.load_rl_policy()

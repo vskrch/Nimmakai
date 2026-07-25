@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PORT=8080 \
     HOST=0.0.0.0 \
-    SQLITE_PATH=/data/nimmakai.db \
+    SQLITE_PATH=/data/potato.db \
     CATALOG_SNAPSHOT_PATH=/data/catalog_snapshot.json \
     PROVIDERS_OVERLAY_PATH=/data/providers.json
 
@@ -35,13 +35,13 @@ COPY config ./config
 
 RUN pip install --upgrade pip \
     && pip install . \
-    && SITE=$(python -c "import nimmakai, pathlib; print(pathlib.Path(nimmakai.__file__).parent)") \
+    && SITE=$(python -c "import potato, pathlib; print(pathlib.Path(potato.__file__).parent)") \
     && mkdir -p "$SITE/static/dist" \
     && chown -R appuser:appuser /app "$SITE"
 
 # Dashboard assets into the installed package (survives site-packages layout)
 COPY --from=frontend /build/static-dist /tmp/static-dist
-RUN SITE=$(python -c "import nimmakai, pathlib; print(pathlib.Path(nimmakai.__file__).parent)") \
+RUN SITE=$(python -c "import potato, pathlib; print(pathlib.Path(potato.__file__).parent)") \
     && cp -a /tmp/static-dist/. "$SITE/static/dist/" \
     && chown -R appuser:appuser "$SITE/static" \
     && rm -rf /tmp/static-dist
@@ -53,4 +53,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=3 \
   CMD curl -fsS "http://127.0.0.1:${PORT:-8080}/ready" || exit 1
 
-CMD ["sh", "-c", "exec uvicorn nimmakai.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "exec uvicorn potato.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

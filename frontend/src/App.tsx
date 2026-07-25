@@ -80,7 +80,7 @@ export default function App() {
     return (
       <div className="h-screen w-screen flex flex-col items-center justify-center bg-zinc-950 text-zinc-400 gap-4">
         <div className="w-10 h-10 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin" />
-        <span className="text-sm font-medium tracking-wide">Initializing Nimmakai Gateway…</span>
+        <span className="text-sm font-medium tracking-wide">Initializing Potato Gateway…</span>
       </div>
     )
   }

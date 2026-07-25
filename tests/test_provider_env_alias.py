@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nimmakai.catalog.providers import ProviderStore
+from potato.catalog.providers import ProviderStore
 
 
 def test_opencode_api_keys_alias_enables_seeded_zen(tmp_path: Path, monkeypatch) -> None:

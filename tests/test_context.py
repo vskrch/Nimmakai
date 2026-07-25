@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nimmakai.catalog.context import (
+from potato.catalog.context import (
     enrich_model_dict,
     extract_context_length,
     merge_context,

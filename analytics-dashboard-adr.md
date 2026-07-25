@@ -1,4 +1,4 @@
-# Nimmakai Analytics Dashboard — Design Plan
+# Potato Analytics Dashboard — Design Plan
 
 > **Goal**: Commercial-grade, real-time analytics dashboard with end-to-end request tracing
 > **Inspiration**: OpenRouter Activity, Langfuse Trace Waterfall, Helicone Proxy Logging, Portkey Control Plane
@@ -77,11 +77,11 @@ graph LR
 
 | Component | File | What It Captures | Gap |
 |-----------|------|-----------------|-----|
-| `RequestLog` | [logging_setup.py](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/logging_setup.py#L16-L34) | request_id, model, intent, status, duration_ms, fallback_index | **In-memory ring buffer only (200 entries), no persistence, no token counts, no per-span timing** |
-| `RoutingStats` | [fallback.py](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/routing/fallback.py#L54-L77) | intent totals, model totals, token counts per model/key | **In-memory only, lost on restart, no time-series, no per-request granularity** |
-| `ModelHealthStore` | [health.py](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/catalog/health.py) | EWMA latency, TPS, error rates, cooldowns | **In-memory only, no historical trend data** |
-| `/admin/logs` | [admin.py](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/routes/admin.py#L59-L90) | Recent request ring with basic filtering | **200-entry cap, no search, no trace detail, no aggregation** |
-| `/stats` | [admin.py](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/routes/admin.py#L166-L211) | Routing stats, key stats, catalog state | **Cumulative counters only, no time-series, no cost tracking** |
+| `RequestLog` | [logging_setup.py](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/logging_setup.py#L16-L34) | request_id, model, intent, status, duration_ms, fallback_index | **In-memory ring buffer only (200 entries), no persistence, no token counts, no per-span timing** |
+| `RoutingStats` | [fallback.py](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/routing/fallback.py#L54-L77) | intent totals, model totals, token counts per model/key | **In-memory only, lost on restart, no time-series, no per-request granularity** |
+| `ModelHealthStore` | [health.py](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/catalog/health.py) | EWMA latency, TPS, error rates, cooldowns | **In-memory only, no historical trend data** |
+| `/admin/logs` | [admin.py](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/routes/admin.py#L59-L90) | Recent request ring with basic filtering | **200-entry cap, no search, no trace detail, no aggregation** |
+| `/stats` | [admin.py](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/routes/admin.py#L166-L211) | Routing stats, key stats, catalog state | **Cumulative counters only, no time-series, no cost tracking** |
 
 ### What's Missing for Commercial Grade
 
@@ -102,10 +102,10 @@ graph LR
 
 ### NMK-A101: SQLite Trace Schema
 
-**File**: NEW `src/nimmakai/analytics/schema.py`
+**File**: NEW `src/potato/analytics/schema.py`
 
 ```sql
--- Core trace table: one row per API request through Nimmakai
+-- Core trace table: one row per API request through Potato
 CREATE TABLE IF NOT EXISTS traces (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     trace_id    TEXT NOT NULL,               -- uuid hex (12 char, matches request_id)
@@ -237,13 +237,13 @@ CREATE INDEX IF NOT EXISTS idx_rollups_model ON trace_rollups(model, bucket_ts);
 - `trace_rollups` pre-aggregated for O(1) dashboard chart loading
 - No `VACUUM` needed — use rolling retention (delete old rows by `created_at`)
 
-**Acceptance**: Tables are created on first boot via db migration; existing `nimmakai.db` gains new tables without data loss
+**Acceptance**: Tables are created on first boot via db migration; existing `potato.db` gains new tables without data loss
 
 ---
 
 ### NMK-A102: Async Batch Writer
 
-**File**: NEW `src/nimmakai/analytics/writer.py`
+**File**: NEW `src/potato/analytics/writer.py`
 
 **Design** (inspired by LiteLLM async logging + Helicone batch pipeline):
 
@@ -258,7 +258,7 @@ class TraceWriter:
     - Background task — never blocks the request path
     """
     
-    def __init__(self, db: NimmakaiDB, *, batch_size: int = 50, flush_interval: float = 1.0):
+    def __init__(self, db: PotatoDB, *, batch_size: int = 50, flush_interval: float = 1.0):
         self._queue: asyncio.Queue[TraceRecord] = asyncio.Queue(maxsize=5000)
         self._db = db
         self._batch_size = batch_size
@@ -326,7 +326,7 @@ class TraceWriter:
 
 ### NMK-A103: Rolling Retention & Rollup Aggregator
 
-**File**: NEW `src/nimmakai/analytics/retention.py`
+**File**: NEW `src/potato/analytics/retention.py`
 
 ```python
 class RetentionManager:
@@ -347,7 +347,7 @@ class RetentionManager:
         """
 ```
 
-**Config additions** to [config.py](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/config.py):
+**Config additions** to [config.py](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/config.py):
 ```python
 # Analytics
 analytics_enabled: bool = True
@@ -363,7 +363,7 @@ analytics_flush_interval: float = 1.0
 
 ### NMK-A104: Cost Estimation Engine
 
-**File**: NEW `src/nimmakai/analytics/cost.py`
+**File**: NEW `src/potato/analytics/cost.py`
 
 ```python
 # Per-1M-token pricing (configurable, defaults for popular free/paid models)
@@ -394,7 +394,7 @@ def estimate_cost(model_id: str, prompt_tokens: int, completion_tokens: int) -> 
 
 ### NMK-A201: TraceRecord Data Model
 
-**File**: NEW `src/nimmakai/analytics/models.py`
+**File**: NEW `src/potato/analytics/models.py`
 
 ```python
 @dataclass
@@ -472,7 +472,7 @@ class TraceRecord:
 
 ### NMK-A202: Middleware Trace Instrumentation
 
-**File**: MODIFY [openai.py](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/routes/openai.py#L294-L582)
+**File**: MODIFY [openai.py](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/routes/openai.py#L294-L582)
 
 **Change**: Wrap the `_chat_like()` function with span timing at each stage:
 
@@ -520,7 +520,7 @@ async def _chat_like(request, *, upstream_path):
 
 ### NMK-A203: FallbackExecutor Span Emission
 
-**File**: MODIFY [fallback.py](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/routing/fallback.py#L181-L300)
+**File**: MODIFY [fallback.py](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/routing/fallback.py#L181-L300)
 
 **Change**: Add optional `span_callback` to FallbackExecutor that emits a `TraceSpan` for each model attempt:
 
@@ -560,9 +560,9 @@ class FallbackExecutor:
 
 ### NMK-A204: Token Extraction from Upstream Response
 
-**File**: MODIFY [fallback.py](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/routing/fallback.py#L440-L460)
+**File**: MODIFY [fallback.py](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/routing/fallback.py#L440-L460)
 
-**Current state**: Token extraction already exists at [L440-460](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/routing/fallback.py#L440-L460) for `RoutingStats.record_tokens()`.
+**Current state**: Token extraction already exists at [L440-460](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/routing/fallback.py#L440-L460) for `RoutingStats.record_tokens()`.
 
 **Change**: Extend to also populate the `TraceRecord`:
 - For JSON responses: Extract `usage.prompt_tokens`, `usage.completion_tokens`, `usage.cached_tokens`
@@ -573,7 +573,7 @@ class FallbackExecutor:
 
 ### NMK-A205: Request Context Extraction
 
-**File**: MODIFY [openai.py](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/routes/openai.py#L326-L335)
+**File**: MODIFY [openai.py](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/routes/openai.py#L326-L335)
 
 **Extend existing context** (currently only counts messages/tools):
 ```python
@@ -599,7 +599,7 @@ trace.char_length = sum(
 
 ### NMK-A301: Trace Query Endpoints
 
-**File**: NEW `src/nimmakai/routes/analytics.py`
+**File**: NEW `src/potato/routes/analytics.py`
 
 ```python
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -750,7 +750,7 @@ async def analytics_summary(
 
 ### NMK-A401: SSE Event Bus
 
-**File**: NEW `src/nimmakai/analytics/events.py`
+**File**: NEW `src/potato/analytics/events.py`
 
 ```python
 class EventBus:
@@ -801,7 +801,7 @@ class EventBus:
 
 ### NMK-A402: SSE Endpoint
 
-**File**: NEW endpoint in `src/nimmakai/routes/analytics.py`
+**File**: NEW endpoint in `src/potato/routes/analytics.py`
 
 ```python
 @router.get("/events")
@@ -840,7 +840,7 @@ async def analytics_events(request: Request) -> StreamingResponse:
 
 > **Commercial SaaS quality** means: dark theme, glassmorphism, micro-animations, real-time data, interactive charts, and instant feedback. Think **Linear + Vercel + OpenRouter**.
 
-The UI will extend the existing [index.html](file:///Users/venkatasai/CascadeProjects/Nimmakai/src/nimmakai/static/index.html) sidebar navigation with new "Analytics" pages.
+The UI will extend the existing [index.html](file:///Users/venkatasai/CascadeProjects/Potato/src/potato/static/index.html) sidebar navigation with new "Analytics" pages.
 
 ---
 
@@ -1155,7 +1155,7 @@ async def export_traces(
 
 ### NMK-A602: OpenTelemetry OTLP Export Hook
 
-**File**: NEW `src/nimmakai/analytics/otel.py`
+**File**: NEW `src/potato/analytics/otel.py`
 
 ```python
 class OTLPExporter:
@@ -1163,7 +1163,7 @@ class OTLPExporter:
     Optional: export traces to any OTLP-compatible collector.
     
     Uses gen_ai.* semantic conventions:
-    - gen_ai.system = "nimmakai"
+    - gen_ai.system = "potato"
     - gen_ai.request.model = model_requested
     - gen_ai.response.model = model_routed
     - gen_ai.usage.input_tokens = prompt_tokens
@@ -1172,7 +1172,7 @@ class OTLPExporter:
 ```
 
 > [!NOTE]
-> OTLP export is optional and requires `opentelemetry-api` + `opentelemetry-sdk`. It's a separate pip extra: `pip install nimmakai[otel]`. This follows LiteLLM's pattern of optional observability integrations.
+> OTLP export is optional and requires `opentelemetry-api` + `opentelemetry-sdk`. It's a separate pip extra: `pip install potato[otel]`. This follows LiteLLM's pattern of optional observability integrations.
 
 ---
 
@@ -1302,7 +1302,7 @@ class OTLPExporter:
 ## File Structure (New Files)
 
 ```
-src/nimmakai/
+src/potato/
   analytics/
     __init__.py
     schema.py          # NMK-A101: SQLite DDL + migration
@@ -1340,7 +1340,7 @@ tests/
 
 ## Competitive Feature Matrix
 
-| Feature | OpenRouter | Langfuse | Helicone | Portkey | **Nimmakai (Planned)** |
+| Feature | OpenRouter | Langfuse | Helicone | Portkey | **Potato (Planned)** |
 |---------|-----------|---------|---------|---------|---------------------|
 | Request logging | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Token tracking | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -1357,7 +1357,7 @@ tests/
 | CSV export | ❌ | ✅ | ✅ | ✅ | ✅ |
 
 > [!IMPORTANT]
-> **Nimmakai's unique value**: No other gateway shows **intent classification confidence**, **fallback chain visualization**, and **per-span routing decisions** in a single self-hosted UI. This is the differentiator for commercial positioning.
+> **Potato's unique value**: No other gateway shows **intent classification confidence**, **fallback chain visualization**, and **per-span routing decisions** in a single self-hosted UI. This is the differentiator for commercial positioning.
 
 ---
 

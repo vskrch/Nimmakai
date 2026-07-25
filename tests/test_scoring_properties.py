@@ -1,8 +1,8 @@
 """NMK-602: Scoring algorithm property tests — invariants that must always hold."""
 
 import pytest
-from nimmakai.catalog.health import ModelHealthStore, ModelHealth
-from nimmakai.routing.optimizer import (
+from potato.catalog.health import ModelHealthStore, ModelHealth
+from potato.routing.optimizer import (
     score_model_live,
     _quality_prior,
     _speed_factor,
@@ -52,8 +52,8 @@ def test_healthy_model_availability_high():
 
 def test_custom_override_precedence():
     """Quality override should take precedence over regex tier matching."""
-    from nimmakai.catalog.ladder import LadderService
-    from nimmakai.catalog.health import ModelHealthStore
+    from potato.catalog.ladder import LadderService
+    from potato.catalog.health import ModelHealthStore
     ls = LadderService(health=ModelHealthStore())
     ls.quality_overrides["nim/custom-model"] = 99.0
     score = ls._base_quality("custom-model", "nim/custom-model")
@@ -62,8 +62,8 @@ def test_custom_override_precedence():
 
 def test_frozen_ladder_deterministic():
     """Two rebuilds with same data should produce identical frozen ladders."""
-    from nimmakai.catalog.ladder import LadderService
-    from nimmakai.catalog.health import ModelHealthStore
+    from potato.catalog.ladder import LadderService
+    from potato.catalog.health import ModelHealthStore
     ls1 = LadderService(health=ModelHealthStore())
     ls2 = LadderService(health=ModelHealthStore())
     ids = {"nim/deepseek-v4-pro", "nim/gpt-4o", "nim/claude-sonnet-4"}
@@ -76,8 +76,8 @@ def test_frozen_ladder_deterministic():
 
 def test_optimize_chain_preserves_order_with_one_model():
     """Single model chain should be unchanged."""
-    from nimmakai.catalog.schema import catalog_from_dict
-    from nimmakai.catalog.registry import ModelRegistry
+    from potato.catalog.schema import catalog_from_dict
+    from potato.catalog.registry import ModelRegistry
     cat = catalog_from_dict({
         "version": "1", "updated": "2026-01-01",
         "defaults": {"dynamic_families": True, "auto_mode_model_tokens": []},

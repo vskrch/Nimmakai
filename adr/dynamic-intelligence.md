@@ -60,7 +60,7 @@ quality_estimate:
 
 speed_tps:
   1st choice: ArtificialAnalysis measured TPS          (real endpoint data)
-  2nd choice: EWMA from Nimmakai's own health tracker  (observed outcomes)
+  2nd choice: EWMA from Potato's own health tracker  (observed outcomes)
   3rd choice: PROVIDER_SPEED_PRIOR in models.yaml      ← cold-start default
 
 capability flags (tools, vision, reasoning, embeddings):
@@ -117,7 +117,7 @@ async def _fetch_openrouter(client: httpx.AsyncClient) -> dict[str, IntelBundle]
     """
     resp = await client.get(
         "https://openrouter.ai/api/v1/models",
-        headers={"HTTP-Referer": "https://nimmakai.ai"},
+        headers={"HTTP-Referer": "https://potato.ai"},
         timeout=15.0,
     )
     models = resp.json().get("data", [])
@@ -237,7 +237,7 @@ class IntelFetcher:
     Results are disk-cached for TTL hours to survive restarts.
     """
     ttl_hours: float = 6.0          # how long before re-fetching
-    cache_path: Path = Path(".nimmakai/intel_cache.json")
+    cache_path: Path = Path(".potato/intel_cache.json")
     aa_api_key: str | None = None   # from env ARTIFICIAL_ANALYSIS_API_KEY
     
     async def fetch_all(self) -> dict[str, IntelBundle]:
@@ -659,7 +659,7 @@ async def _intel_refresh_loop(self, settings) -> None:
 
 ## Disk Cache for Resilience
 
-`IntelFetcher` persists fetched bundles to `.nimmakai/intel_cache.json`. On startup:
+`IntelFetcher` persists fetched bundles to `.potato/intel_cache.json`. On startup:
 1. Load from disk immediately (instant scoring with stale but real data)
 2. Background-fetch fresh data from all sources
 3. Install new cache when ready → ladder rebuilds → routing instantly improves
@@ -705,13 +705,13 @@ snapshot is always available.
 
 ```bash
 # 1. Unit tests
-cd /Users/venkatasai/CascadeProjects/Nimmakai
+cd /Users/venkatasai/CascadeProjects/Potato
 python -m pytest tests/ -x -q --tb=short
 
 # 2. Intel fetcher smoke test (offline-safe)
 python -c "
 import asyncio
-from nimmakai.catalog.intel_fetcher import IntelFetcher
+from potato.catalog.intel_fetcher import IntelFetcher
 f = IntelFetcher()
 bundles = asyncio.run(f.fetch_all())
 print(f'Fetched {len(bundles)} bundles')
@@ -721,15 +721,15 @@ for name, b in list(bundles.items())[:5]:
 
 # 3. Score cache smoke test
 python -c "
-from nimmakai.catalog.score_cache import recompute
+from potato.catalog.score_cache import recompute
 # ... construct minimal test
 "
 
 # 4. End-to-end routing quality check
-python -m nimmakai &
+python -m potato &
 curl http://localhost:8080/admin/rankings | python -m json.tool | head -60
 # Verify: coding_agentic top models have quality > 85 and sources include 'artificialanalysis'
 
 # 5. 504 fast-advance test (manual)
-# Block one upstream temporarily; verify X-Nimmakai-Fallback-Index increments fast
+# Block one upstream temporarily; verify X-Potato-Fallback-Index increments fast
 ```

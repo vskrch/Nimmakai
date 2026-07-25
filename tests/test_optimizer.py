@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from nimmakai.catalog.health import ModelHealthStore
-from nimmakai.catalog.ladder import LadderService
-from nimmakai.routing.optimizer import optimize_chain, score_model_live
+from potato.catalog.health import ModelHealthStore
+from potato.catalog.ladder import LadderService
+from potato.routing.optimizer import optimize_chain, score_model_live
 
 
 class _FakeReg:

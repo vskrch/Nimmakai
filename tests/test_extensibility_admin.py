@@ -5,13 +5,13 @@ from __future__ import annotations
 import os
 import tempfile
 
-from nimmakai.catalog.db import NimmakaiDB
+from potato.catalog.db import PotatoDB
 
 
 def test_extensibility_features_defaults():
     """Fresh DB returns default feature toggles."""
     d = tempfile.mkdtemp()
-    db = NimmakaiDB(os.path.join(d, "ext.db"))
+    db = PotatoDB(os.path.join(d, "ext.db"))
     feats = db.get_extensibility_features()
     assert "prompt_understanding_enabled" in feats
     assert "custom_catalog_enabled" in feats
@@ -22,7 +22,7 @@ def test_extensibility_features_defaults():
 def test_extensibility_features_roundtrip():
     """Set and get extensibility features."""
     d = tempfile.mkdtemp()
-    db = NimmakaiDB(os.path.join(d, "ext.db"))
+    db = PotatoDB(os.path.join(d, "ext.db"))
     db.set_extensibility_features({
         "prompt_understanding_enabled": True,
         "prompt_understanding_model": "zen/mimo-v2.5-free",
@@ -41,7 +41,7 @@ def test_extensibility_features_roundtrip():
 def test_custom_catalog_mappings_defaults():
     """Fresh DB returns empty mappings."""
     d = tempfile.mkdtemp()
-    db = NimmakaiDB(os.path.join(d, "ext.db"))
+    db = PotatoDB(os.path.join(d, "ext.db"))
     mappings = db.get_custom_catalog_mappings()
     assert mappings == {}
 
@@ -49,7 +49,7 @@ def test_custom_catalog_mappings_defaults():
 def test_custom_catalog_mappings_roundtrip():
     """Set and get custom catalog mappings."""
     d = tempfile.mkdtemp()
-    db = NimmakaiDB(os.path.join(d, "ext.db"))
+    db = PotatoDB(os.path.join(d, "ext.db"))
     db.set_custom_catalog_mappings({
         "coding_agentic": "zen/mimo-v2.5-free",
         "chat_fast": "nim/nemotron-3-ultra-550b",
@@ -64,7 +64,7 @@ def test_custom_catalog_mappings_roundtrip():
 def test_custom_catalog_mappings_empty_values_filtered():
     """Empty values are not stored."""
     d = tempfile.mkdtemp()
-    db = NimmakaiDB(os.path.join(d, "ext.db"))
+    db = PotatoDB(os.path.join(d, "ext.db"))
     db.set_custom_catalog_mappings({"coding_agentic": "model-a", "chat_fast": ""})
     mappings = db.get_custom_catalog_mappings()
     assert "coding_agentic" in mappings

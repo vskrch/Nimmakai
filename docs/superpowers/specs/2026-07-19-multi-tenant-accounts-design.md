@@ -9,7 +9,7 @@ Signup → verify email → **admin approves** → API key issued → user sees 
 
 ## Architecture
 
-- SQLite tables in existing `NimmakaiDB` (no new service)
+- SQLite tables in existing `PotatoDB` (no new service)
 - Dashboard auth: HTTP-only session cookie (`nk_session`)
 - Proxy auth: Bearer API key (`sk-nk-…`) → `user_id` on traces
 - Email: stub (`EMAIL_BACKEND=stub`) logs/returns verify links (active). SMTP sender + verify/OTP builders implemented but not wired — see `docs/email-smtp.md`.

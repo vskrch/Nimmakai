@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
-from nimmakai.main import create_app
-from nimmakai.routes.claude import (
+from potato.main import create_app
+from potato.routes.claude import (
     is_anthropic_request,
     transform_anthropic_to_openai,
     transform_openai_to_anthropic_json,
@@ -34,7 +34,7 @@ def test_transform_anthropic_to_openai():
         "temperature": 0.5,
     }
     openai_payload = transform_anthropic_to_openai(anthropic_payload)
-    assert openai_payload["model"] == "nimmakai/auto"
+    assert openai_payload["model"] == "potato/auto"
     assert openai_payload["max_tokens"] == 500
     assert openai_payload["temperature"] == 0.5
     assert len(openai_payload["messages"]) == 2
@@ -54,7 +54,7 @@ def test_transform_openai_to_anthropic_json():
         ],
         "usage": {"prompt_tokens": 15, "completion_tokens": 8},
     }
-    anthropic_resp = transform_openai_to_anthropic_json(openai_resp, "nimmakai/auto")
+    anthropic_resp = transform_openai_to_anthropic_json(openai_resp, "potato/auto")
     assert anthropic_resp["type"] == "message"
     assert anthropic_resp["role"] == "assistant"
     assert anthropic_resp["content"][0]["text"] == "def foo(): pass"
@@ -64,12 +64,13 @@ def test_transform_openai_to_anthropic_json():
 
 @pytest.fixture
 def client(tmp_path):
-    from nimmakai.config import Settings
+    from potato.config import Settings
     settings = Settings(
         proxy_api_keys=["sk-test"],
         allow_insecure_auth=True,
         catalog_fetch_docs=False,
         catalog_run_probes=False,
+        nim_api_keys=["nvapi-dummy"],
     )
     app = create_app(settings)
     with TestClient(app) as test_client:
@@ -94,7 +95,7 @@ def test_chat_endpoint_default_model(client, monkeypatch):
             None,
         )
 
-    from nimmakai.upstream import UpstreamClient
+    from potato.upstream import UpstreamClient
     monkeypatch.setattr(UpstreamClient, "request_json", fake_request_json)
 
     res = client.post(
@@ -125,7 +126,7 @@ def test_v1_messages_anthropic_endpoint(client, monkeypatch):
             None,
         )
 
-    from nimmakai.upstream import UpstreamClient
+    from potato.upstream import UpstreamClient
     monkeypatch.setattr(UpstreamClient, "request_json", fake_request_json)
 
     res = client.post(

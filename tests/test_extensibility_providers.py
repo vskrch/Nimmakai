@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nimmakai.catalog.presets import (
+from potato.catalog.presets import (
     ENV_PROVIDER_BOOTSTRAP,
     PROVIDER_SPEED_PRIOR_COLDSTART,
     get_preset,

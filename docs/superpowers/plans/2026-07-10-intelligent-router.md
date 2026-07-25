@@ -18,7 +18,7 @@
 - [ ] Safety: quarantine, RPD, jitter, sticky, concurrency, Retry-After
 - [ ] Intent classifier (rules + optional LLM)
 - [ ] Selector + fallback + route integration
-- [ ] Admin/catalog endpoints + synthetic `nimmakai/auto`
+- [ ] Admin/catalog endpoints + synthetic `potato/auto`
 - [ ] Optional egress proxies
 - [ ] Tests + README + `.env.example`
 - [ ] Verify pytest + ruff

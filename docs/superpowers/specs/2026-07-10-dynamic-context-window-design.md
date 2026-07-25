@@ -2,11 +2,11 @@
 
 **Date:** 2026-07-10  
 **Status:** approved — implement  
-**Goal:** Each model exposes its **own maximum context window**, discovered dynamically at runtime from NVIDIA — never hardcoded in code, YAML, or a static DB. Clients (Cursor/agents) can size prompts correctly; Nimmakai never under-clamps.
+**Goal:** Each model exposes its **own maximum context window**, discovered dynamically at runtime from NVIDIA — never hardcoded in code, YAML, or a static DB. Clients (Cursor/agents) can size prompts correctly; Potato never under-clamps.
 
 ## Problem
 
-Agents size prompts using `context_length` (and cousins) from `GET /v1/models`. Nimmakai currently:
+Agents size prompts using `context_length` (and cousins) from `GET /v1/models`. Potato currently:
 
 - Proxies `GET /models` but does not enrich or persist per-model windows
 - Passes `max_tokens` / sampling through unchanged (correct for passthrough) but does not advertise real windows
@@ -18,7 +18,7 @@ That can cause agentic errors when the client assumes a wrong window.
 
 1. **`max_tokens` ≠ context window.** `max_tokens` is the *completion* budget. “Use maximum context” means **advertise the model’s input+output capacity** and **never lower** client `max_tokens`. It does **not** mean set `max_tokens = context_length` (that would waste/break requests).
 2. **NVIDIA often omits context on `/v1/models`.** Many NIM catalog entries only have `id` / `object` / `owned_by`. Discovery must tolerate missing fields and fall back to docs text; if still unknown → **omit** the field (never invent).
-3. **`nimmakai/auto` has no single window.** Omit `context_length` on the synthetic auto entry (do not pick an arbitrary max — that lies to agents).
+3. **`potato/auto` has no single window.** Omit `context_length` on the synthetic auto entry (do not pick an arbitrary max — that lies to agents).
 4. **Skip-before-send vs retry-on-error.** User rejected preemptive “prompt too big → weaker model.” Spec still allows treating a clear upstream **context exceeded** error as **retryable ladder advance** (same class as model unavailable) so one oversized turn can try the next stronger-available model without rewriting history.
 5. **Today’s `/v1/models` path** always hits upstream live; enrichment must merge discovered values onto each item (and onto cached registry state used when upstream is partial).
 
@@ -44,21 +44,21 @@ From upstream `GET /models` `data[]` items, extract the first positive int among
 
 From docs detail / description text when API lacks a value: parse patterns like `128K context`, `context length: 131072`, `up to 1M tokens` (conservative regex; discard absurd values outside e.g. 1_024 … 10_000_000).
 
-Persist `context_by_model: {model_id: int}` in memory + optional `.nimmakai/catalog_snapshot.json` as **last-fetch cache only**.
+Persist `context_by_model: {model_id: int}` in memory + optional `.potato/catalog_snapshot.json` as **last-fetch cache only**.
 
 ### Advertise
 
-On Nimmakai `GET /v1/models` and `GET /v1/models/{id}`:
+On Potato `GET /v1/models` and `GET /v1/models/{id}`:
 
 - For each real model: if we know a window, set `context_length` (and mirror to `max_model_len` if absent) so common clients see it.
 - Prefer **max(upstream_reported, discovered)** when both exist and differ (never shrink a larger upstream value).
-- `nimmakai/auto`: no `context_length`.
+- `potato/auto`: no `context_length`.
 
 ### Request path
 
 - Chat/completions/etc.: passthrough; only rewrite `model`.
 - Do not inject or reduce `max_tokens`.
-- Response diagnostic (optional): `X-Nimmakai-Context-Length: <n>` when known for the model actually used.
+- Response diagnostic (optional): `X-Potato-Context-Length: <n>` when known for the model actually used.
 
 ### Fallback
 
@@ -79,7 +79,7 @@ On Nimmakai `GET /v1/models` and `GET /v1/models/{id}`:
 
 1. After refresh, models with discoverable windows show `context_length` on our `/v1/models`.
 2. No hardcoded per-model sizes in repo.
-3. Client `max_tokens` never lowered by Nimmakai.
+3. Client `max_tokens` never lowered by Potato.
 4. Unknown → field omitted.
 5. Clear context-exceeded upstream errors advance the ladder.
 6. Unit tests for extractors, merge/enrich, retryable context error.
@@ -93,6 +93,6 @@ On Nimmakai `GET /v1/models` and `GET /v1/models/{id}`:
 ## Spec self-review
 
 - Ambiguity on `max_tokens` vs context clarified
-- `nimmakai/auto` decided (omit)
+- `potato/auto` decided (omit)
 - Retry-on-context-error included without contradicting “no preemptive skip”
 - No hardcoded model→size map

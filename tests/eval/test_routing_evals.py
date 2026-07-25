@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nimmakai.catalog import ModelRegistry
-from nimmakai.catalog.learning import LearningStore
-from nimmakai.config import Settings
-from nimmakai.routing import Intent, IntentClassifier, IntentResult, ModelSelector
+from potato.catalog import ModelRegistry
+from potato.catalog.learning import LearningStore
+from potato.config import Settings
+from potato.routing import Intent, IntentClassifier, IntentResult, ModelSelector
 
 YAML = Path(__file__).resolve().parents[2] / "config" / "models.yaml"
 
@@ -57,7 +57,7 @@ def test_eval_cursor_agent_routes_coding_to_qwen_head(monkeypatch) -> None:
     assert intent.intent == Intent.CODING_AGENTIC
     reg = _registry()
     sel = ModelSelector(reg, Settings(nim_api_keys=["k"]))
-    d = sel.resolve("nimmakai/auto", intent)
+    d = sel.resolve("potato/auto", intent)
     # qwen3.5-397b or qwen3.5-122b should be in top 2 (Thompson noise / speed score may occasionally order them)
     top2 = d.chain[:2]
     assert any("qwen" in m for m in top2)
@@ -93,7 +93,7 @@ def test_eval_ladder_walks_after_primary_unavailable() -> None:
 
 
 def test_eval_learning_demotes_repeated_failures() -> None:
-    store = LearningStore(path=Path("/tmp/nimmakai-learning-eval.json"))
+    store = LearningStore(path=Path("/tmp/potato-learning-eval.json"))
     for _ in range(4):
         store.record(
             intent="coding_agentic",

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nimmakai.catalog.intel_fetcher import (
+from potato.catalog.intel_fetcher import (
     IntelBundle,
     _merge_bundles,
     _normalize_slug,
@@ -87,7 +87,7 @@ def test_merge_bundles_new_slug():
 
 def test_intel_fetcher_disk_cache_roundtrip(tmp_path):
     """IntelFetcher disk cache save/load roundtrip."""
-    from nimmakai.catalog.intel_fetcher import IntelFetcher
+    from potato.catalog.intel_fetcher import IntelFetcher
 
     cache_path = tmp_path / "intel_cache.json"
     fetcher = IntelFetcher(cache_path=cache_path, ttl_hours=6.0)
@@ -114,7 +114,7 @@ def test_intel_fetcher_disk_cache_roundtrip(tmp_path):
 
 def test_intel_fetcher_disk_cache_missing(tmp_path):
     """Load returns None when cache file doesn't exist."""
-    from nimmakai.catalog.intel_fetcher import IntelFetcher
+    from potato.catalog.intel_fetcher import IntelFetcher
 
     fetcher = IntelFetcher(cache_path=tmp_path / "nonexistent.json")
     assert fetcher._load_disk_cache() is None
@@ -122,7 +122,7 @@ def test_intel_fetcher_disk_cache_missing(tmp_path):
 
 def test_intel_fetcher_mem_cache_ttl(tmp_path):
     """Memory cache serves within TTL without re-fetching."""
-    from nimmakai.catalog.intel_fetcher import IntelFetcher
+    from potato.catalog.intel_fetcher import IntelFetcher
 
     fetcher = IntelFetcher(cache_path=tmp_path / "intel.json", ttl_hours=999.0)
     # Manually set mem cache

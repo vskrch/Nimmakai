@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nimmakai.routing import Intent, IntentClassifier
+from potato.routing import Intent, IntentClassifier
 
 
 def test_tools_present() -> None:
@@ -98,7 +98,7 @@ def test_forced_header() -> None:
     r = c.classify(
         path="/v1/chat/completions",
         body={"messages": [{"role": "user", "content": "hi"}]},
-        headers={"x-nimmakai-intent": "reasoning"},
+        headers={"x-potato-intent": "reasoning"},
     )
     assert r.intent == Intent.REASONING
     assert r.rule_id == "forced_header"

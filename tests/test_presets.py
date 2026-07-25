@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nimmakai.catalog.presets import (
+from potato.catalog.presets import (
     get_preset,
     list_presets,
     speed_prior_for_provider,
 )
-from nimmakai.catalog.providers import ProviderStore
+from potato.catalog.providers import ProviderStore
 
 
 def test_list_presets_includes_free_openai_compatible() -> None:

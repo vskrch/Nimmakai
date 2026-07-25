@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: '../src/nimmakai/static/dist',
+    outDir: '../src/potato/static/dist',
     emptyOutDir: true,
   },
   server: {

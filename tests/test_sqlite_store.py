@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nimmakai.catalog.db import NimmakaiDB, get_db
-from nimmakai.catalog.preferences import UserPreferences
-from nimmakai.catalog.providers import ProviderConfig, ProviderStore
+from potato.catalog.db import PotatoDB, get_db
+from potato.catalog.preferences import UserPreferences
+from potato.catalog.providers import ProviderConfig, ProviderStore
 
 
 def test_sqlite_provider_roundtrip(tmp_path: Path) -> None:

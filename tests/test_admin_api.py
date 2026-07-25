@@ -5,14 +5,14 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nimmakai.balancer import KeyPool
-from nimmakai.catalog.hub import ProviderHub
-from nimmakai.catalog.preferences import UserPreferences
-from nimmakai.catalog.providers import ProviderStore
-from nimmakai.config import Settings
-from nimmakai.main import create_app
-from nimmakai.routing import RoutingStats
-from nimmakai.safety import AccountGuard
+from potato.balancer import KeyPool
+from potato.catalog.hub import ProviderHub
+from potato.catalog.preferences import UserPreferences
+from potato.catalog.providers import ProviderStore
+from potato.config import Settings
+from potato.main import create_app
+from potato.routing import RoutingStats
+from potato.safety import AccountGuard
 
 _temp_dirs = []
 
@@ -33,7 +33,7 @@ def _make_app():
         nim_max_in_flight_per_key=3,
         providers_overlay_path=str(Path(td.name) / "providers.json"),
         catalog_snapshot_path=str(Path(td.name) / "catalog_snapshot.json"),
-        sqlite_path=str(Path(td.name) / "nimmakai.db"),
+        sqlite_path=str(Path(td.name) / "potato.db"),
         sqlite_seed_free_presets=False,
     )
     app = create_app(settings)
@@ -129,7 +129,7 @@ async def test_root_endpoint():
         r = await c.get("/")
         assert r.status_code == 200
         body = r.json()
-        assert body["name"] == "nimmakai"
+        assert body["name"] == "potato"
         assert "dashboard" in body
 
 
@@ -374,7 +374,7 @@ async def test_seeded_zen_keys_auto_enable():
         nim_max_in_flight_per_key=3,
         providers_overlay_path=str(Path(td.name) / "providers.json"),
         catalog_snapshot_path=str(Path(td.name) / "catalog_snapshot.json"),
-        sqlite_path=str(Path(td.name) / "nimmakai.db"),
+        sqlite_path=str(Path(td.name) / "potato.db"),
         sqlite_seed_free_presets=True,
     )
     app = create_app(settings)

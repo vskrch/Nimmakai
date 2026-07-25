@@ -98,7 +98,7 @@ export default function Sidebar({ page, onNavigate, isAdmin, email, onLogout }: 
         </div>
         <div>
           <div className="flex items-center gap-1.5">
-            <h1 className="text-base font-bold tracking-tight text-white">Nimmakai</h1>
+            <h1 className="text-base font-bold tracking-tight text-white">Potato</h1>
             <span className="text-[10px] font-semibold px-1.5 py-0.2 bg-violet-500/20 text-violet-300 rounded border border-violet-500/30">v1.0</span>
           </div>
           <p className="text-[11px] text-zinc-400 font-medium flex items-center gap-1 mt-0.5">

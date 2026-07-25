@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nimmakai.catalog.providers import (
+from potato.catalog.providers import (
     ProviderConfig,
     ProviderStore,
     namespace_model,

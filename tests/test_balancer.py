@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from nimmakai.balancer import KeyPool
+from potato.balancer import KeyPool
 
 
 @pytest.mark.asyncio

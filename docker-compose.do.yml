@@ -1,14 +1,14 @@
-# Optional: run Nimmakai on a DigitalOcean Droplet ($6–12/mo) with persistent SQLite.
+# Optional: run Potato on a DigitalOcean Droplet ($6–12/mo) with persistent SQLite.
 # Use this when you need durable providers/analytics across redeploys.
 #
-#   doctl compute droplet create nimmakai --size s-1vcpu-1gb --image docker-20-04 ...
+#   doctl compute droplet create potato --size s-1vcpu-1gb --image docker-20-04 ...
 #   scp / rsync this repo, then:
 #   docker compose -f docker-compose.do.yml up -d --build
 
 services:
-  nimmakai:
+  potato:
     build: .
-    image: nimmakai:latest
+    image: potato:latest
     ports:
       - "8080:8080"
     env_file:
@@ -16,13 +16,13 @@ services:
     environment:
       HOST: "0.0.0.0"
       PORT: "8080"
-      SQLITE_PATH: /data/nimmakai.db
+      SQLITE_PATH: /data/potato.db
       CATALOG_SNAPSHOT_PATH: /data/catalog_snapshot.json
       PROVIDERS_OVERLAY_PATH: /data/providers.json
       SQLITE_SEED_FREE_PRESETS: "true"
       ALLOW_INSECURE_AUTH: "false"
     volumes:
-      - nimmakai-data:/data
+      - potato-data:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/ready"]
@@ -32,4 +32,4 @@ services:
       start_period: 40s
 
 volumes:
-  nimmakai-data:
+  potato-data:

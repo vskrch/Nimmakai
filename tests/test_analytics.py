@@ -11,21 +11,21 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nimmakai.analytics.cost import estimate_cost, lookup_rates
-from nimmakai.analytics.events import EventBus
-from nimmakai.analytics.models import TraceRecord, TraceSpan
-from nimmakai.analytics.retention import RetentionManager
-from nimmakai.analytics.store import AnalyticsStore
-from nimmakai.analytics.writer import TraceWriter
-from nimmakai.balancer import KeyPool
-from nimmakai.catalog.db import get_db
-from nimmakai.catalog.hub import ProviderHub
-from nimmakai.catalog.preferences import UserPreferences
-from nimmakai.catalog.providers import ProviderStore
-from nimmakai.config import Settings
-from nimmakai.main import _init_analytics, create_app
-from nimmakai.routing import RoutingStats
-from nimmakai.safety import AccountGuard
+from potato.analytics.cost import estimate_cost, lookup_rates
+from potato.analytics.events import EventBus
+from potato.analytics.models import TraceRecord, TraceSpan
+from potato.analytics.retention import RetentionManager
+from potato.analytics.store import AnalyticsStore
+from potato.analytics.writer import TraceWriter
+from potato.balancer import KeyPool
+from potato.catalog.db import get_db
+from potato.catalog.hub import ProviderHub
+from potato.catalog.preferences import UserPreferences
+from potato.catalog.providers import ProviderStore
+from potato.config import Settings
+from potato.main import _init_analytics, create_app
+from potato.routing import RoutingStats
+from potato.safety import AccountGuard
 
 _temp_dirs: list[tempfile.TemporaryDirectory] = []
 AUTH = {"Authorization": "Bearer any"}
@@ -99,7 +99,7 @@ def _make_app_with_analytics():
         nim_base_url="https://integrate.api.nvidia.com/v1",
         providers_overlay_path=str(Path(td.name) / "providers.json"),
         catalog_snapshot_path=str(Path(td.name) / "catalog_snapshot.json"),
-        sqlite_path=str(Path(td.name) / "nimmakai.db"),
+        sqlite_path=str(Path(td.name) / "potato.db"),
         sqlite_seed_free_presets=False,
         analytics_enabled=True,
         analytics_flush_interval=0.2,
@@ -385,7 +385,7 @@ async def test_event_bus_publish_subscribe():
 @pytest.mark.asyncio
 async def test_analytics_sse_endpoint():
     app, _settings = _make_app_with_analytics()
-    from nimmakai.analytics.events import EventBus
+    from potato.analytics.events import EventBus
 
     bus = EventBus(heartbeat_seconds=0.2)
     app.state.event_bus = bus

@@ -13,9 +13,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from nimmakai.config import Settings
-from nimmakai.main import create_app
-from nimmakai.routes.responses import (
+from potato.config import Settings
+from potato.main import create_app
+from potato.routes.responses import (
     transform_chat_to_responses_json,
     transform_responses_to_chat,
 )
@@ -226,7 +226,7 @@ def test_v1_responses_non_stream(client, monkeypatch) -> None:
             None,
         )
 
-    from nimmakai.upstream import UpstreamClient
+    from potato.upstream import UpstreamClient
     monkeypatch.setattr(UpstreamClient, "request_json", fake_request_json)
 
     res = client.post(
@@ -260,7 +260,7 @@ def test_v1_responses_x_api_key_auth(client, monkeypatch) -> None:
     async def fake_request_json(*args, **kwargs):
         return (200, {"id": "c", "model": "m", "choices": [{"message": {"content": "ok"}}], "usage": {}}, {}, None)
 
-    from nimmakai.upstream import UpstreamClient
+    from potato.upstream import UpstreamClient
     monkeypatch.setattr(UpstreamClient, "request_json", fake_request_json)
 
     res = client.post(
@@ -281,7 +281,7 @@ def test_v1_responses_stream(client, monkeypatch) -> None:
             yield b"data: [DONE]\n\n"
         return 200, gen(), {"content-type": "text/event-stream"}, None
 
-    from nimmakai.upstream import UpstreamClient
+    from potato.upstream import UpstreamClient
     monkeypatch.setattr(UpstreamClient, "stream", fake_stream)
 
     res = client.post(

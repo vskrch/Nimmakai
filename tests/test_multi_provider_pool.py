@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nimmakai import upstream as up_mod
-from nimmakai.config import Settings
-from nimmakai.main import create_app
+from potato import upstream as up_mod
+from potato.config import Settings
+from potato.main import create_app
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def multi_app(monkeypatch):
         nim_base_url="https://nim.test/v1",
         providers_overlay_path=str(Path(td) / "providers.json"),
         catalog_snapshot_path=str(Path(td) / "catalog.json"),
-        sqlite_path=str(Path(td) / "nimmakai.db"),
+        sqlite_path=str(Path(td) / "potato.db"),
         sqlite_seed_free_presets=False,
         models_config_path="config/models.yaml",
         routing_enabled=True,
@@ -143,13 +143,13 @@ async def test_free_providers_merge_and_route(multi_app):
                 "/v1/chat/completions",
                 headers=auth,
                 json={
-                    "model": "nimmakai/auto",
+                    "model": "potato/auto",
                     "messages": [{"role": "user", "content": "hi"}],
                 },
             )
             assert chat.status_code == 200
-            assert chat.headers.get("x-nimmakai-model")
-            assert chat.headers.get("x-nimmakai-provider") in {
+            assert chat.headers.get("x-potato-model")
+            assert chat.headers.get("x-potato-provider") in {
                 "nim",
                 "groq",
                 "cerebras",
@@ -166,4 +166,4 @@ async def test_free_providers_merge_and_route(multi_app):
 
             dash = await c.get("/dashboard")
             assert dash.status_code == 200
-            assert "Nimmakai" in dash.text
+            assert "Potato" in dash.text

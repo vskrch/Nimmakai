@@ -110,7 +110,7 @@ export default function AuthModal({ onSession }: AuthModalProps) {
           <div className="w-12 h-12 bg-gradient-to-br from-violet-600 to-fuchsia-600 rounded-2xl flex items-center justify-center shadow-[0_0_24px_rgba(139,92,246,0.5)] mx-auto mb-3 border border-white/20">
             <Zap className="w-6 h-6 text-white fill-white" />
           </div>
-          <h3 className="text-lg font-bold text-white tracking-tight">Nimmakai Gateway</h3>
+          <h3 className="text-lg font-bold text-white tracking-tight">Potato Gateway</h3>
           <p className="text-xs text-zinc-400 mt-1">Authenticate to access the multi-provider LLM dashboard</p>
         </div>
 

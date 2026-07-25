@@ -5,13 +5,13 @@ import { api, ap, ad, errMsg, okBody } from '../lib/api'
 import { GitFork, Plus, Trash2, X, ArrowRight, Save, RotateCcw, Lock } from 'lucide-react'
 
 // Virtual router ids that may carry a custom ladder.
-// `nimmakai/auto` is deliberately excluded — it stays on the intelligent router.
+// `potato/auto` is deliberately excluded — it stays on the intelligent router.
 const ROUTABLE_MODELS: { id: string; label: string; desc: string }[] = [
-  { id: 'nimmakai/coding', label: 'nimmakai/coding', desc: 'Coding & agentic operations' },
-  { id: 'nimmakai/auto-coding', label: 'nimmakai/auto-coding', desc: 'Auto-coding alias' },
-  { id: 'nimmakai/best', label: 'nimmakai/best', desc: 'Best / frontier alias' },
-  { id: 'nimmakai/auto-fast', label: 'nimmakai/auto-fast', desc: 'Latency-first' },
-  { id: 'nimmakai/auto-cheap', label: 'nimmakai/auto-cheap', desc: 'Cost-aware' },
+  { id: 'potato/coding', label: 'potato/coding', desc: 'Coding & agentic operations' },
+  { id: 'potato/auto-coding', label: 'potato/auto-coding', desc: 'Auto-coding alias' },
+  { id: 'potato/best', label: 'potato/best', desc: 'Best / frontier alias' },
+  { id: 'potato/auto-fast', label: 'potato/auto-fast', desc: 'Latency-first' },
+  { id: 'potato/auto-cheap', label: 'potato/auto-cheap', desc: 'Cost-aware' },
 ]
 
 interface ModelLadder {
@@ -24,7 +24,7 @@ interface ModelLadder {
 export default function ModelLaddersPage() {
   const { data: catalog } = useCatalog()
   const [ladders, setLadders] = useState<ModelLadder[]>([])
-  const [selectedModel, setSelectedModel] = useState<string>('nimmakai/coding')
+  const [selectedModel, setSelectedModel] = useState<string>('potato/coding')
   const [chain, setChain] = useState<string[]>([])
   const [note, setNote] = useState('')
   const [search, setSearch] = useState('')
@@ -146,7 +146,7 @@ export default function ModelLaddersPage() {
             Drag models from the pool to build a custom fallback ladder for a virtual model id.
             When a client requests that model, the chain runs A → B → C (first available wins).
             <span className="text-amber-300/80"> Default </span>
-            <code className="text-amber-300/90 font-mono">nimmakai/auto</code>
+            <code className="text-amber-300/90 font-mono">potato/auto</code>
             <span className="text-amber-300/80"> is never overridden — it stays on the intelligent router.</span>
           </p>
         </div>
@@ -194,7 +194,7 @@ export default function ModelLaddersPage() {
               <div className="pt-2 mt-2 border-t border-white/[0.06]">
                 <div className="flex items-center gap-1.5 px-3 py-1.5 text-[10px] text-zinc-500">
                   <Lock className="w-3 h-3" />
-                  <code className="font-mono">nimmakai/auto</code>
+                  <code className="font-mono">potato/auto</code>
                   <span className="text-zinc-600">— locked (intelligent router)</span>
                 </div>
               </div>

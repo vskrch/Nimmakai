@@ -5,9 +5,9 @@
 # NOTE: Only use on dev/staging Droplets. For production, use docker-compose.do.yml.
 
 services:
-  nimmakai:
+  potato:
     build: .
-    image: nimmakai:latest
+    image: potato:latest
     ports:
       - "80:8080"
     env_file:
@@ -15,18 +15,18 @@ services:
     environment:
       HOST: "0.0.0.0"
       PORT: "8080"
-      SQLITE_PATH: /data/nimmakai.db
+      SQLITE_PATH: /data/potato.db
       CATALOG_SNAPSHOT_PATH: /data/catalog_snapshot.json
       PROVIDERS_OVERLAY_PATH: /data/providers.json
       SQLITE_SEED_FREE_PRESETS: "true"
       ALLOW_INSECURE_AUTH: "false"
     volumes:
-      - nimmakai-data:/data
+      - potato-data:/data
       # Mount source code over installed package for live reload
-      - ./src/nimmakai:/usr/local/lib/python3.12/site-packages/nimmakai
+      - ./src/potato:/usr/local/lib/python3.12/site-packages/potato
     # Override CMD: uvicorn with --reload watches the mounted src
     command: >
-      sh -c "exec uvicorn nimmakai.main:app --host 0.0.0.0 --port ${PORT:-8080} --reload --reload-dir /usr/local/lib/python3.12/site-packages/nimmakai"
+      sh -c "exec uvicorn potato.main:app --host 0.0.0.0 --port ${PORT:-8080} --reload --reload-dir /usr/local/lib/python3.12/site-packages/potato"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/ready"]
@@ -36,4 +36,4 @@ services:
       start_period: 40s
 
 volumes:
-  nimmakai-data:
+  potato-data:

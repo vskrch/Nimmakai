@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nimmakai.catalog.learning import LearningStore
+from potato.catalog.learning import LearningStore
 
 
 def test_learning_penalty_on_unavailable(tmp_path: Path) -> None:

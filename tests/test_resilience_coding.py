@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from nimmakai.catalog.health import ModelHealthStore
-from nimmakai.catalog.intel_fetcher import IntelBundle
-from nimmakai.catalog.ladder import LadderService
-from nimmakai.catalog.learning import LearningStore
-from nimmakai.catalog.presets import get_preset, list_presets
-from nimmakai.catalog.score_cache import ModelScoreCache, recompute
-from nimmakai.resilience import emergency_coding_chain
+from potato.catalog.health import ModelHealthStore
+from potato.catalog.intel_fetcher import IntelBundle
+from potato.catalog.ladder import LadderService
+from potato.catalog.learning import LearningStore
+from potato.catalog.presets import get_preset, list_presets
+from potato.catalog.score_cache import ModelScoreCache, recompute
+from potato.resilience import emergency_coding_chain
 
 
 def test_zen_preset_present() -> None:

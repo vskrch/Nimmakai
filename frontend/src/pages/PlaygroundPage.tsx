@@ -21,7 +21,7 @@ interface Message {
 export default function PlaygroundPage() {
   const { data: catalog } = useCatalog()
   const [messages, setMessages] = useState<Message[]>([
-    { role: 'assistant', content: "Hello! I am connected to the Nimmakai Gateway. Type a prompt below to test automatic intent classification, model routing, and SSE response streaming." }
+    { role: 'assistant', content: "Hello! I am connected to the Potato Gateway. Type a prompt below to test automatic intent classification, model routing, and SSE response streaming." }
   ])
   const [input, setInput] = useState('')
   const [model, setModel] = useState('auto')

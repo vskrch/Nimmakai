@@ -6,7 +6,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from nimmakai.logging_setup import (
+from potato.logging_setup import (
     RequestLog,
     RequestLogStore,
     default_log_dir,
@@ -15,7 +15,7 @@ from nimmakai.logging_setup import (
 
 
 def test_default_log_dir_beside_sqlite(tmp_path: Path) -> None:
-    db = tmp_path / "data" / "nimmakai.db"
+    db = tmp_path / "data" / "potato.db"
     db.parent.mkdir()
     assert default_log_dir(db) == tmp_path / "data" / "request_logs"
     day = time.strftime("%Y-%m-%d", time.gmtime())

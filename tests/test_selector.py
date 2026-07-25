@@ -6,12 +6,12 @@ from pathlib import Path
 
 import pytest
 
-from nimmakai.catalog import ModelRegistry
-from nimmakai.catalog.model_ladders import ModelLadder, ModelLadderStore
-from nimmakai.catalog.preferences import IntentPreference, UserPreferences
-from nimmakai.config import Settings
-from nimmakai.routing import Intent, IntentResult, ModelSelector
-from nimmakai.routing.auto_router import AutoRouterOptions
+from potato.catalog import ModelRegistry
+from potato.catalog.model_ladders import ModelLadder, ModelLadderStore
+from potato.catalog.preferences import IntentPreference, UserPreferences
+from potato.config import Settings
+from potato.routing import Intent, IntentResult, ModelSelector
+from potato.routing.auto_router import AutoRouterOptions
 
 YAML = Path(__file__).resolve().parents[1] / "config" / "models.yaml"
 
@@ -46,7 +46,7 @@ def test_auto_mode_coding_uses_qwen(monkeypatch) -> None:
 
 def test_auto_mode_chat_uses_nemotron() -> None:
     s = _selector()
-    d = s.resolve("nimmakai/auto", _intent(Intent.CHAT_FAST))
+    d = s.resolve("potato/auto", _intent(Intent.CHAT_FAST))
     assert d.mode == "auto"
     # Nemotron super (quality=86 × affinity=1.25 ≈ 107) should be in top 2
     # (Thompson Sampling may occasionally promote another model — by design)
@@ -84,7 +84,7 @@ def test_auto_cheap_mode() -> None:
     s.registry.live_ids.add("nim/llama-3.1-8b-instruct")
     s.registry.live_ids.add("nim/llama-3.1-405b-instruct")
     s.registry._rebuild_all_chains()
-    d = s.resolve("nimmakai/auto-cheap", _intent())
+    d = s.resolve("potato/auto-cheap", _intent())
     assert d.mode == "auto"
     # 8B is massively boosted by cheap mode vs 405B
     assert d.chain[0] == "nim/llama-3.1-8b-instruct"
@@ -207,7 +207,7 @@ def test_empty_model_uses_auto_router() -> None:
 
 def test_coding_tier_forces_coding_intent() -> None:
     s = _selector()
-    d = s.resolve("nimmakai/auto-coding", _intent(Intent.CHAT_FAST))
+    d = s.resolve("potato/auto-coding", _intent(Intent.CHAT_FAST))
     assert d.intent == Intent.CODING_AGENTIC
 
 
@@ -234,11 +234,11 @@ def test_disabled_known_model_raises() -> None:
 def test_custom_model_ladder_used() -> None:
     s = _selector(enable_fallback_on_explicit=True)
     ladders = ModelLadderStore(db=None)
-    ladders.set("nimmakai/coding", ["qwen/qwen3.5-122b-a10b", "zai/glm-5.2"])
+    ladders.set("potato/coding", ["qwen/qwen3.5-122b-a10b", "zai/glm-5.2"])
     s.model_ladders = ladders
-    d = s.resolve("nimmakai/coding", _intent())
+    d = s.resolve("potato/coding", _intent())
     assert d.mode == "passthrough_with_fallback"
-    assert d.rule_id == "custom_ladder:nimmakai/coding"
+    assert d.rule_id == "custom_ladder:potato/coding"
     assert d.chain[0] == "qwen/qwen3.5-122b-a10b"
     assert "zai/glm-5.2" in d.chain
 
@@ -247,12 +247,12 @@ def test_custom_model_ladder_empty_chain_falls_through() -> None:
     s = _selector()
     ladders = ModelLadderStore(db=None)
     # Empty chain → not used, falls through to normal routing
-    ladders.ladders["nimmakai/coding"] = ModelLadder(
-        model_id="nimmakai/coding", chain=[]
+    ladders.ladders["potato/coding"] = ModelLadder(
+        model_id="potato/coding", chain=[]
     )
     s.model_ladders = ladders
-    d = s.resolve("nimmakai/coding", _intent())
-    # Falls through to auto-router (nimmakai/coding is a coding-tier alias)
+    d = s.resolve("potato/coding", _intent())
+    # Falls through to auto-router (potato/coding is a coding-tier alias)
     assert d.mode in {"auto", "unknown_alias_as_auto"}
 
 
@@ -261,7 +261,7 @@ def test_custom_model_ladder_empty_chain_falls_through() -> None:
 
 def test_user_preference_strict_passthrough() -> None:
     s = _selector()
-    prefs = UserPreferences(path=Path("/tmp/nimmakai-test-prefs.json"))
+    prefs = UserPreferences(path=Path("/tmp/potato-test-prefs.json"))
     prefs.preferences["coding_agentic"] = IntentPreference(
         intent="coding_agentic",
         chain=["zai/glm-5.2"],
@@ -275,7 +275,7 @@ def test_user_preference_strict_passthrough() -> None:
 
 def test_user_preference_non_strict_appends_siblings() -> None:
     s = _selector()
-    prefs = UserPreferences(path=Path("/tmp/nimmakai-test-prefs.json"))
+    prefs = UserPreferences(path=Path("/tmp/potato-test-prefs.json"))
     prefs.preferences["coding_agentic"] = IntentPreference(
         intent="coding_agentic",
         chain=["zai/glm-5.2"],
@@ -522,7 +522,7 @@ def test_catalog_model_with_empty_live_pool_passthrough() -> None:
     (selector.py:298), so a known catalog id resolves to itself and routes as
     passthrough rather than falling through to auto.
     """
-    from nimmakai.catalog.schema import ModelMeta
+    from potato.catalog.schema import ModelMeta
 
     s = _selector()
     s.registry.catalog.models["my-virtual"] = ModelMeta()
@@ -546,18 +546,18 @@ def test_embeddings_unknown_nim_id_no_chain_passthrough() -> None:
 
 
 def test_embeddings_auto_id_with_empty_chain_uses_raw() -> None:
-    """Embeddings + auto id (nimmakai/auto) + empty chain → chain=[raw].
+    """Embeddings + auto id (potato/auto) + empty chain → chain=[raw].
 
     Covers selector.py:202-203: the `elif not chain and raw and looks_like_nim_id`
     branch when raw is an auto-router id (is_auto True) so the explicit branch
     at 190 is skipped.
     """
     s = _selector()
-    # embeddings chain is empty in the default LIVE set; nimmakai/auto is_auto=True
+    # embeddings chain is empty in the default LIVE set; potato/auto is_auto=True
     # but contains "/" so looks_like_nim_id is True
-    d = s.resolve("nimmakai/auto", _intent(Intent.EMBEDDINGS))
+    d = s.resolve("potato/auto", _intent(Intent.EMBEDDINGS))
     assert d.intent == Intent.EMBEDDINGS
-    assert "nimmakai/auto" in d.chain
+    assert "potato/auto" in d.chain
 
 
 def test_embeddings_explicit_disabled_nim_id_raises() -> None:

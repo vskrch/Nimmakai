@@ -7,10 +7,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from nimmakai.balancer import KeyStats
-from nimmakai.catalog import ModelRegistry
-from nimmakai.config import Settings
-from nimmakai.routing import (
+from potato.balancer import KeyStats
+from potato.catalog import ModelRegistry
+from potato.config import Settings
+from potato.routing import (
     FallbackExecutor,
     Intent,
     IntentResult,
@@ -175,7 +175,7 @@ async def test_context_overflow_advances() -> None:
     headers = ex.routing_headers(
         decision, model=result.model, key_id="key-1", fallback_index=1
     )
-    assert headers.get("X-Nimmakai-Context-Length") == "131072"
+    assert headers.get("X-Potato-Context-Length") == "131072"
 
     settings = Settings(nim_api_keys=["k"])
     reg = ModelRegistry.from_yaml(YAML)
@@ -185,13 +185,13 @@ async def test_context_overflow_advances() -> None:
     reg.live_ids = all_ids
     sel = ModelSelector(reg, settings)
     intent = IntentResult(intent=Intent.CHAT_FAST, confidence=0.7, rule_id="short_chat")
-    d = sel.resolve("nimmakai/auto", intent)
+    d = sel.resolve("potato/auto", intent)
     assert d.mode == "auto"
     assert d.chain
 
 @pytest.mark.asyncio
 async def test_auto_chain_expands_related_intents() -> None:
-    """nimmakai/auto fallback chain expands beyond a thin primary decision chain."""
+    """potato/auto fallback chain expands beyond a thin primary decision chain."""
     settings = Settings(nim_api_keys=["k"], max_model_fallbacks=8)
     reg = ModelRegistry.from_yaml(YAML)
     reg.live_ids = {
@@ -206,7 +206,7 @@ async def test_auto_chain_expands_related_intents() -> None:
         mode="auto",
         intent=Intent.CODING_AGENTIC,
         rule_id="tools_present",
-        requested_model="nimmakai/auto",
+        requested_model="potato/auto",
         auto_tier="balanced",
     )
     ex = FallbackExecutor(upstream, reg, settings)
@@ -224,7 +224,7 @@ async def test_auto_quality_floor_never_empties_chain() -> None:
     reg.live_ids = {"model-a", "model-b"}
     # Seed ladder scores with huge spread so floor would filter model-b
     if hasattr(reg, "ladder"):
-        from nimmakai.catalog.ladder import LadderSnapshot
+        from potato.catalog.ladder import LadderSnapshot
 
         reg.ladder._ladders[("chat_fast", "default")] = LadderSnapshot(
             intent="chat_fast",
@@ -238,7 +238,7 @@ async def test_auto_quality_floor_never_empties_chain() -> None:
         mode="auto",
         intent=Intent.CHAT_FAST,
         rule_id="short_chat",
-        requested_model="nimmakai/auto",
+        requested_model="potato/auto",
         auto_tier="balanced",
     )
     ex = FallbackExecutor(upstream, reg, settings)
@@ -281,7 +281,7 @@ async def test_auto_advances_through_expanded_pool() -> None:
         mode="auto",
         intent=Intent.CODING_AGENTIC,
         rule_id="tools_present",
-        requested_model="nimmakai/auto",
+        requested_model="potato/auto",
         auto_tier="balanced",
     )
     ex = FallbackExecutor(upstream, reg, settings)

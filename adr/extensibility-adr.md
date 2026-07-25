@@ -1,4 +1,4 @@
-# Nimmakai — Routing Extensibility & Admin Revamp ADR
+# Potato — Routing Extensibility & Admin Revamp ADR
 
 > **Status**: Draft — Proposed Architecture
 > **Date**: 2026-07-25  
@@ -9,7 +9,7 @@
 
 ## 1. Problem Statement
 
-Nimmakai requires several new additive capabilities to enhance flexibility and cost-efficiency:
+Potato requires several new additive capabilities to enhance flexibility and cost-efficiency:
 1. **New Providers**: Native integration with Ollama Cloud and OpenCode Go.
 2. **Prompt-Understanding Router**: An intelligent pre-routing step where a lightweight LLM evaluates the raw prompt to explicitly pick the best model for the job (reserving expensive models for complex tasks).
 3. **Custom Model Catalog**: Allow admins to strictly define which models map to which tasks, overriding the default auto-router.
@@ -23,7 +23,7 @@ Nimmakai requires several new additive capabilities to enhance flexibility and c
 
 To satisfy the constraint that the core router remains untouched, we will implement a **Pre-Router Interceptor Pattern**. 
 
-Currently, when a request hits Nimmakai with `model="auto"`, the core router resolves it using internal classification and ladder mechanics. 
+Currently, when a request hits Potato with `model="auto"`, the core router resolves it using internal classification and ladder mechanics. 
 
 **New Flow**:
 Before the core router processes the request, it passes through a chain of interceptors. If an interceptor decides exactly which model to use, it mutates the request payload from `model="auto"` to a specific model ID (e.g., `model="opencode/mimo-v2.5-free"`). 
@@ -79,12 +79,12 @@ The Admin UI will be rebuilt to support the new feature density.
 ## 5. Epic and Ticket Breakdown
 
 ### Epic 1: Provider Integrations (NMK-EXT-100)
-- **NMK-EXT-101**: Add Ollama Cloud to `src/nimmakai/catalog/presets.py`.
-- **NMK-EXT-102**: Add OpenCode Go to `src/nimmakai/catalog/presets.py` with standard rate limit profiles and tag definitions.
+- **NMK-EXT-101**: Add Ollama Cloud to `src/potato/catalog/presets.py`.
+- **NMK-EXT-102**: Add OpenCode Go to `src/potato/catalog/presets.py` with standard rate limit profiles and tag definitions.
 
 ### Epic 2: Pre-Router Interceptor Framework (NMK-EXT-200)
 - **NMK-EXT-201**: Define `PreRouterInterceptor` base class and protocol.
-- **NMK-EXT-202**: Wire the interceptor chain into the main API ingress point (e.g., `src/nimmakai/routes/openai.py`) immediately before `ModelSelector.resolve()` is invoked.
+- **NMK-EXT-202**: Wire the interceptor chain into the main API ingress point (e.g., `src/potato/routes/openai.py`) immediately before `ModelSelector.resolve()` is invoked.
 
 ### Epic 3: Custom Catalog Override (NMK-EXT-300)
 - **NMK-EXT-301**: Extend SQLite database schema to store `custom_catalog_mappings` (intent -> model_id).
@@ -97,5 +97,5 @@ The Admin UI will be rebuilt to support the new feature density.
 
 ### Epic 5: Admin UI Revamp (NMK-EXT-500)
 - **NMK-EXT-501**: Extend SQLite database schema for `extensibility_features` (booleans for the 4 new toggles).
-- **NMK-EXT-502**: Add REST endpoints `/admin/extensibility` (GET/PUT) in `src/nimmakai/routes/admin.py`.
+- **NMK-EXT-502**: Add REST endpoints `/admin/extensibility` (GET/PUT) in `src/potato/routes/admin.py`.
 - **NMK-EXT-503**: Revamp the frontend layout, implementing the new tabbed design and control panels for the Prompt-Understanding router and Custom Catalog mapping.

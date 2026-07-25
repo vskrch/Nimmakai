@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nimmakai.catalog.health import ModelHealthStore
+from potato.catalog.health import ModelHealthStore
 
 
 def test_adaptive_promotes_recent_success() -> None:

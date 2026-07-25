@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from nimmakai.catalog.hub import ProviderHub
-from nimmakai.catalog.providers import ProviderConfig, ProviderStore
-from nimmakai.config import Settings
+from potato.catalog.hub import ProviderHub
+from potato.catalog.providers import ProviderConfig, ProviderStore
+from potato.config import Settings
 
 NIM_YAML = (
     "providers:\n"

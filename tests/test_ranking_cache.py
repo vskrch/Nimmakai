@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nimmakai.catalog.db import NimmakaiDB
-from nimmakai.catalog.health import ModelHealthStore
-from nimmakai.catalog.intel_fetcher import IntelBundle
-from nimmakai.catalog.ladder import LadderService
-from nimmakai.catalog.learning import LearningStore
-from nimmakai.catalog.registry import ModelRegistry
-from nimmakai.catalog.score_cache import ModelScoreCache, recompute
+from potato.catalog.db import PotatoDB
+from potato.catalog.health import ModelHealthStore
+from potato.catalog.intel_fetcher import IntelBundle
+from potato.catalog.ladder import LadderService
+from potato.catalog.learning import LearningStore
+from potato.catalog.registry import ModelRegistry
+from potato.catalog.score_cache import ModelScoreCache, recompute
 
 
 def test_ladder_freeze_no_rescore() -> None:
@@ -46,7 +46,7 @@ def test_ladder_freeze_no_rescore() -> None:
 
 
 def test_ranking_cache_roundtrip(tmp_path: Path) -> None:
-    db = NimmakaiDB(tmp_path / "r.db")
+    db = PotatoDB(tmp_path / "r.db")
     svc = LadderService()
     live = {
         "nim/deepseek-ai/deepseek-v4-pro",
@@ -74,7 +74,7 @@ def test_registry_recompute_and_persist(tmp_path: Path) -> None:
         "nim/qwen/qwen3.5-397b-a17b",
         "nim/google/gemma-2-2b-it",
     }
-    db = NimmakaiDB(tmp_path / "reg.db")
+    db = PotatoDB(tmp_path / "reg.db")
     reg.bind_db(db)
     best = reg.recompute_rankings(persist=True)
     assert best["coding_agentic"]

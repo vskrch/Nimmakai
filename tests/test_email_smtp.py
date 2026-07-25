@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from nimmakai.accounts.email import (
+from potato.accounts.email import (
     OutboundEmail,
     SmtpConfig,
     SmtpEmailSender,
@@ -53,7 +53,7 @@ def test_smtp_config_from_settings():
         smtp_username="u",
         smtp_password="p",
         smtp_from="noreply@example.com",
-        smtp_from_name="Nimmakai",
+        smtp_from_name="Potato",
         smtp_use_tls=False,
         smtp_use_ssl=True,
         smtp_timeout=15.0,
@@ -77,7 +77,7 @@ def test_get_email_sender_smtp_with_settings():
         smtp_username=None,
         smtp_password=None,
         smtp_from="noreply@example.com",
-        smtp_from_name="Nimmakai",
+        smtp_from_name="Potato",
         smtp_use_tls=True,
         smtp_use_ssl=False,
         smtp_timeout=30.0,
@@ -86,7 +86,7 @@ def test_get_email_sender_smtp_with_settings():
     assert isinstance(sender, SmtpEmailSender)
 
 
-@patch("nimmakai.accounts.email.smtplib.SMTP")
+@patch("potato.accounts.email.smtplib.SMTP")
 def test_smtp_sender_starttls_send(mock_smtp_cls):
     smtp = MagicMock()
     mock_smtp_cls.return_value.__enter__.return_value = smtp
@@ -112,7 +112,7 @@ def test_smtp_sender_starttls_send(mock_smtp_cls):
     smtp.send_message.assert_called_once()
 
 
-@patch("nimmakai.accounts.email.smtplib.SMTP_SSL")
+@patch("potato.accounts.email.smtplib.SMTP_SSL")
 def test_smtp_sender_ssl_send(mock_ssl_cls):
     smtp = MagicMock()
     mock_ssl_cls.return_value.__enter__.return_value = smtp
@@ -132,7 +132,7 @@ def test_smtp_sender_ssl_send(mock_ssl_cls):
     smtp.login.assert_not_called()
 
 
-@patch("nimmakai.accounts.email.smtplib.SMTP")
+@patch("potato.accounts.email.smtplib.SMTP")
 def test_smtp_sender_failure_returns_ok_false(mock_smtp_cls):
     mock_smtp_cls.return_value.__enter__.side_effect = OSError("connection refused")
     sender = SmtpEmailSender(

@@ -10,17 +10,17 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from nimmakai.balancer import KeyStats
-from nimmakai.catalog import ModelRegistry
-from nimmakai.compat import openai_error, sanitize_chat_body, wrap_upstream_error
-from nimmakai.config import Settings
-from nimmakai.routing import (
+from potato.balancer import KeyStats
+from potato.catalog import ModelRegistry
+from potato.compat import openai_error, sanitize_chat_body, wrap_upstream_error
+from potato.config import Settings
+from potato.routing import (
     FallbackExecutor,
     Intent,
     RouteDecision,
     parse_auto_router_options,
 )
-from nimmakai.routing.fallback import _analyze_success_body
+from potato.routing.fallback import _analyze_success_body
 
 YAML = Path(__file__).resolve().parents[1] / "config" / "models.yaml"
 
@@ -30,7 +30,7 @@ def _key(i: int = 0) -> KeyStats:
 
 
 def test_missing_vite_assets_does_not_crash_app_startup(tmp_path: Path) -> None:
-    from nimmakai.main import _mount_vite_assets
+    from potato.main import _mount_vite_assets
 
     dist = tmp_path / "dist"
     dist.mkdir()
@@ -206,7 +206,7 @@ def test_wrap_upstream_error_string() -> None:
 
 
 def test_http_exception_handler_unwraps_detail() -> None:
-    from nimmakai.main import create_app
+    from potato.main import create_app
 
     app = create_app(
         Settings(
@@ -301,8 +301,8 @@ def test_routing_headers_non_raising_with_broken_hub() -> None:
         fallback_index=0,
         provider_id="nim",
     )
-    assert h["X-Nimmakai-Provider"] == "nim"
-    assert h["X-Nimmakai-Model"] == "model-a"
+    assert h["X-Potato-Provider"] == "nim"
+    assert h["X-Potato-Model"] == "model-a"
 
 
 # ── TICKET-2: sanitize does not strip before parse ──────────────────
@@ -310,7 +310,7 @@ def test_routing_headers_non_raising_with_broken_hub() -> None:
 
 def test_parse_auto_router_before_sanitize() -> None:
     raw = {
-        "model": "nimmakai/auto",
+        "model": "potato/auto",
         "session_id": "sess-1",
         "plugins": [
             {
@@ -328,7 +328,7 @@ def test_parse_auto_router_before_sanitize() -> None:
     cleaned = sanitize_chat_body(raw)
     assert cleaned.get("session_id") == "sess-1"
     assert cleaned.get("plugins") is not None
-    from nimmakai.routing.auto_router import strip_router_client_fields
+    from potato.routing.auto_router import strip_router_client_fields
 
     stripped = strip_router_client_fields(cleaned)
     assert "session_id" not in stripped

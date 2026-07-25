@@ -3,7 +3,7 @@ updated: "2026-07-10"
 defaults:
   auto_mode_model_tokens:
     - auto
-    - nimmakai/auto
+    - potato/auto
     - openrouter/auto
     - kilo/auto
     - kilo-auto/frontier

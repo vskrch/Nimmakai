@@ -6,9 +6,9 @@ import asyncio
 import os
 import tempfile
 
-from nimmakai.catalog.db import NimmakaiDB
-from nimmakai.routing.intents import Intent, IntentResult
-from nimmakai.routing.interceptors import (
+from potato.catalog.db import PotatoDB
+from potato.routing.intents import Intent, IntentResult
+from potato.routing.interceptors import (
     CustomCatalogInterceptor,
     PromptUnderstandingInterceptor,
     run_interceptor_chain,
@@ -42,7 +42,7 @@ def _intent(intent=Intent.CODING_AGENTIC) -> IntentResult:
 
 def _tmp_db():
     d = tempfile.mkdtemp()
-    return NimmakaiDB(os.path.join(d, "ext_test.db"))
+    return PotatoDB(os.path.join(d, "ext_test.db"))
 
 
 # ---------------------------------------------------------------------------

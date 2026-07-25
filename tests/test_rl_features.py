@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from nimmakai.routing.rl_features import extract_feature_vector, FEATURE_DIM, FEATURE_NAMES
+from potato.routing.rl_features import extract_feature_vector, FEATURE_DIM, FEATURE_NAMES
 
 
 def test_extract_feature_vector_empty():

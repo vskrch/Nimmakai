@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from nimmakai.safety.backoff import compute_backoff_seconds
+from potato.safety.backoff import compute_backoff_seconds
 
 
 def test_exponential_grows_then_caps() -> None:

@@ -1,0 +1,111 @@
+{
+  "context_by_model": {},
+  "dynamic_chains": {
+    "chat_fast": [
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b",
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3"
+    ],
+    "chat_fast::cheap": [
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3",
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b"
+    ],
+    "chat_fast::fast": [
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b",
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3"
+    ],
+    "coding_agentic": [
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b",
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3"
+    ],
+    "coding_agentic::cheap": [
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3",
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b"
+    ],
+    "coding_agentic::fast": [
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b",
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3"
+    ],
+    "embeddings": [],
+    "embeddings::cheap": [],
+    "embeddings::fast": [],
+    "long_horizon": [
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b",
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3"
+    ],
+    "long_horizon::cheap": [
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3",
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b"
+    ],
+    "long_horizon::fast": [
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b",
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3"
+    ],
+    "reasoning": [
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b",
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3"
+    ],
+    "reasoning::cheap": [
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3",
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b"
+    ],
+    "reasoning::fast": [
+      "qwen/qwen3.5-122b-a10b",
+      "nvidia/nemotron-3-super-120b-a12b",
+      "zai/glm-5.2",
+      "stepfun/step-3.7-flash",
+      "minimaxai/minimax-m3"
+    ],
+    "vision": [
+      "minimaxai/minimax-m3"
+    ],
+    "vision::cheap": [
+      "minimaxai/minimax-m3"
+    ],
+    "vision::fast": [
+      "minimaxai/minimax-m3"
+    ]
+  },
+  "live_ids": [
+    "minimaxai/minimax-m3",
+    "nim/nv-embed-v1",
+    "nvidia/nemotron-3-super-120b-a12b",
+    "qwen/qwen3.5-122b-a10b",
+    "stepfun/step-3.7-flash",
+    "zai/glm-5.2"
+  ],
+  "probed_ok": [],
+  "saved_at": 1785014485.257447
+}

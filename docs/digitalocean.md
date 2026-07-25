@@ -1,4 +1,4 @@
-# Deploy Nimmakai on DigitalOcean (~$12/mo budget)
+# Deploy Potato on DigitalOcean (~$12/mo budget)
 
 This guide sets up **push-to-deploy** CI/CD similar to Heroku: push to `main` → DigitalOcean builds the Docker image → live URL updates.
 
@@ -15,7 +15,7 @@ GitHub Student Pack often includes **DigitalOcean credits** (redeem at [Educatio
 | **Droplet** `s-1vcpu-1gb` + Docker | **~$6** | Persistent volume | Durable SQLite / analytics — use **one-click userdata** (`scripts/generate-do-userdata.sh`) |
 | App Platform 512 MiB | **$5** | Ephemeral | Tight budget (may OOM under load) |
 
-**Do not** add a Managed Postgres ($7+) on the $12 plan — Nimmakai uses SQLite. App Platform **does not support volumes**, so SQLite is wiped on every redeploy. Put all provider keys in encrypted env vars so the app rehydrates cleanly.
+**Do not** add a Managed Postgres ($7+) on the $12 plan — Potato uses SQLite. App Platform **does not support volumes**, so SQLite is wiped on every redeploy. Put all provider keys in encrypted env vars so the app rehydrates cleanly.
 
 ---
 
@@ -36,7 +36,7 @@ git push -u origin main
 
 ### 3. One-time create (Control Panel — easiest)
 
-1. [Create App](https://cloud.digitalocean.com/apps/new) → **GitHub** → authorize → select **Nimmakai** repo / `main`.
+1. [Create App](https://cloud.digitalocean.com/apps/new) → **GitHub** → authorize → select **Potato** repo / `main`.
 2. Detect **Dockerfile** (root). Keep HTTP port **8080**.
 3. Instance size: **1 vCPU / 1 GiB fixed** (~$10/mo). Region: closest to you.
 4. Add **encrypted** runtime env vars (see table below).
@@ -49,7 +49,7 @@ Auto-deploy is on by default for GitHub apps: **every push to `main` redeploys**
 
 Edit `.do/app.yaml`:
 
-- Set `github.repo` to `your-user/Nimmakai`
+- Set `github.repo` to `your-user/Potato`
 - Leave `PROXY_API_KEYS` empty in the spec, then set a **strong random** encrypted secret in the UI (never ship a placeholder like `REPLACE_ME`)
 - Spec uses `deploy_on_push: false` — promote via CI after tests (or flip to `true` only if you accept push-to-prod without gates)
 - Health check path is `/ready` (fails until proxy auth + live models exist)
@@ -91,7 +91,7 @@ Even without this workflow, App Platform still deploys on push when GitHub is co
 ```
 Base URL:  https://YOUR-APP.ondigitalocean.app/v1
 API Key:   <one of PROXY_API_KEYS>
-Model:     nimmakai/auto
+Model:     potato/auto
 ```
 
 ---
@@ -99,7 +99,7 @@ Model:     nimmakai/auto
 ## Path B — Droplet + Docker Compose (persistent SQLite)
 
 Use when you need analytics / dashboard-added providers to survive redeploys.
-Compose file: `docker-compose.do.yml` (maps host **80 → 8080**, volume `nimmakai-data` → `/data`).
+Compose file: `docker-compose.do.yml` (maps host **80 → 8080**, volume `potato-data` → `/data`).
 
 ### B0. One-click User data (fastest)
 
@@ -107,7 +107,7 @@ Generate a paste-ready bootstrap script on your laptop (prompts for keys, embeds
 
 ```bash
 ./scripts/generate-do-userdata.sh
-# writes ./nimmakai-droplet-userdata.sh  (gitignored)
+# writes ./potato-droplet-userdata.sh  (gitignored)
 ```
 
 Then [Create Droplet](https://cloud.digitalocean.com/droplets/new):
@@ -117,9 +117,9 @@ Then [Create Droplet](https://cloud.digitalocean.com/droplets/new):
 | Image | Marketplace → **Docker on Ubuntu** |
 | Size | Basic **s-1vcpu-1gb** (~$6) |
 | Auth | SSH key |
-| User data | Paste **entire** `nimmakai-droplet-userdata.sh` |
+| User data | Paste **entire** `potato-droplet-userdata.sh` |
 
-Wait 5–10 minutes → `http://YOUR_IP/health` or `cat /root/NIMMAKAI-READY.txt` over SSH.
+Wait 5–10 minutes → `http://YOUR_IP/health` or `cat /root/POTATO-READY.txt` over SSH.
 
 Non-interactive (CI / scripting):
 
@@ -128,7 +128,7 @@ NONINTERACTIVE=1 \
   PROXY_API_KEYS=sk-your-key \
   NIM_API_KEYS=nvapi-... \
   GROQ_API_KEYS=gsk-... \
-  ./scripts/generate-do-userdata.sh -o /tmp/nimmakai-userdata.sh
+  ./scripts/generate-do-userdata.sh -o /tmp/potato-userdata.sh
 ```
 
 Manual SSH steps below (B1+) are the same outcome without user data.
@@ -141,14 +141,14 @@ Manual SSH steps below (B1+) are the same outcome without user data.
    - **Image**: Marketplace → **Docker on Ubuntu** (or Ubuntu + install Docker yourself)
    - **Size**: Basic **`$6`** — `s-1vcpu-1gb` (1 vCPU / 1 GiB)
    - **Authentication**: SSH key (recommended) or one-time password
-   - Hostname: e.g. `nimmakai`
+   - Hostname: e.g. `potato`
 3. Create → wait until status is **Active**. Copy the public IPv4.
 
 CLI alternative:
 
 ```bash
 doctl compute ssh-key list   # note KEY_ID
-doctl compute droplet create nimmakai \
+doctl compute droplet create potato \
   --size s-1vcpu-1gb \
   --image docker-20-04 \
   --region sfo3 \
@@ -174,11 +174,11 @@ ssh root@YOUR_DROPLET_IP
 # (or: ssh -i ~/.ssh/id_ed25519 root@YOUR_DROPLET_IP)
 
 mkdir -p /opt && cd /opt
-git clone https://github.com/YOUR_USER/Nimmakai.git
-cd Nimmakai
+git clone https://github.com/YOUR_USER/Potato.git
+cd Potato
 ```
 
-Private repo: use a deploy key or `git clone git@github.com:YOUR_USER/Nimmakai.git` after adding the droplet’s SSH key to GitHub.
+Private repo: use a deploy key or `git clone git@github.com:YOUR_USER/Potato.git` after adding the droplet’s SSH key to GitHub.
 
 Confirm Docker is available:
 
@@ -202,7 +202,7 @@ Minimum for production:
 | `ALLOW_INSECURE_AUTH` | Must stay `false` (compose also forces this) |
 | Provider keys | e.g. `NIM_API_KEYS`, `OPENCODE_ZEN_API_KEYS`, `GROQ_API_KEYS`, … |
 
-Compose already sets `SQLITE_PATH=/data/nimmakai.db` and seeds free presets. Do **not** set `ALLOW_INSECURE_AUTH=true` on the droplet.
+Compose already sets `SQLITE_PATH=/data/potato.db` and seeds free presets. Do **not** set `ALLOW_INSECURE_AUTH=true` on the droplet.
 
 Generate a proxy key if needed:
 
@@ -214,7 +214,7 @@ openssl rand -hex 24
 ### B5. Build and start
 
 ```bash
-cd /opt/Nimmakai
+cd /opt/Potato
 docker compose -f docker-compose.do.yml up -d --build
 docker compose -f docker-compose.do.yml ps
 docker compose -f docker-compose.do.yml logs -f --tail=80
@@ -235,12 +235,12 @@ Browser: `http://YOUR_DROPLET_IP/dashboard` → Auth modal → paste a `PROXY_AP
 
 ### B7. (Optional) Domain + HTTPS with Caddy
 
-1. Point an A record: `nimmakai.example.com` → Droplet IP.
+1. Point an A record: `potato.example.com` → Droplet IP.
 2. On the droplet, install Caddy and reverse-proxy to the container. Simplest pattern: change compose to publish **`127.0.0.1:8080:8080`** only, then Caddy listens on 80/443:
 
 ```bash
 # /etc/caddy/Caddyfile
-nimmakai.example.com {
+potato.example.com {
     reverse_proxy 127.0.0.1:8080
 }
 ```
@@ -249,29 +249,29 @@ nimmakai.example.com {
 systemctl reload caddy
 ```
 
-Then use `https://nimmakai.example.com` in Cursor.
+Then use `https://potato.example.com` in Cursor.
 
 ### B8. Point Cursor / agents at the Droplet
 
 ```
 Base URL:  http://YOUR_DROPLET_IP/v1
-           # or https://nimmakai.example.com/v1 after TLS
+           # or https://potato.example.com/v1 after TLS
 API Key:   <one of PROXY_API_KEYS>
-Model:     nimmakai/auto
+Model:     potato/auto
 ```
 
 ### B9. Redeploy / updates
 
 ```bash
 ssh root@YOUR_DROPLET_IP
-cd /opt/Nimmakai
+cd /opt/Potato
 git pull
 docker compose -f docker-compose.do.yml up -d --build
 ```
 
-SQLite + catalog live in Docker volume **`nimmakai-data`** — they survive rebuilds. To wipe data: `docker volume rm nimmakai_nimmakai-data` (destructive).
+SQLite + catalog live in Docker volume **`potato-data`** — they survive rebuilds. To wipe data: `docker volume rm potato_potato-data` (destructive).
 
-Optional auto-update: [Watchtower](https://containrrr.dev/watchtower/) watching `nimmakai:latest`, or a GitHub Action that SSHs and runs the commands above.
+Optional auto-update: [Watchtower](https://containrrr.dev/watchtower/) watching `potato:latest`, or a GitHub Action that SSHs and runs the commands above.
 
 ### B10. Useful ops commands
 
@@ -279,7 +279,7 @@ Optional auto-update: [Watchtower](https://containrrr.dev/watchtower/) watching 
 docker compose -f docker-compose.do.yml logs -f
 docker compose -f docker-compose.do.yml restart
 docker compose -f docker-compose.do.yml down          # stop (keeps volume)
-docker volume ls | grep nimmakai
+docker volume ls | grep potato
 df -h                                                 # disk pressure on 1 GiB
 ```
 
@@ -306,12 +306,12 @@ curl -s -H "Authorization: Bearer $PROXY_KEY" \
 Local Docker smoke test before pushing:
 
 ```bash
-docker build -t nimmakai:local .
+docker build -t potato:local .
 docker run --rm -p 8080:8080 \
   -e PROXY_API_KEYS=sk-test \
   -e ALLOW_INSECURE_AUTH=false \
   -e NIM_API_KEYS= \
-  nimmakai:local
+  potato:local
 # then: curl localhost:8080/health
 ```
 

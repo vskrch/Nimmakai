@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from nimmakai.catalog.preferences import (
+from potato.catalog.preferences import (
     VALID_INTENTS,
     IntentPreference,
     UserPreferences,

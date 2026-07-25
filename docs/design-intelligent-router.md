@@ -1,18 +1,18 @@
-# Nimmakai Intelligent Model Router + Account-Safe Multi-Key Proxy
+# Potato Intelligent Model Router + Account-Safe Multi-Key Proxy
 
 | Field | Value |
 |-------|-------|
 | **Author** | TBD |
 | **Date** | 2026-07-10 |
 | **Status** | Implemented (v0.2.0) |
-| **Workspace** | `/Users/venkatasai/CascadeProjects/Nimmakai` |
+| **Workspace** | `/Users/venkatasai/CascadeProjects/Potato` |
 | **Related** | Bootstrap proxy (`KeyPool`, `UpstreamClient`, OpenAI routes) |
 
 ---
 
 ## Overview
 
-Nimmakai is an OpenAI-compatible FastAPI proxy that fronts NVIDIA NIM (`https://integrate.api.nvidia.com/v1`) and fans traffic across multiple `nvapi-` keys with per-key RPM windows, EWMA latency scoring, and 429 cooldowns. The bootstrap already delivers multi-key balancing and transparent `/v1/*` passthrough for coding agents (Cursor, OpenCode, Pi, etc.).
+Potato is an OpenAI-compatible FastAPI proxy that fronts NVIDIA NIM (`https://integrate.api.nvidia.com/v1`) and fans traffic across multiple `nvapi-` keys with per-key RPM windows, EWMA latency scoring, and 429 cooldowns. The bootstrap already delivers multi-key balancing and transparent `/v1/*` passthrough for coding agents (Cursor, OpenCode, Pi, etc.).
 
 This design extends that foundation with three tightly coupled capabilities:
 
@@ -20,7 +20,7 @@ This design extends that foundation with three tightly coupled capabilities:
 2. **Ordered fallback** — intentional quality/health-aware model chains instead of random or single-model hard-fail.
 3. **Account-safe multi-key operation** — sustainable personal multi-account usage via soft budgets, jitter, sticky sessions, circuit breakers, concurrency caps, and fail-closed behavior — without ToS-evasion strategies (IP rotation farms, CAPTCHA solving, identity automation).
 
-The design **extends** `KeyPool` (`src/nimmakai/balancer.py`) and the request path in `routes/openai.py` + `upstream.py`; it does not rewrite the bootstrap. Catalog data lives in versioned YAML, refreshed against `GET /v1/models` and health probes.
+The design **extends** `KeyPool` (`src/potato/balancer.py`) and the request path in `routes/openai.py` + `upstream.py`; it does not rewrite the bootstrap. Catalog data lives in versioned YAML, refreshed against `GET /v1/models` and health probes.
 
 ---
 
@@ -30,13 +30,13 @@ The design **extends** `KeyPool` (`src/nimmakai/balancer.py`) and the request pa
 
 | Component | Path | Role |
 |-----------|------|------|
-| App lifespan | `src/nimmakai/main.py` | Creates `KeyPool` + `UpstreamClient`, mounts routers |
-| Settings | `src/nimmakai/config.py` | `NIM_API_KEYS`, RPM limit × 0.9 safety, cooldown, `DEFAULT_MODEL` |
-| Key pool | `src/nimmakai/balancer.py` | Sliding-window RPM, weighted pick (headroom × 1/latency × success × concurrency), 429 cooldown |
-| Forwarder | `src/nimmakai/upstream.py` | `request_json` / `stream` with up to 3 key rotations on 429 |
-| Auth | `src/nimmakai/auth.py` | Client Bearer / `x-api-key` vs `PROXY_API_KEYS` |
-| OpenAI surface | `src/nimmakai/routes/openai.py` | chat/completions, completions, embeddings, responses, models |
-| Admin | `src/nimmakai/routes/admin.py` | `/health`, `/stats` |
+| App lifespan | `src/potato/main.py` | Creates `KeyPool` + `UpstreamClient`, mounts routers |
+| Settings | `src/potato/config.py` | `NIM_API_KEYS`, RPM limit × 0.9 safety, cooldown, `DEFAULT_MODEL` |
+| Key pool | `src/potato/balancer.py` | Sliding-window RPM, weighted pick (headroom × 1/latency × success × concurrency), 429 cooldown |
+| Forwarder | `src/potato/upstream.py` | `request_json` / `stream` with up to 3 key rotations on 429 |
+| Auth | `src/potato/auth.py` | Client Bearer / `x-api-key` vs `PROXY_API_KEYS` |
+| OpenAI surface | `src/potato/routes/openai.py` | chat/completions, completions, embeddings, responses, models |
+| Admin | `src/potato/routes/admin.py` | `/health`, `/stats` |
 
 **What works well:** multi-key RPM headroom, latency-aware weighting, stream byte-for-byte proxy (preserves tool_calls SSE), simple client gate.
 
@@ -74,7 +74,7 @@ Coding agents generate bursty, tool-heavy, multi-turn traffic. Users naturally w
 2. **Ordered fallback chains** per intent, reordered lightly by live model+key health (error rate, EWMA latency), never random quality demotion.
 3. **Account-safe multi-key sustainability**: soft RPM (existing), global soft limits, jitter, daily budgets, 401/403 quarantine, sticky sessions, max in-flight per key/global, Retry-After, human-like concurrency, fail-closed clear errors.
 4. **Versioned model catalog** (`config/models.yaml`) + startup/periodic `GET /v1/models` probe + health probes; aliases and tiers externalized.
-5. **Agent quality**: preserve streaming tool_calls; surface `X-Nimmakai-Model`, `X-Nimmakai-Intent`, `X-Nimmakai-Key-Id`; rule-first classifier &lt;5ms.
+5. **Agent quality**: preserve streaming tool_calls; surface `X-Potato-Model`, `X-Potato-Intent`, `X-Potato-Key-Id`; rule-first classifier &lt;5ms.
 6. **Incremental delivery** via ordered PRs that each leave the proxy shippable.
 
 ### Non-Goals
@@ -82,7 +82,7 @@ Coding agents generate bursty, tool-heavy, multi-turn traffic. Users naturally w
 1. **Not** a ToS-circumvention system: no residential proxy farms, CAPTCHA solving, fake phone identity automation as product features.
 2. **Not** a full multi-tenant SaaS control plane / billing system.
 3. **Not** replacing NVIDIA’s catalog with a permanent hard-coded model list as the sole source of truth.
-4. **Not** fine-tuning or hosting models; Nimmakai remains a proxy/router.
+4. **Not** fine-tuning or hosting models; Potato remains a proxy/router.
 5. **Not** guaranteed free-tier capacity aggregation — multi-account free-tier use may violate NVIDIA ToS; document user responsibility and legitimate alternatives (enterprise, self-host).
 6. **Not** multi-region geo routing or complex Redis-backed distributed pool in v1 (may be a later PR; single-process in-memory is the design baseline).
 
@@ -99,7 +99,7 @@ flowchart TB
     SDK[OpenAI SDK]
   end
 
-  subgraph nimmakai [Nimmakai FastAPI]
+  subgraph potato [Potato FastAPI]
     Auth[auth.require_proxy_auth]
     Router[routes/openai.py]
     Intent[routing.IntentClassifier]
@@ -164,7 +164,7 @@ sequenceDiagram
     else success
       N-->>U: 200 / SSE
       U->>P: release success + latency
-      R-->>C: body + X-Nimmakai-* headers
+      R-->>C: body + X-Potato-* headers
     end
   end
   G->>G: after_request budgets / circuit
@@ -173,7 +173,7 @@ sequenceDiagram
 ### Module layout (new + extended)
 
 ```
-src/nimmakai/
+src/potato/
   main.py                 # wire registry, safety, refresh tasks
   config.py               # new settings for routing/safety/catalog paths
   balancer.py             # extend KeyStats / KeyPool (sticky, budgets, quarantine)
@@ -205,7 +205,7 @@ src/nimmakai/
     models.yaml           # versioned tiers, chains, aliases (repo)
 ```
 
-> Note: application package remains under `src/nimmakai/`; YAML lives at repo root `config/models.yaml` (or `src/nimmakai/data/models.yaml` packaged as package data). Prefer **repo-root `config/models.yaml`** with settings path override for user edits without reinstalling.
+> Note: application package remains under `src/potato/`; YAML lives at repo root `config/models.yaml` (or `src/potato/data/models.yaml` packaged as package data). Prefer **repo-root `config/models.yaml`** with settings path override for user edits without reinstalling.
 
 ### 1. Model catalog (`catalog/`)
 
@@ -217,7 +217,7 @@ Catalog is **configuration**, not code. Schema sketch:
 version: 1
 updated: "2026-07-10"
 defaults:
-  auto_mode_model_tokens: ["auto", "nimmakai/auto", ""]
+  auto_mode_model_tokens: ["auto", "potato/auto", ""]
   passthrough_if_known: true
   max_fallback_attempts: 3
   classify_mode: rules_only   # rules_only | rules_then_llm
@@ -466,18 +466,18 @@ If stream starts then fails mid-way, surface error to client (agents typically r
 
 | Header | Example |
 |--------|---------|
-| `X-Nimmakai-Model` | `minimaxai/minimax-m2.7` |
-| `X-Nimmakai-Intent` | `coding_agentic` |
-| `X-Nimmakai-Key-Id` | `key-2` |
-| `X-Nimmakai-Route-Mode` | `auto` \| `alias` \| `passthrough` |
-| `X-Nimmakai-Fallback-Index` | `0` (or `1` if second model used) |
-| `X-Nimmakai-Rule-Id` | `tools_present` |
+| `X-Potato-Model` | `minimaxai/minimax-m2.7` |
+| `X-Potato-Intent` | `coding_agentic` |
+| `X-Potato-Key-Id` | `key-2` |
+| `X-Potato-Route-Mode` | `auto` \| `alias` \| `passthrough` |
+| `X-Potato-Fallback-Index` | `0` (or `1` if second model used) |
+| `X-Potato-Rule-Id` | `tools_present` |
 
 Also rewrite response JSON `model` field to the **actual** upstream model used (agents and logs benefit). Document that this differs from some proxies that echo the request model.
 
 ### 5. Account safety (`safety/` + KeyPool extensions)
 
-Honest framing: multi-account free-tier aggregation may violate NVIDIA ToS. Nimmakai designs for **resilient legitimate personal usage** patterns, documents risk, and recommends enterprise / self-host for production scale.
+Honest framing: multi-account free-tier aggregation may violate NVIDIA ToS. Potato designs for **resilient legitimate personal usage** patterns, documents risk, and recommends enterprise / self-host for production scale.
 
 #### 5.1 Extend `KeyStats` / `KeyPool` (keep existing scoring)
 
@@ -533,7 +533,7 @@ Disable for latency benchmarks via `SAFETY_JITTER_ENABLED=false`.
   "error": {
     "message": "All NIM keys unavailable (quarantined, budget, or rate-limited). Retry later.",
     "type": "server_error",
-    "code": "nimmakai_pool_exhausted"
+    "code": "potato_pool_exhausted"
   }
 }
 ```
@@ -542,7 +542,7 @@ Do **not** spin aggressive retry storms.
 
 #### 5.5 Sticky sessions (`safety/sticky.py`)
 
-- Session key sources (first present): `X-Nimmakai-Session`, hash of proxy API key + optional `X-Cursor-Chat-Id` / custom header, or hash of first `messages[0]` system prefix (weak).
+- Session key sources (first present): `X-Potato-Session`, hash of proxy API key + optional `X-Cursor-Chat-Id` / custom header, or hash of first `messages[0]` system prefix (weak).
 - Map `session_id → key_id` in LRU (TTL e.g. 30 min).
 - Purpose: reduce fingerprint of constant key-hopping within one conversation; improve cache locality if NIM has any per-key affinity (unknown, but sticky is low-cost).
 - Still fall back to other keys on 429/quarantine.
@@ -556,7 +556,7 @@ Do **not** spin aggressive retry storms.
 #### 5.7 Upstream identity (`upstream.py`)
 
 ```python
-"User-Agent": "nimmakai/0.x (+https://github.com/...; OpenAI-compatible proxy)"
+"User-Agent": "potato/0.x (+https://github.com/...; OpenAI-compatible proxy)"
 # or mimic official OpenAI Python SDK UA if users prefer lower novelty:
 # "User-Agent": "OpenAI/Python 1.x"
 ```
@@ -639,7 +639,7 @@ app.state.guard = guard
 | `auth_fail_threshold` | `2` | Quarantine trigger |
 | `auth_quarantine_seconds` | `3600` | Quarantine duration |
 | `sticky_sessions_enabled` | `true` | Session→key bias |
-| `upstream_user_agent` | `nimmakai/...` | UA string |
+| `upstream_user_agent` | `potato/...` | UA string |
 | `strict_catalog` | `false` | Fail start if YAML models missing from live |
 
 ### 7. Quality optimization for coding agents
@@ -649,8 +649,8 @@ app.state.guard = guard
 3. **Do not** fall back to Gemma on first MiniMax blip if better chain peers remain — only after retryable failure / health blackout.
 4. **Tool streaming:** keep byte-for-byte SSE proxy; never buffer-and-rewrite tool_call deltas.
 5. **Embeddings:** separate chain; do not send embedding traffic to chat models.
-6. **Vision:** only select VLM-capable models when image parts detected; if client forced a non-VLM model, return clear 400 from Nimmakai after capability check (optional guard).
-7. **List models for clients:** optionally inject synthetic `nimmakai/auto` into `GET /v1/models` response so Cursor model pickers can select auto explicitly.
+6. **Vision:** only select VLM-capable models when image parts detected; if client forced a non-VLM model, return clear 400 from Potato after capability check (optional guard).
+7. **List models for clients:** optionally inject synthetic `potato/auto` into `GET /v1/models` response so Cursor model pickers can select auto explicitly.
 
 ### 8. Admin / observability endpoints
 
@@ -691,15 +691,15 @@ New (auth-protected if `PROXY_API_KEYS` set):
 | `POST /v1/completions` | Same routing (lighter default intent) |
 | `POST /v1/embeddings` | Embeddings intent/chain only |
 | `POST /v1/responses` | Same routing as chat when shape allows |
-| `GET /v1/models` | Passthrough + optional synthetic `nimmakai/auto` |
+| `GET /v1/models` | Passthrough + optional synthetic `potato/auto` |
 
 ### New request options (optional headers)
 
 | Header | Purpose |
 |--------|---------|
-| `X-Nimmakai-Session` | Sticky session id |
-| `X-Nimmakai-Disable-Route: 1` | Force passthrough of model field, no auto |
-| `X-Nimmakai-Intent: reasoning` | Force intent (power users) |
+| `X-Potato-Session` | Sticky session id |
+| `X-Potato-Disable-Route: 1` | Force passthrough of model field, no auto |
+| `X-Potato-Intent: reasoning` | Force intent (power users) |
 
 ### Internal Python interfaces (critical)
 
@@ -719,14 +719,14 @@ class FallbackExecutor:
     async def execute_stream(self, path: str, body: dict, decision: RouteDecision, ...) -> StreamResult: ...
 ```
 
-### Error codes (Nimmakai-specific under OpenAI error envelope)
+### Error codes (Potato-specific under OpenAI error envelope)
 
 | code | HTTP | When |
 |------|------|------|
-| `nimmakai_pool_exhausted` | 503 | All keys unavailable |
-| `nimmakai_models_exhausted` | 503 | All models in chain failed |
-| `nimmakai_catalog_empty` | 503 | No models available and strict routing |
-| `nimmakai_capability_mismatch` | 400 | Vision/tools required but model lacks support (optional) |
+| `potato_pool_exhausted` | 503 | All keys unavailable |
+| `potato_models_exhausted` | 503 | All models in chain failed |
+| `potato_catalog_empty` | 503 | No models available and strict routing |
+| `potato_capability_mismatch` | 400 | Vision/tools required but model lacks support (optional) |
 
 ---
 
@@ -851,12 +851,12 @@ Log level: INFO for route decisions (sampling optional later); DEBUG for feature
 
 | Metric | Labels | Type |
 |--------|--------|------|
-| `nimmakai_requests_total` | intent, model, mode, status_class | counter |
-| `nimmakai_fallback_total` | from_model, to_model, reason | counter |
-| `nimmakai_key_rpm` | key_id | gauge |
-| `nimmakai_key_quarantined` | key_id | gauge |
-| `nimmakai_route_seconds` | mode | histogram (rule path should be negligible) |
-| `nimmakai_upstream_latency_seconds` | model, key_id | histogram (EWMA already) |
+| `potato_requests_total` | intent, model, mode, status_class | counter |
+| `potato_fallback_total` | from_model, to_model, reason | counter |
+| `potato_key_rpm` | key_id | gauge |
+| `potato_key_quarantined` | key_id | gauge |
+| `potato_route_seconds` | mode | histogram (rule path should be negligible) |
+| `potato_upstream_latency_seconds` | model, key_id | histogram (EWMA already) |
 
 ### Alerting (personal ops)
 
@@ -911,14 +911,14 @@ Log level: INFO for route decisions (sampling optional later); DEBUG for feature
 3. Default for `enable_fallback_on_explicit`: true (resilience) vs false (strict user choice)? **Proposal: true** with header opt-out.
 4. Daily RPD default — free tier does not publish a hard RPD; is 2000/key/day too high/low for personal use?
 5. Multi-instance: is Redis sticky/budget sharing needed in the next 3 months?
-6. Should response `model` field remain the **request** model for client compatibility, or the **actual** model? **Proposal: actual**, plus request echo in `X-Nimmakai-Requested-Model`.
+6. Should response `model` field remain the **request** model for client compatibility, or the **actual** model? **Proposal: actual**, plus request echo in `X-Potato-Requested-Model`.
 7. Package YAML inside wheel vs external `config/` only?
 
 ---
 
 ## References
 
-- Bootstrap code: `src/nimmakai/{main,config,balancer,upstream,auth}.py`, `routes/openai.py`, `routes/admin.py`
+- Bootstrap code: `src/potato/{main,config,balancer,upstream,auth}.py`, `routes/openai.py`, `routes/admin.py`
 - NVIDIA NIM OpenAI-compatible API: `https://integrate.api.nvidia.com/v1`
 - Model catalog UI: `https://build.nvidia.com/models`
 - README roadmap: model-level routing / fallback aliases
@@ -939,7 +939,7 @@ Log level: INFO for route decisions (sampling optional later); DEBUG for feature
 | 6 | **Passthrough real NIM ids; auto/alias for Cursor defaults** | Power users keep control; convenience without surprise rewrites of explicit ids (fallbacks optional) |
 | 7 | **Account safety = legitimate traffic shaping, not ban evasion** | Ethical/legal boundary; still delivers sticky, jitter, budgets, quarantine, Retry-After |
 | 8 | **Sticky session is soft bias, not hard pin** | Consistency without defeating multi-key RPM spreading |
-| 9 | **Surface routing in `X-Nimmakai-*` headers + rewrite response `model` to actual** | Debuggability for agent users; honest about what ran |
+| 9 | **Surface routing in `X-Potato-*` headers + rewrite response `model` to actual** | Debuggability for agent users; honest about what ran |
 | 10 | **Feature-flag routing (`ROUTING_ENABLED`) for instant rollback** | Safe incremental rollout on a personal proxy |
 | 11 | **In-memory state for MVP (no Redis)** | Matches single-user Cursor proxy deployment; keep interfaces swappable later |
 | 12 | **Default auto intent for agent-like traffic = `coding_agentic`** | Optimizes for Cursor/OpenCode quality; chat_fast only when signals are clearly light |
@@ -955,7 +955,7 @@ Incremental, each PR independently reviewable and mergeable with tests. Order is
 | | |
 |--|--|
 | **Title** | `feat(catalog): versioned models.yaml registry and settings` |
-| **Files/components** | `config/models.yaml` (initial curated chains/aliases); `src/nimmakai/catalog/{__init__,schema,registry,aliases}.py`; `src/nimmakai/config.py` (path + flags); `tests/test_catalog.py`; package data / path resolution |
+| **Files/components** | `config/models.yaml` (initial curated chains/aliases); `src/potato/catalog/{__init__,schema,registry,aliases}.py`; `src/potato/config.py` (path + flags); `tests/test_catalog.py`; package data / path resolution |
 | **Depends on** | None |
 | **Description** | Add pydantic schema for YAML; load aliases, intents, chains; `is_known` from YAML only (no live probe yet); `ROUTING_ENABLED` default false so runtime behavior unchanged. Unit tests for alias resolution and chain lookup. |
 
@@ -964,7 +964,7 @@ Incremental, each PR independently reviewable and mergeable with tests. Order is
 | | |
 |--|--|
 | **Title** | `feat(catalog): GET /v1/models refresh and per-model health` |
-| **Files/components** | `src/nimmakai/catalog/registry.py`, `health.py`; `src/nimmakai/main.py` (lifespan task); `src/nimmakai/routes/admin.py` (`/catalog`, force refresh); `src/nimmakai/upstream.py` (optional helper for models GET); `tests/test_catalog_refresh.py` |
+| **Files/components** | `src/potato/catalog/registry.py`, `health.py`; `src/potato/main.py` (lifespan task); `src/potato/routes/admin.py` (`/catalog`, force refresh); `src/potato/upstream.py` (optional helper for models GET); `tests/test_catalog_refresh.py` |
 | **Depends on** | PR 1 |
 | **Description** | Startup + periodic refresh; intersect chains with live ids; health EWMA/error tracking API; admin endpoints; graceful degradation if refresh fails. |
 
@@ -973,16 +973,16 @@ Incremental, each PR independently reviewable and mergeable with tests. Order is
 | | |
 |--|--|
 | **Title** | `feat(safety): quarantine, daily budget, jitter, sticky, Retry-After` |
-| **Files/components** | `src/nimmakai/balancer.py`; `src/nimmakai/safety/{__init__,jitter,budgets,circuit,sticky,concurrency}.py`; `src/nimmakai/upstream.py`; `src/nimmakai/config.py`; `src/nimmakai/routes/admin.py` (stats fields); `tests/test_balancer.py`, `tests/test_safety.py` |
+| **Files/components** | `src/potato/balancer.py`; `src/potato/safety/{__init__,jitter,budgets,circuit,sticky,concurrency}.py`; `src/potato/upstream.py`; `src/potato/config.py`; `src/potato/routes/admin.py` (stats fields); `tests/test_balancer.py`, `tests/test_safety.py` |
 | **Depends on** | None (can parallelize with PR 1–2); merge before PR 5 ideally |
-| **Description** | Extend `KeyStats`/`acquire`/`release` for quarantine (401/403), RPD budget, max in-flight; global concurrency; jitter helper; sticky store; parse Retry-After; User-Agent; fail-closed 503 `nimmakai_pool_exhausted`. **No model routing yet** — all traffic still passthrough. |
+| **Description** | Extend `KeyStats`/`acquire`/`release` for quarantine (401/403), RPD budget, max in-flight; global concurrency; jitter helper; sticky store; parse Retry-After; User-Agent; fail-closed 503 `potato_pool_exhausted`. **No model routing yet** — all traffic still passthrough. |
 
 ### PR 4 — Intent classifier (rules only)
 
 | | |
 |--|--|
 | **Title** | `feat(routing): deterministic intent classifier` |
-| **Files/components** | `src/nimmakai/routing/{__init__,intents,classifier}.py`; `tests/test_classifier.py` (golden cases: Cursor tools, short Q&A, math, vision, embeddings path) |
+| **Files/components** | `src/potato/routing/{__init__,intents,classifier}.py`; `tests/test_classifier.py` (golden cases: Cursor tools, short Q&A, math, vision, embeddings path) |
 | **Depends on** | None strictly; uses settings from PR 1 if shared |
 | **Description** | Implement feature extraction + ordered rules; &lt;5ms pure function; no wire-up to routes yet (library + tests only) for easy review. |
 
@@ -991,7 +991,7 @@ Incremental, each PR independently reviewable and mergeable with tests. Order is
 | | |
 |--|--|
 | **Title** | `feat(routing): model selector, ordered fallback, chat route integration` |
-| **Files/components** | `src/nimmakai/routing/{selector,fallback}.py`; `src/nimmakai/routes/openai.py`; `src/nimmakai/upstream.py` (return key on JSON path; preferred_key); `src/nimmakai/main.py` (wire components); `tests/test_selector.py`, `tests/test_fallback.py`, `tests/test_openai_routing.py` (httpx mock) |
+| **Files/components** | `src/potato/routing/{selector,fallback}.py`; `src/potato/routes/openai.py`; `src/potato/upstream.py` (return key on JSON path; preferred_key); `src/potato/main.py` (wire components); `tests/test_selector.py`, `tests/test_fallback.py`, `tests/test_openai_routing.py` (httpx mock) |
 | **Depends on** | PR 1, PR 2, PR 3, PR 4 |
 | **Description** | End-to-end auto/alias/passthrough; quality-ordered chain with health reorder; key retries then model fallback; diagnostic headers; response `model` rewrite; feature flag on. Streaming: no mid-stream model switch. Embeddings/completions/responses basic routing. |
 
@@ -999,17 +999,17 @@ Incremental, each PR independently reviewable and mergeable with tests. Order is
 
 | | |
 |--|--|
-| **Title** | `docs+feat: nimmakai/auto in model list, README, env examples` |
+| **Title** | `docs+feat: potato/auto in model list, README, env examples` |
 | **Files/components** | `routes/openai.py` (`GET /v1/models` inject); `README.md`; `.env.example`; `docs/design-intelligent-router.md` (this doc); optional `config/models.yaml` comments |
 | **Depends on** | PR 5 |
-| **Description** | Document Cursor setup (`model=nimmakai/auto`); ToS/responsibility note; safety settings; examples of headers; mark roadmap items done. |
+| **Description** | Document Cursor setup (`model=potato/auto`); ToS/responsibility note; safety settings; examples of headers; mark roadmap items done. |
 
 ### PR 7 — Optional LLM classify path (behind flag)
 
 | | |
 |--|--|
 | **Title** | `feat(routing): optional low-confidence LLM intent classify with cache` |
-| **Files/components** | `src/nimmakai/routing/classifier.py`; `config.py`; `tests/test_classifier_llm.py` |
+| **Files/components** | `src/potato/routing/classifier.py`; `config.py`; `tests/test_classifier_llm.py` |
 | **Depends on** | PR 5 |
 | **Description** | `rules_then_llm` mode; RPM-aware skip; LRU cache; still default `rules_only`. |
 
@@ -1043,7 +1043,7 @@ gantt
 
 ### Definition of done (full feature)
 
-- [ ] Cursor with `model=auto` or `nimmakai/auto` completes tool-call streaming on a coding chain head
+- [ ] Cursor with `model=auto` or `potato/auto` completes tool-call streaming on a coding chain head
 - [ ] Short Q&A routes to `chat_fast` chain (verified via headers)
 - [ ] Explicit `org/model` passthrough works
 - [ ] Ordered fallback advances on simulated 404 model

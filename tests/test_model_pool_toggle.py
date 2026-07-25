@@ -5,15 +5,15 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from nimmakai.balancer import KeyPool
-from nimmakai.catalog.hub import ProviderHub
-from nimmakai.catalog.preferences import UserPreferences
-from nimmakai.catalog.providers import ProviderStore
-from nimmakai.catalog.registry import ModelRegistry
-from nimmakai.config import Settings
-from nimmakai.main import create_app
-from nimmakai.routing import Intent, IntentResult, ModelSelector, RoutingStats
-from nimmakai.safety import AccountGuard
+from potato.balancer import KeyPool
+from potato.catalog.hub import ProviderHub
+from potato.catalog.preferences import UserPreferences
+from potato.catalog.providers import ProviderStore
+from potato.catalog.registry import ModelRegistry
+from potato.config import Settings
+from potato.main import create_app
+from potato.routing import Intent, IntentResult, ModelSelector, RoutingStats
+from potato.safety import AccountGuard
 
 AUTH = {"Authorization": "Bearer any"}
 _temp_dirs: list = []
@@ -35,7 +35,7 @@ def _app_with_live_models(model_ids: list[str]):
         nim_max_in_flight_per_key=3,
         providers_overlay_path=str(Path(td.name) / "providers.json"),
         catalog_snapshot_path=str(Path(td.name) / "catalog_snapshot.json"),
-        sqlite_path=str(Path(td.name) / "nimmakai.db"),
+        sqlite_path=str(Path(td.name) / "potato.db"),
         sqlite_seed_free_presets=False,
     )
     app = create_app(settings)
@@ -145,9 +145,9 @@ def test_disabled_not_known_for_routing():
 
 def test_executor_chain_strips_disabled_passthrough():
     """Even a hand-built decision must not execute disabled models."""
-    from nimmakai.routing.fallback import FallbackExecutor
-    from nimmakai.routing.intents import Intent
-    from nimmakai.routing.selector import RouteDecision
+    from potato.routing.fallback import FallbackExecutor
+    from potato.routing.intents import Intent
+    from potato.routing.selector import RouteDecision
 
     _app, registry, settings = _app_with_live_models(
         ["zen/mimo-v2.5-free", "zen/big-pickle"]
@@ -210,7 +210,7 @@ def test_disabled_models_persist_across_bind():
     registry.set_model_enabled("groq/llama-3", False)
     # New registry + same sqlite
     reg2 = ModelRegistry.from_settings(settings)
-    from nimmakai.catalog.db import get_db
+    from potato.catalog.db import get_db
 
     reg2.live_ids = set(registry.live_ids)
     reg2.bind_db(get_db(settings.sqlite_path))

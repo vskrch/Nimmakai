@@ -1,16 +1,16 @@
 """NMK-601: Integration test — custom provider → model registration → routing."""
 
 import pytest
-from nimmakai.catalog.hub import ProviderHub
-from nimmakai.catalog.providers import ProviderConfig, ProviderStore, namespace_model
-from nimmakai.catalog.registry import ModelRegistry
-from nimmakai.catalog.ladder import LadderService
-from nimmakai.catalog.health import ModelHealthStore
-from nimmakai.routing.optimizer import score_model_live
+from potato.catalog.hub import ProviderHub
+from potato.catalog.providers import ProviderConfig, ProviderStore, namespace_model
+from potato.catalog.registry import ModelRegistry
+from potato.catalog.ladder import LadderService
+from potato.catalog.health import ModelHealthStore
+from potato.routing.optimizer import score_model_live
 
 
 def _make_registry():
-    from nimmakai.catalog.schema import catalog_from_dict
+    from potato.catalog.schema import catalog_from_dict
     cat = catalog_from_dict({
         "version": "1",
         "updated": "2026-01-01",

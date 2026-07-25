@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from nimmakai.catalog.docs_fetcher import DocModel
-from nimmakai.catalog.health import ModelHealthStore
-from nimmakai.catalog.intel_fetcher import IntelBundle
-from nimmakai.catalog.ladder import LadderService
-from nimmakai.catalog.learning import LearningStore
-from nimmakai.catalog.score_cache import ModelScoreCache, recompute
+from potato.catalog.docs_fetcher import DocModel
+from potato.catalog.health import ModelHealthStore
+from potato.catalog.intel_fetcher import IntelBundle
+from potato.catalog.ladder import LadderService
+from potato.catalog.learning import LearningStore
+from potato.catalog.score_cache import ModelScoreCache, recompute
 
 
 def _install_score_cache(live: set[str], bundles: dict | None = None) -> None:

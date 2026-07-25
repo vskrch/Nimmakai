@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import pytest
-from nimmakai.routing.rl_rewards import calculate_composite_reward
+from potato.routing.rl_rewards import calculate_composite_reward
 
 
 def test_reward_503_error():

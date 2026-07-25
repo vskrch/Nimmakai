@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 
-from nimmakai.catalog.health import ModelHealthStore
+from potato.catalog.health import ModelHealthStore
 
 
 def test_504_cooldown():
@@ -61,7 +61,7 @@ def test_health_config_fields():
 
 def test_deadline_config():
     """Settings has the fixed deadline values (NMK-C104)."""
-    from nimmakai.config import Settings
+    from potato.config import Settings
 
     s = Settings()
     assert s.request_deadline_seconds == 120.0
@@ -72,7 +72,7 @@ def test_deadline_config():
 
 def test_intent_budget_config():
     """Settings has per-intent attempt budgets (NMK-C103)."""
-    from nimmakai.config import Settings
+    from potato.config import Settings
 
     s = Settings()
     assert s.intent_attempt_budget_seconds["reasoning"] == 45.0
@@ -84,8 +84,8 @@ def test_intent_budget_config():
 
 def test_attempt_budget_for_intent():
     """FallbackExecutor._attempt_budget_for returns per-intent budget."""
-    from nimmakai.config import Settings
-    from nimmakai.routing.fallback import FallbackExecutor
+    from potato.config import Settings
+    from potato.routing.fallback import FallbackExecutor
 
     class FakeReg:
         pass
@@ -112,8 +112,8 @@ def test_attempt_budget_for_intent():
 
 def test_max_n_for_intent():
     """FallbackExecutor._max_n_for_intent returns per-intent fallback cap."""
-    from nimmakai.config import Settings
-    from nimmakai.routing.fallback import FallbackExecutor
+    from potato.config import Settings
+    from potato.routing.fallback import FallbackExecutor
 
     class FakeReg:
         pass

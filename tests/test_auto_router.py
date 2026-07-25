@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from nimmakai.catalog import ModelRegistry
-from nimmakai.config import Settings
-from nimmakai.routing.auto_router import (
+from potato.catalog import ModelRegistry
+from potato.config import Settings
+from potato.routing.auto_router import (
     filter_chain,
     is_auto_router_id,
     is_free_model,
@@ -17,9 +17,9 @@ from nimmakai.routing.auto_router import (
     strip_router_client_fields,
     tradeoff_to_tier,
 )
-from nimmakai.routing.intents import Intent, IntentResult
-from nimmakai.routing.selector import ModelSelector
-from nimmakai.safety.sticky import StickySessionStore
+from potato.routing.intents import Intent, IntentResult
+from potato.routing.selector import ModelSelector
+from potato.safety.sticky import StickySessionStore
 
 YAML = Path(__file__).resolve().parents[1] / "config" / "models.yaml"
 
@@ -50,7 +50,7 @@ def test_openrouter_auto_is_auto_router() -> None:
     assert is_auto_router_id("kilo/auto")
     assert is_auto_router_id("kilo-auto/frontier")
     assert is_auto_router_id("kilo-auto/free")
-    assert is_auto_router_id("nimmakai/auto")
+    assert is_auto_router_id("potato/auto")
     assert not is_auto_router_id("anthropic/claude-sonnet-4.5")
     assert resolve_auto_tier("openrouter/auto") == "balanced"
     assert resolve_auto_tier("kilo-auto/frontier") == "frontier"
@@ -192,11 +192,11 @@ def test_synthetic_models_include_openrouter_kilo() -> None:
     assert "openrouter/auto" in ids
     assert "kilo/auto" in ids
     assert "kilo-auto/free" in ids
-    assert "nimmakai/auto" in ids
+    assert "potato/auto" in ids
 
 
 def test_intent_expansion_order_primary_first() -> None:
-    from nimmakai.routing.auto_router import intent_expansion_order
+    from potato.routing.auto_router import intent_expansion_order
 
     coding = intent_expansion_order("coding_agentic")
     assert coding[0] == "coding_agentic"
@@ -206,7 +206,7 @@ def test_intent_expansion_order_primary_first() -> None:
 
 
 def test_sticky_fits_intent_pool_strict_for_tools() -> None:
-    from nimmakai.routing.auto_router import sticky_fits_intent_pool
+    from potato.routing.auto_router import sticky_fits_intent_pool
 
     pool = ["qwen/qwen3.5-122b-a10b", "nvidia/nemotron-3-super-120b-a12b"]
     # High confidence coding: chat-only pin outside pool is rejected
@@ -232,8 +232,8 @@ def test_sticky_fits_intent_pool_strict_for_tools() -> None:
     ) is True
 
 
-def test_nimmakai_auto_always_nonempty_when_live() -> None:
-    """nimmakai/auto must always produce a chain when the catalog has models."""
+def test_potato_auto_always_nonempty_when_live() -> None:
+    """potato/auto must always produce a chain when the catalog has models."""
     s = _selector()
     for intent in (
         Intent.CODING_AGENTIC,
@@ -241,13 +241,13 @@ def test_nimmakai_auto_always_nonempty_when_live() -> None:
         Intent.REASONING,
         Intent.LONG_HORIZON,
     ):
-        d = s.resolve("nimmakai/auto", _intent(intent))
+        d = s.resolve("potato/auto", _intent(intent))
         assert d.mode == "auto"
         assert d.intent == intent
         assert len(d.chain) >= 1, f"empty chain for intent={intent}"
 
 
-def test_nimmakai_auto_empty_primary_ladder_still_routes() -> None:
+def test_potato_auto_empty_primary_ladder_still_routes() -> None:
     """When the primary intent ladder is empty, related/emergency pool fills it."""
     settings = Settings(nim_api_keys=["k"])
     reg = ModelRegistry.from_yaml(YAML)
@@ -259,12 +259,12 @@ def test_nimmakai_auto_empty_primary_ladder_still_routes() -> None:
     if hasattr(reg.ladder, "_ladders"):
         reg.ladder._ladders.pop(("chat_fast", "default"), None)
     s = ModelSelector(reg, settings)
-    d = s.resolve("nimmakai/auto", _intent(Intent.CHAT_FAST))
+    d = s.resolve("potato/auto", _intent(Intent.CHAT_FAST))
     assert d.mode == "auto"
     assert d.chain, "auto must heal empty primary ladder"
 
 
-def test_nimmakai_auto_sticky_demoted_for_coding_tools() -> None:
+def test_potato_auto_sticky_demoted_for_coding_tools() -> None:
     """Sticky chat model must not lead high-confidence coding/tools auto requests."""
     s = _selector()
     intent = IntentResult(
@@ -274,7 +274,7 @@ def test_nimmakai_auto_sticky_demoted_for_coding_tools() -> None:
     )
     # Pin a free/chat-ish model that may not lead the coding pool
     d = s.resolve(
-        "nimmakai/auto",
+        "potato/auto",
         intent,
         preferred_model="zen/mimo-v2.5-free",
     )
@@ -288,7 +288,7 @@ def test_nimmakai_auto_sticky_demoted_for_coding_tools() -> None:
 
 
 def test_build_intent_aware_pool_prefers_primary() -> None:
-    from nimmakai.routing.auto_router import build_intent_aware_pool
+    from potato.routing.auto_router import build_intent_aware_pool
 
     s = _selector()
     coding = build_intent_aware_pool(

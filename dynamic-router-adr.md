@@ -1,4 +1,4 @@
-# Nimmakai — Dynamic Intelligence Router: Production ADR
+# Potato — Dynamic Intelligence Router: Production ADR
 
 > **Status**: Draft — Ready for Agentic Execution  
 > **Date**: 2026-07-24  
@@ -83,7 +83,7 @@ IntelFetcher
   ├── ArtificialAnalysis API          (intelligence_index, TPS — optional key)
   ├── HuggingFace OpenEvals parquet   (MMLU, HumanEval normalized — no key)
   └── Arena-AI community JSON         (ELO scores — no key)
-→ IntelBundle dict  (disk-cached .nimmakai/intel_cache.json)
+→ IntelBundle dict  (disk-cached .potato/intel_cache.json)
 
 ModelScoreCache.recompute(live_ids, intel_bundles, health, learning, yaml_cfg)
 → atomic install → LadderService.rebuild()
@@ -170,7 +170,7 @@ Intent affinity for (model M, intent I):
 
 ### NMK-C101: Externalize `ladder.py` Constants
 
-**Files**: `src/nimmakai/config.py`, `src/nimmakai/catalog/ladder.py`
+**Files**: `src/potato/config.py`, `src/potato/catalog/ladder.py`
 
 Add to `config.py`:
 ```python
@@ -190,7 +190,7 @@ In `ladder.py`, pass these into `LadderService.__init__()` and replace all 6 lit
 
 ### NMK-C102: Externalize `health.py` Constants
 
-**Files**: `src/nimmakai/config.py`, `src/nimmakai/catalog/health.py`
+**Files**: `src/potato/config.py`, `src/potato/catalog/health.py`
 
 Add to `config.py`:
 ```python
@@ -212,7 +212,7 @@ Convert `ModelHealthStore` dataclass fields to accept all above. Replace every i
 
 ### NMK-C103: Remove `coding_max_fallbacks`, Add Universal + Per-Intent Budget
 
-**File**: `src/nimmakai/config.py`
+**File**: `src/potato/config.py`
 
 ```python
 # DELETE:
@@ -237,7 +237,7 @@ intent_attempt_budget_seconds: dict = field(default_factory=lambda: {
 
 ### NMK-C104: Fix Request Deadline and Upstream Timeout (Root Cause of 504 Cascade)
 
-**File**: `src/nimmakai/config.py`
+**File**: `src/potato/config.py`
 
 ```python
 # BEFORE:
@@ -266,7 +266,7 @@ Add code comment:
 
 ### NMK-C105: YAML `scoring` Section
 
-**File**: `config/models.yaml` (or `src/nimmakai/data/models.yaml`)
+**File**: `config/models.yaml` (or `src/potato/data/models.yaml`)
 
 Add complete scoring block:
 ```yaml
@@ -352,7 +352,7 @@ scoring:
 
 ### NMK-R201: Fix Per-Attempt Budget (Intent-Aware)
 
-**File**: `src/nimmakai/routing/fallback.py`
+**File**: `src/potato/routing/fallback.py`
 
 **Problem**: `attempt_budget = max(1.0, min(remaining, 45.0))` — 45s hardcoded, ignores intent type.
 
@@ -374,7 +374,7 @@ attempt_budget = max(1.0, min(remaining, _per_attempt))
 
 ### NMK-R202: 504 Immediate Advance — No Backoff Sleep
 
-**File**: `src/nimmakai/routing/fallback.py`
+**File**: `src/potato/routing/fallback.py`
 
 In both `execute_json` and `execute_stream` failure handling blocks:
 
@@ -406,7 +406,7 @@ elif status in {500, 502, 503}:
 
 ### NMK-R203: Fix Deadline Consistency Between `execute_json` and `execute_stream`
 
-**File**: `src/nimmakai/routing/fallback.py`
+**File**: `src/potato/routing/fallback.py`
 
 Extract shared helper so both paths use the same deadline:
 ```python
@@ -421,7 +421,7 @@ Replace `deadline = time.monotonic() + ...` in both execute methods with `self._
 
 ### NMK-R204: Externalize Deadline Guard Seconds
 
-**File**: `src/nimmakai/config.py`
+**File**: `src/potato/config.py`
 
 ```python
 deadline_guard_seconds: float = 3.0
@@ -436,7 +436,7 @@ In `fallback.py` replace `remaining < 3.0` with `remaining < getattr(self.settin
 ## Epic 3 — Intel Fetcher
 
 **Goal**: Async multi-source fetcher for model intelligence data. Internet sources are primary. Disk-cached for restart resilience.  
-**File**: NEW `src/nimmakai/catalog/intel_fetcher.py`
+**File**: NEW `src/potato/catalog/intel_fetcher.py`
 
 ---
 
@@ -494,7 +494,7 @@ async def _fetch_openrouter(client: httpx.AsyncClient) -> dict[str, IntelBundle]
     try:
         resp = await client.get(
             "https://openrouter.ai/api/v1/models",
-            headers={"HTTP-Referer": "https://nimmakai.ai", "X-Title": "Nimmakai Router"},
+            headers={"HTTP-Referer": "https://potato.ai", "X-Title": "Potato Router"},
             timeout=20.0,
         )
         resp.raise_for_status()
@@ -669,7 +669,7 @@ class IntelFetcher:
     """
     Fetches model intelligence from all sources concurrently.
     Failures in any single source are fully isolated.
-    Results disk-cached at .nimmakai/intel_cache.json for restart resilience.
+    Results disk-cached at .potato/intel_cache.json for restart resilience.
     
     Source priority (highest to lowest in merge):
       1. OpenRouter     (capabilities — most reliable, always available)
@@ -680,7 +680,7 @@ class IntelFetcher:
 
     def __init__(
         self, *,
-        cache_path: Path = Path(".nimmakai/intel_cache.json"),
+        cache_path: Path = Path(".potato/intel_cache.json"),
         ttl_hours: float = 6.0,
         aa_api_key: str | None = None,
     ) -> None:
@@ -815,7 +815,7 @@ def _download_bytes_sync(url: str, timeout: float) -> bytes:
 ## Epic 4 — Model Score Cache
 
 **Goal**: Atomic, versionable, periodically-recomputed dict of `ModelScore` objects. No QUALITY_TIERS regex, no INTENT_AFFINITY dict.  
-**File**: NEW `src/nimmakai/catalog/score_cache.py`
+**File**: NEW `src/potato/catalog/score_cache.py`
 
 ---
 
@@ -1114,7 +1114,7 @@ def _glob_match(s: str, pattern: str) -> bool:
 ## Epic 5 — Ladder Hardcode Removal
 
 **Goal**: Delete QUALITY_TIERS, INTENT_AFFINITY, _coding_elite_boost, INTENT_KEYWORDS. Delegate to ModelScoreCache.  
-**File**: `src/nimmakai/catalog/ladder.py`
+**File**: `src/potato/catalog/ladder.py`
 
 ---
 
@@ -1258,7 +1258,7 @@ def _capability_score(self, model_id: str, mid_lower: str, intent: str) -> float
 
 ### NMK-RT601: `optimizer.py` Intent-Weighted Scoring from YAML
 
-**File**: `src/nimmakai/routing/optimizer.py`
+**File**: `src/potato/routing/optimizer.py`
 
 ```python
 # Module-level table, loaded at startup from yaml
@@ -1317,7 +1317,7 @@ def optimize_chain(chain, *, ladder_scores, health, provider_ids, max_n=None,
 
 ### NMK-RT602: Remove 4x `coding_candidates()` Expansions from `selector.py`
 
-**File**: `src/nimmakai/routing/selector.py`
+**File**: `src/potato/routing/selector.py`
 
 **Block 1** (~line 267) — in alias resolution:
 ```python
@@ -1367,7 +1367,7 @@ if is_auto:
 
 ### NMK-RT604: Remove 5x `coding_max_fallbacks` from `fallback.py`
 
-**File**: `src/nimmakai/routing/fallback.py`
+**File**: `src/potato/routing/fallback.py`
 
 Add helper to `FallbackExecutor`:
 ```python
@@ -1390,7 +1390,7 @@ self._max_n_for_intent(decision.intent.value)
 
 ### NMK-RT605: Remove `coding_candidates` from `auto_router.py`
 
-**File**: `src/nimmakai/routing/auto_router.py`
+**File**: `src/potato/routing/auto_router.py`
 
 Delete the entire block (~lines 384–388):
 ```python
@@ -1416,7 +1416,7 @@ Also remove the `expand_coding_pool: bool = True` parameter from `build_intent_a
 
 ### NMK-H701: Add 504 Cooldown to `record_outcome()`
 
-**File**: `src/nimmakai/catalog/health.py`
+**File**: `src/potato/catalog/health.py`
 
 In `record_outcome()`, add 504 case BEFORE the generic `else` error branch:
 ```python
@@ -1438,7 +1438,7 @@ After three consecutive 504s, cooldown is 90s.
 
 ### NMK-H702: Wire Health Config Fields
 
-**File**: `src/nimmakai/catalog/health.py`
+**File**: `src/potato/catalog/health.py`
 
 Add all config fields to `ModelHealthStore.__init__()` or as dataclass fields:
 ```python
@@ -1478,7 +1478,7 @@ health_store = ModelHealthStore(
 
 ### NMK-G801: `PROVIDER_SPEED_PRIOR` → Cold-Start Only
 
-**File**: `src/nimmakai/catalog/presets.py`
+**File**: `src/potato/catalog/presets.py`
 
 Rename to `PROVIDER_SPEED_PRIOR_COLDSTART` with doc comment:
 ```python
@@ -1493,7 +1493,7 @@ Update `speed_prior_for_provider()` to use new name. Update all callers.
 
 ### NMK-G802: Delete `ZEN_FREE_CODING_MODELS`
 
-**File**: `src/nimmakai/catalog/presets.py`
+**File**: `src/potato/catalog/presets.py`
 
 Delete lines 299–314. Models are now discovered via `/v1/models` + scored by `ModelScoreCache`.
 
@@ -1501,7 +1501,7 @@ Delete lines 299–314. Models are now discovered via `/v1/models` + scored by `
 
 ### NMK-G803: Add `intent_candidates()`, Deprecate `coding_candidates()`
 
-**File**: `src/nimmakai/catalog/registry.py`
+**File**: `src/potato/catalog/registry.py`
 
 ```python
 def intent_candidates(self, intent: str) -> list[str]:
@@ -1526,7 +1526,7 @@ Remove `_coding_candidates_cache` and `_coding_candidates_key` attributes — no
 
 ### NMK-G804: Add Intel Refresh Loop to Registry
 
-**File**: `src/nimmakai/catalog/registry.py`
+**File**: `src/potato/catalog/registry.py`
 
 ```python
 def bind_intel_fetcher(self, fetcher, settings) -> None:
@@ -1596,15 +1596,15 @@ async def _do_single_refresh(self) -> None:
 
 ### NMK-G805: Wire in `main.py`
 
-**File**: `src/nimmakai/main.py`
+**File**: `src/potato/main.py`
 
 In `lifespan()` startup:
 ```python
-from nimmakai.catalog.intel_fetcher import IntelFetcher
-from nimmakai.routing.optimizer import load_intent_weights
+from potato.catalog.intel_fetcher import IntelFetcher
+from potato.routing.optimizer import load_intent_weights
 
 intel_fetcher = IntelFetcher(
-    cache_path=Path(getattr(settings, "intel_cache_path", ".nimmakai/intel_cache.json")),
+    cache_path=Path(getattr(settings, "intel_cache_path", ".potato/intel_cache.json")),
     ttl_hours=float(getattr(settings, "intel_fetch_ttl_hours", 6.0)),
     aa_api_key=(
         getattr(settings, "artificial_analysis_api_key", "")
@@ -1635,7 +1635,7 @@ with suppress(asyncio.CancelledError):
 
 ### NMK-P901: `/admin/intel` Status Endpoint
 
-**File**: `src/nimmakai/routes/admin.py`
+**File**: `src/potato/routes/admin.py`
 
 ```python
 @router.get("/admin/intel")
@@ -1706,7 +1706,7 @@ async def get_model_score(model_id: str, request: Request) -> JSONResponse:
 # Dynamic Intelligence Scoring
 ARTIFICIAL_ANALYSIS_API_KEY=        # Optional — enables AA benchmark data source
 INTEL_FETCH_TTL_HOURS=6
-INTEL_CACHE_PATH=.nimmakai/intel_cache.json
+INTEL_CACHE_PATH=.potato/intel_cache.json
 SCORE_RECOMPUTE_INTERVAL_SECONDS=300
 
 # Fixed timeouts (504 fix)
@@ -1873,7 +1873,7 @@ PHASE 6 — Hardening (do last):
 | No `coding_max_fallbacks` | `grep -rn "coding_max_fallbacks" src/` | Zero hits |
 | No `coding_candidates()` calls | `grep -rn "coding_candidates()" routing/ auto_router.py` | Zero hits |
 | YAML weights respected | Set `chat_fast.speed=0.80`; restart | Chat routes faster models |
-| Cache resilience | Delete `.nimmakai/intel_cache.json`; restart | Boots with param estimates |
+| Cache resilience | Delete `.potato/intel_cache.json`; restart | Boots with param estimates |
 | All tests pass | `python -m pytest tests/ -x -q --tb=short` | 0 failures |
 | Admin endpoint works | `GET /admin/intel` | Returns `version`, `top_by_intent` |
 | Manual refresh works | `POST /admin/intel/refresh` | Returns `refresh_queued` |

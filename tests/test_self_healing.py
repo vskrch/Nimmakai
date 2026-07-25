@@ -3,10 +3,10 @@
 import asyncio
 import time
 import pytest
-from nimmakai.catalog.health import ModelHealthStore
-from nimmakai.catalog.ladder import LadderService
-from nimmakai.catalog.learning import LearningStore
-from nimmakai.safety.circuit_breaker import ProviderCircuitBreaker, BreakerState
+from potato.catalog.health import ModelHealthStore
+from potato.catalog.ladder import LadderService
+from potato.catalog.learning import LearningStore
+from potato.safety.circuit_breaker import ProviderCircuitBreaker, BreakerState
 
 
 def test_circuit_breaker_opens_after_failures():
@@ -82,9 +82,9 @@ def test_learning_persistence():
 
 def test_emergency_coding_chain_returns_models():
     """Emergency chain should return live models when ladder is empty."""
-    from nimmakai.catalog.schema import catalog_from_dict
-    from nimmakai.catalog.registry import ModelRegistry
-    from nimmakai.resilience import emergency_coding_chain
+    from potato.catalog.schema import catalog_from_dict
+    from potato.catalog.registry import ModelRegistry
+    from potato.resilience import emergency_coding_chain
     cat = catalog_from_dict({
         "version": "1", "updated": "2026-01-01",
         "defaults": {"dynamic_families": True, "auto_mode_model_tokens": []},
