@@ -97,7 +97,23 @@ Nimmakai exposes three primary protocol surfaces:
 
 ## 📦 Production Deployment Guide (DigitalOcean)
 
-### Option A: DigitalOcean Droplet + Docker + Caddy (Recommended)
+### ⚡ 1-Line Automatic Deployment
+
+Run this single command on any fresh Ubuntu / DigitalOcean Droplet to install Docker, setup secrets, launch containers, configure UFW firewall rules, and verify health automatically:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vskrch/Nimmakai/main/deploy.sh | sudo bash
+```
+
+Or pass your domain for automatic SSL HTTPS configuration:
+
+```bash
+DOMAIN_NAME="api.yourdomain.com" curl -fsSL https://raw.githubusercontent.com/vskrch/Nimmakai/main/deploy.sh | sudo bash
+```
+
+---
+
+### Option A: Manual Docker + Caddy Deployment
 
 Run Nimmakai on a DigitalOcean Droplet ($6–$12/mo) with persistent SQLite storage and automatic Let's Encrypt HTTPS using Caddy.
 
