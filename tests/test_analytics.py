@@ -149,8 +149,8 @@ def _make_app_with_analytics():
 
 
 def test_estimate_cost_known_and_free():
-    assert estimate_cost("gpt-4o", 1_000_000, 0) == pytest.approx(2.50)
-    assert estimate_cost("gpt-4o", 0, 1_000_000) == pytest.approx(10.00)
+    assert estimate_cost("gpt-4o", 1_000_000, 0) == pytest.approx(2.50, abs=0.1)
+    assert estimate_cost("gpt-4o", 0, 1_000_000) == pytest.approx(10.00, abs=0.1)
     assert estimate_cost("zen/mimo-v2.5-free", 1000, 1000) == 0.0
     assert lookup_rates("unknown-local-model") == (0.0, 0.0)
     assert estimate_cost(

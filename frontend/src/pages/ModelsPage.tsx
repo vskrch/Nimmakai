@@ -1,7 +1,17 @@
-import { useState, useMemo } from 'react'
+import React, { useState, useMemo } from 'react'
 import { Card, CardBody, Badge, Button, Input, Spinner } from '../components/ui'
 import { useCatalog } from '../hooks/useApi'
 import { ap, errMsg } from '../lib/api'
+import {
+  Cpu,
+  Search,
+  RefreshCw,
+  Sliders,
+  CheckCircle2,
+  XCircle,
+  Filter,
+  Layers
+} from 'lucide-react'
 
 export default function ModelsPage() {
   const { data: catalog, reload: reloadCatalog } = useCatalog()
@@ -27,7 +37,6 @@ export default function ModelsPage() {
         enabled: !disabledSet.has(id),
       }
     })
-    // Fallback for older servers without live_ids in /catalog
     if (fromLive.length === 0 && catalog?.dynamic_chains) {
       const seen = new Set<string>()
       const out: { id: string; provider: string; name: string; enabled: boolean }[] = []
@@ -73,7 +82,7 @@ export default function ModelsPage() {
     const r = await ap('/admin/catalog/refresh', {})
     setBusy(null)
     if (r && (r as Record<string, unknown>).ok) {
-      setMsg({ text: 'Catalog refreshed', ok: true })
+      setMsg({ text: 'Catalog refreshed successfully', ok: true })
       reloadCatalog()
     } else {
       setMsg({ text: errMsg(r, 'Refresh failed'), ok: false })
@@ -86,12 +95,12 @@ export default function ModelsPage() {
     setBusy(null)
     if (r && (r as Record<string, unknown>).ok) {
       setMsg({
-        text: enabled ? `Enabled ${modelId}` : `Disabled ${modelId} (removed from pool)`,
+        text: enabled ? `Enabled ${modelId}` : `Disabled ${modelId} (removed from active pool)`,
         ok: true,
       })
       reloadCatalog()
     } else {
-      setMsg({ text: errMsg(r, 'Failed to update model'), ok: false })
+      setMsg({ text: errMsg(r, 'Failed to update model status'), ok: false })
     }
   }
 
@@ -105,9 +114,7 @@ export default function ModelsPage() {
     setBusy(null)
     if (r && (r as Record<string, unknown>).ok) {
       setMsg({
-        text: enableAll
-          ? `Enabled all ${providerId} models`
-          : `Disabled all ${providerId} models`,
+        text: enableAll ? `Enabled all ${providerId} models` : `Disabled all ${providerId} models`,
         ok: true,
       })
       reloadCatalog()
@@ -119,7 +126,7 @@ export default function ModelsPage() {
   async function handleQualityOverride(modelId: string, value: string) {
     const v = parseFloat(value)
     if (isNaN(v) || v < 0 || v > 100) {
-      setMsg({ text: 'Quality must be 0-100', ok: false })
+      setMsg({ text: 'Quality rating must be between 0 and 100', ok: false })
       return
     }
     const parts = modelId.split('/')
@@ -129,77 +136,85 @@ export default function ModelsPage() {
       quality_override: v,
     })
     if (r && (r as Record<string, unknown>).ok) {
-      setMsg({ text: `Quality override set for ${modelId}`, ok: true })
+      setMsg({ text: `Quality score override updated for ${modelId}`, ok: true })
     } else {
-      setMsg({ text: errMsg(r, 'Failed'), ok: false })
+      setMsg({ text: errMsg(r, 'Failed to save quality override'), ok: false })
     }
   }
 
   if (!catalog) return <Spinner />
 
   return (
-    <div className="animate-[fadeIn_0.3s_ease]">
-      <div className="mb-4">
-        <h2 className="text-xl font-semibold">Model Pool</h2>
-        <p className="text-zinc-400 text-[13px] mt-1 max-w-[640px]">
-          Enable or disable models per provider. Disabled models stay discovered but leave
-          routing and <code className="text-zinc-300">/v1/models</code>.
-        </p>
-      </div>
-
-      <div className="flex gap-3 mb-4 flex-wrap items-center">
-        <Input
-          placeholder="Search models..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="max-w-[300px]"
-        />
-        <Button onClick={handleRefresh} disabled={busy === 'refresh'}>
-          {busy === 'refresh' ? 'Refreshing…' : 'Refresh Catalog'}
+    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+      {/* Header controls */}
+      <div className="flex justify-between items-start gap-4 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2">
+            <Cpu className="w-5 h-5 text-violet-400" />
+            <h2 className="text-lg font-bold text-white tracking-tight">Model Pool & Capability Catalog</h2>
+          </div>
+          <p className="text-zinc-400 text-xs mt-1 max-w-[620px]">
+            Manage active models across all connected providers. Disabled models remain discovered in system metadata but are excluded from active fallback chains.
+          </p>
+        </div>
+        <Button variant="secondary" onClick={handleRefresh} disabled={busy === 'refresh'}>
+          <RefreshCw className={`w-3.5 h-3.5 ${busy === 'refresh' ? 'animate-spin' : ''}`} />
+          <span>{busy === 'refresh' ? 'Probing Endpoints…' : 'Refresh Catalog'}</span>
         </Button>
-        <button
-          type="button"
-          onClick={() => setShowDisabledOnly(v => !v)}
-          className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
-            showDisabledOnly
-              ? 'bg-amber-500/10 text-amber-200 border-amber-500/30'
-              : 'bg-white/[0.03] text-zinc-400 border-white/[0.08]'
-          }`}
-        >
-          Disabled only
-        </button>
-        <span className="text-xs text-zinc-400">
-          {filtered.length} shown · <strong className="text-white">{activeCount}</strong> in pool ·{' '}
-          <strong className="text-white">{disabledCount}</strong> disabled
-        </span>
       </div>
 
       {msg && (
-        <div
-          className={`mb-4 p-3 rounded-lg text-[13px] ${
-            msg.ok
-              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-              : 'bg-red-500/10 text-red-400 border border-red-500/20'
-          }`}
-        >
-          {msg.text}
-          <button className="ml-3 text-xs opacity-60" onClick={() => setMsg(null)}>
-            dismiss
-          </button>
+        <div className={`p-4 rounded-xl text-xs flex items-center justify-between font-medium ${
+          msg.ok ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
+        }`}>
+          <span>{msg.text}</span>
+          <button className="text-zinc-400 hover:text-white" onClick={() => setMsg(null)}>Dismiss</button>
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 mb-4">
+      {/* Filter toolbar */}
+      <div className="flex gap-3 flex-wrap items-center justify-between">
+        <div className="flex items-center gap-3 flex-wrap flex-1">
+          <div className="relative min-w-[240px]">
+            <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Input
+              placeholder="Search model name or ID..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowDisabledOnly(v => !v)}
+            className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+              showDisabledOnly
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                : 'bg-zinc-900 text-zinc-400 border-white/[0.08] hover:text-white'
+            }`}
+          >
+            Disabled Only
+          </button>
+        </div>
+        <div className="text-xs text-zinc-400 font-mono">
+          <span>{filtered.length} visible · </span>
+          <strong className="text-emerald-400">{activeCount} active</strong> ·{' '}
+          <strong className="text-rose-400">{disabledCount} disabled</strong>
+        </div>
+      </div>
+
+      {/* Provider Filter Chips */}
+      <div className="flex flex-wrap gap-2">
         <button
           type="button"
           onClick={() => setFilterProv(null)}
-          className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border cursor-pointer ${
             !filterProv
-              ? 'bg-violet-500/10 text-violet-300 border-violet-500/20'
-              : 'bg-white/[0.03] text-zinc-400 border-white/[0.08] hover:bg-white/[0.05]'
+              ? 'bg-violet-500/20 text-violet-200 border-violet-500/30'
+              : 'bg-zinc-900 text-zinc-400 border-white/[0.08] hover:bg-white/[0.04]'
           }`}
         >
-          All ({allModels.length})
+          All Providers ({allModels.length})
         </button>
         {providers.map(p => {
           const n = allModels.filter(m => m.provider === p).length
@@ -209,10 +224,10 @@ export default function ModelsPage() {
               key={p}
               type="button"
               onClick={() => setFilterProv(filterProv === p ? null : p)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all border cursor-pointer ${
                 filterProv === p
-                  ? 'bg-violet-500/10 text-violet-300 border-violet-500/20'
-                  : 'bg-white/[0.03] text-zinc-400 border-white/[0.08] hover:bg-white/[0.05]'
+                  ? 'bg-violet-500/20 text-violet-200 border-violet-500/30'
+                  : 'bg-zinc-900 text-zinc-400 border-white/[0.08] hover:bg-white/[0.04]'
               }`}
             >
               {p} ({on}/{n})
@@ -222,112 +237,98 @@ export default function ModelsPage() {
       </div>
 
       {filterProv && (
-        <div className="flex gap-2 mb-4">
-          <Button
-            size="sm"
-            onClick={() => bulkProvider(filterProv, true)}
-            disabled={busy === `bulk:${filterProv}`}
-          >
-            Enable all {filterProv}
-          </Button>
-          <Button
-            size="sm"
-            variant="danger"
-            onClick={() => bulkProvider(filterProv, false)}
-            disabled={busy === `bulk:${filterProv}`}
-          >
-            Disable all {filterProv}
-          </Button>
+        <div className="flex gap-2 p-3 rounded-xl bg-zinc-950/60 border border-white/[0.06] items-center justify-between">
+          <span className="text-xs text-zinc-300 font-medium">Bulk operations for provider: <strong className="text-violet-400">{filterProv}</strong></span>
+          <div className="flex gap-2">
+            <Button size="xs" variant="secondary" onClick={() => bulkProvider(filterProv, true)} disabled={busy === `bulk:${filterProv}`}>
+              Enable All {filterProv}
+            </Button>
+            <Button size="xs" variant="danger" onClick={() => bulkProvider(filterProv, false)} disabled={busy === `bulk:${filterProv}`}>
+              Disable All {filterProv}
+            </Button>
+          </div>
         </div>
       )}
 
-      <Card className="p-0">
-        <table className="w-full">
-          <thead>
-            <tr className="text-left border-b border-white/[0.08]">
-              <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px] w-[100px]">
-                In pool
-              </th>
-              <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">
-                Model
-              </th>
-              <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">
-                Provider
-              </th>
-              <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px] w-[120px]">
-                Quality
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={4} className="px-6 py-8 text-center text-zinc-400">
-                  No models found. Add providers with keys, then Refresh Catalog.
-                </td>
-              </tr>
-            ) : (
-              filtered.map(m => (
-                <tr
-                  key={m.id}
-                  className={`border-b border-white/[0.08] last:border-0 hover:bg-white/[0.01] ${
-                    !m.enabled ? 'opacity-60' : ''
-                  }`}
-                >
-                  <td className="px-6 py-3.5">
-                    <button
-                      type="button"
-                      role="switch"
-                      aria-checked={m.enabled}
-                      disabled={busy === m.id}
-                      onClick={() => toggleModel(m.id, !m.enabled)}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border transition-colors ${
-                        m.enabled
-                          ? 'bg-emerald-500/80 border-emerald-400/40'
-                          : 'bg-zinc-700 border-white/10'
-                      } ${busy === m.id ? 'opacity-50' : ''}`}
-                      title={m.enabled ? 'Disable (remove from pool)' : 'Enable (add to pool)'}
-                    >
-                      <span
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
-                          m.enabled ? 'translate-x-5' : 'translate-x-0.5'
-                        } mt-0.5`}
-                      />
-                    </button>
-                  </td>
-                  <td className="px-6 py-3.5 text-[13px]">
-                    <strong>{m.name}</strong>
-                    <div className="text-[11px] text-zinc-500">{m.id}</div>
-                  </td>
-                  <td className="px-6 py-3.5">
-                    <Badge variant="accent">{m.provider}</Badge>
-                    {!m.enabled && (
-                      <Badge variant="default">Disabled</Badge>
-                    )}
-                  </td>
-                  <td className="px-6 py-3.5">
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      placeholder="—"
-                      className="bg-black/20 border border-white/[0.08] text-white px-2 py-1 rounded text-[11px] w-[60px] focus:outline-none focus:border-violet-500/50"
-                      onBlur={e => {
-                        if (e.target.value) handleQualityOverride(m.id, e.target.value)
-                      }}
-                    />
-                    <span className="text-[11px] text-zinc-500 ml-1">0-100</span>
-                  </td>
+      {/* Model Table */}
+      <Card>
+        <CardBody className="p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
+                  <th className="px-6 py-3.5 font-semibold w-[90px]">Pool Toggle</th>
+                  <th className="px-6 py-3.5 font-semibold">Model Name & ID</th>
+                  <th className="px-6 py-3.5 font-semibold">Provider</th>
+                  <th className="px-6 py-3.5 font-semibold w-[160px]">Quality Override (0-100)</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody className="divide-y divide-white/[0.06]">
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="px-6 py-12 text-center text-zinc-500 text-xs">
+                      No models found matching query filter. Add upstream provider keys or click Refresh Catalog.
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map(m => (
+                    <tr
+                      key={m.id}
+                      className={`hover:bg-white/[0.02] transition-colors ${!m.enabled ? 'opacity-50 bg-rose-500/[0.02]' : ''}`}
+                    >
+                      <td className="px-6 py-4">
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={m.enabled}
+                          disabled={busy === m.id}
+                          onClick={() => toggleModel(m.id, !m.enabled)}
+                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out border ${
+                            m.enabled
+                              ? 'bg-emerald-500 border-emerald-400'
+                              : 'bg-zinc-800 border-zinc-700'
+                          } ${busy === m.id ? 'opacity-50' : ''}`}
+                        >
+                          <span
+                            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${
+                              m.enabled ? 'translate-x-4' : 'translate-x-0.5'
+                            } mt-0.5`}
+                          />
+                        </button>
+                      </td>
+                      <td className="px-6 py-4">
+                        <strong className="text-white text-xs font-semibold">{m.name}</strong>
+                        <div className="text-[11px] text-zinc-500 font-mono mt-0.5">{m.id}</div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <Badge variant="accent">{m.provider}</Badge>
+                        {!m.enabled && (
+                          <Badge variant="err" className="ml-2">Disabled</Badge>
+                        )}
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            min={0}
+                            max={100}
+                            placeholder="Score"
+                            className="bg-zinc-950 border border-white/[0.1] text-white px-2.5 py-1.5 rounded-lg text-xs w-[75px] font-mono focus:outline-none focus:border-violet-500"
+                            onBlur={e => {
+                              if (e.target.value) handleQualityOverride(m.id, e.target.value)
+                            }}
+                          />
+                          <span className="text-[10px] text-zinc-500 font-mono">0-100</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </CardBody>
       </Card>
-
-      <CardBody className="mt-4 text-xs text-zinc-500">
-        Tip: filter by a provider chip, then use Enable/Disable all for that provider.
-      </CardBody>
     </div>
   )
 }

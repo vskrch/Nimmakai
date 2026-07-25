@@ -184,3 +184,11 @@ export interface SSEHealthEvent {
   provider_health: Record<string, { enabled: boolean; runtime: boolean; available_keys: number }>
   model_health: Record<string, { ok: boolean; tps: number; latency: number; error_rate: number }>
 }
+
+export interface ExtensibilityResponse {
+  ollama_cloud: boolean
+  opencode_go: boolean
+  prompt_understanding: boolean
+  custom_catalog: boolean
+}
+

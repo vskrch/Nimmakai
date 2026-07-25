@@ -1,15 +1,26 @@
+import React, { useState } from 'react'
 import { Card, CardHeader, CardBody, Badge, Button, Spinner } from '../components/ui'
 import { useRankings, usePreferences } from '../hooks/useApi'
 import { ap, ad, errMsg } from '../lib/api'
-import { useState } from 'react'
+import {
+  GitFork,
+  RefreshCw,
+  Star,
+  Trash2,
+  Layers,
+  Cpu,
+  Zap,
+  CheckCircle2,
+  Activity
+} from 'lucide-react'
 
 const INTENTS: Record<string, { label: string; desc: string }> = {
-  coding_agentic: { label: 'Coding / Agentic', desc: 'Tools, multi-file, agents' },
-  chat_fast: { label: 'Chat / Q&A', desc: 'Conversation, summaries' },
-  reasoning: { label: 'Reasoning', desc: 'Math, logic, deep steps' },
-  long_horizon: { label: 'Long Context', desc: 'Large context, planning' },
-  vision: { label: 'Vision', desc: 'Image + text' },
-  embeddings: { label: 'Embeddings', desc: 'Embedding models only' },
+  coding_agentic: { label: 'Coding & Agentic Operations', desc: 'Code syntax, multi-file agents, tool usage' },
+  chat_fast: { label: 'Interactive Chat & Q&A', desc: 'Conversational turns, summaries, general queries' },
+  reasoning: { label: 'Deep Reasoning & Math', desc: 'Complex logic proofs, multi-step chain-of-thought' },
+  long_horizon: { label: 'Long Context Processing', desc: 'Large document synthesis, project planning' },
+  vision: { label: 'Multimodal Vision', desc: 'Image comprehension, OCR, multi-modal reasoning' },
+  embeddings: { label: 'Vector Embeddings', desc: 'High-dimensional semantic embeddings' },
 }
 
 export default function RoutingPage() {
@@ -20,7 +31,7 @@ export default function RoutingPage() {
   async function handleRefreshRankings() {
     const r = await ap('/admin/rankings/refresh', {})
     if (r && (r as Record<string, unknown>).ok) {
-      setMsg('Rankings recomputed')
+      setMsg('Routing engine recomputed model ladder rankings')
       reloadRankings()
     }
   }
@@ -33,95 +44,130 @@ export default function RoutingPage() {
   if (!rankings) return <Spinner />
 
   const ladders = rankings.ladders || {}
-  const ladderKeys = Object.keys(ladders).filter(k => !k.includes('::'))
 
   return (
-    <div className="animate-[fadeIn_0.3s_ease]">
+    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+      {/* Header controls */}
+      <div className="flex justify-between items-start gap-4 flex-wrap">
+        <div>
+          <div className="flex items-center gap-2">
+            <GitFork className="w-5 h-5 text-violet-400" />
+            <h2 className="text-lg font-bold text-white tracking-tight">Intent-Based Dynamic Routing Engine</h2>
+          </div>
+          <p className="text-zinc-400 text-xs mt-1 max-w-[620px]">
+            Nimmakai dynamically ranks available models for each task intent based on benchmark capability, measured tokens/sec, and real-time provider health.
+          </p>
+        </div>
+        <Button variant="secondary" onClick={handleRefreshRankings}>
+          <RefreshCw className="w-3.5 h-3.5 text-violet-400" />
+          <span>Recompute Rankings</span>
+        </Button>
+      </div>
+
       {msg && (
-        <div className="mb-4 p-3 rounded-lg text-[13px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-          {msg}
-          <button className="ml-3 text-xs opacity-60" onClick={() => setMsg(null)}>dismiss</button>
+        <div className="p-4 rounded-xl text-xs bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 flex justify-between items-center font-medium">
+          <span>{msg}</span>
+          <button className="text-zinc-400 hover:text-white" onClick={() => setMsg(null)}>Dismiss</button>
         </div>
       )}
 
-      <div className="mb-8">
-        <div className="flex items-center gap-3 mb-2">
-          <h2 className="text-xl font-semibold">Intent Routing</h2>
-          <Button size="sm" onClick={handleRefreshRankings}>Recompute Rankings</Button>
-        </div>
-        <p className="text-zinc-400 text-[13px]">Override automatic routing by pinning models to intents.</p>
+      {/* Intent Cards */}
+      <div className="space-y-4">
+        {Object.entries(INTENTS).map(([key, meta]) => {
+          const pref = prefs.find(p => p.intent === key)
+          const ladder = ladders[key]
+          const head = ladder?.ladder_head || []
+          const scores = ladder?.scores_head || {}
 
-        <div className="mt-6 space-y-3">
-          {Object.entries(INTENTS).map(([key, meta]) => {
-            const pref = prefs.find(p => p.intent === key)
-            const ladder = ladders[key]
-            const head = ladder?.ladder_head || []
-            const scores = ladder?.scores_head || {}
-
-            return (
-              <Card key={key}>
-                <CardBody className="flex items-center gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <strong className="text-sm">{meta.label}</strong>
-                      <Badge variant="accent">{ladder?.ladder_len ?? 0} models</Badge>
-                      {pref && <Badge variant="ok">Custom pinned</Badge>}
-                    </div>
-                    <p className="text-xs text-zinc-400 mb-2">{meta.desc}</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {head.slice(0, 5).map((m, i) => (
-                        <span key={m} className={`inline-flex items-center px-2 py-1 rounded-full text-[11px] font-medium gap-1 ${i === 0 ? 'bg-violet-500/10 text-violet-300 border border-violet-500/20' : 'bg-white/[0.03] text-zinc-300 border border-white/[0.08]'}`}>
-                          {i === 0 && '★ '}{m.split('/').pop()}
-                          {scores[m] != null && <span className="text-zinc-500 ml-0.5">{Number(scores[m]).toFixed(1)}</span>}
-                        </span>
-                      ))}
-                      {(ladder?.ladder_len ?? 0) > 5 && (
-                        <span className="text-[11px] text-zinc-500 self-center">+{(ladder?.ladder_len ?? 0) - 5} more</span>
-                      )}
-                    </div>
+          return (
+            <Card key={key}>
+              <CardBody className="flex items-center justify-between gap-6 flex-wrap">
+                <div className="flex-1 min-w-[280px]">
+                  <div className="flex items-center gap-2.5 mb-1">
+                    <strong className="text-sm font-bold text-white">{meta.label}</strong>
+                    <Badge variant="accent" className="font-mono">{ladder?.ladder_len ?? 0} models ranked</Badge>
+                    {pref && <Badge variant="ok">Custom Pinned</Badge>}
                   </div>
-                  <div className="flex gap-2">
-                    {pref && (
-                      <Button size="sm" variant="danger" onClick={() => handleClearPref(key)}>Clear Override</Button>
+                  <p className="text-xs text-zinc-400 mb-3">{meta.desc}</p>
+                  
+                  {/* Model Ladder Chips */}
+                  <div className="flex flex-wrap gap-2">
+                    {head.slice(0, 5).map((m, i) => (
+                      <span
+                        key={m}
+                        className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-mono font-medium gap-1.5 transition-all ${
+                          i === 0
+                            ? 'bg-violet-500/20 text-violet-200 border border-violet-500/30 shadow-[0_0_12px_rgba(139,92,246,0.2)]'
+                            : 'bg-zinc-950 text-zinc-300 border border-white/[0.08]'
+                        }`}
+                      >
+                        {i === 0 && <Star className="w-3 h-3 text-amber-400 fill-amber-400" />}
+                        <span>{m.split('/').pop()}</span>
+                        {scores[m] != null && <span className="text-zinc-500 font-normal">({Number(scores[m]).toFixed(1)})</span>}
+                      </span>
+                    ))}
+                    {(ladder?.ladder_len ?? 0) > 5 && (
+                      <span className="text-xs text-zinc-500 font-mono self-center">
+                        +{(ladder?.ladder_len ?? 0) - 5} remaining
+                      </span>
                     )}
                   </div>
-                </CardBody>
-              </Card>
-            )
-          })}
-        </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {pref && (
+                    <Button size="sm" variant="danger" onClick={() => handleClearPref(key)}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Clear Custom Override</span>
+                    </Button>
+                  )}
+                </div>
+              </CardBody>
+            </Card>
+          )
+        })}
       </div>
 
+      {/* Coding Score Breakdown Table */}
       {rankings.score_breakdown && rankings.score_breakdown.length > 0 && (
         <Card>
           <CardHeader>
-            <h3 className="text-sm font-semibold">Coding Chain Score Breakdown</h3>
+            <div className="flex items-center gap-2">
+              <Zap className="w-4 h-4 text-violet-400" />
+              <h3 className="text-sm font-semibold text-white">Coding Agentic Score Matrix Breakdown</h3>
+            </div>
           </CardHeader>
           <CardBody className="p-0">
-            <table className="w-full">
-              <thead>
-                <tr className="text-left border-b border-white/[0.08]">
-                  <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Model</th>
-                  <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Score</th>
-                  <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Intelligence</th>
-                  <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Speed</th>
-                  <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Health</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rankings.score_breakdown.map(s => (
-                  <tr key={s.model} className="border-b border-white/[0.08] last:border-0 hover:bg-white/[0.01]">
-                    <td className="px-6 py-3 text-[13px]">{s.model.split('/').pop()}</td>
-                    <td className="px-6 py-3 text-[13px] font-semibold">{s.score.toFixed(4)}</td>
-                    <td className="px-6 py-3 text-[13px] text-zinc-400">{s.intelligence.toFixed(3)}</td>
-                    <td className="px-6 py-3 text-[13px] text-zinc-400">{s.speed.toFixed(3)}</td>
-                    <td className="px-6 py-3">
-                      {s.unhealthy ? <Badge variant="err">Unhealthy</Badge> : <span className="text-[13px] text-zinc-400">{s.health.toFixed(3)}</span>}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
+                    <th className="px-6 py-3.5 font-semibold">Model Name</th>
+                    <th className="px-6 py-3.5 font-semibold">Composite Score</th>
+                    <th className="px-6 py-3.5 font-semibold">Intelligence Signal</th>
+                    <th className="px-6 py-3.5 font-semibold">Speed Signal</th>
+                    <th className="px-6 py-3.5 font-semibold">Health Score</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-white/[0.06]">
+                  {rankings.score_breakdown.map(s => (
+                    <tr key={s.model} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="px-6 py-4 font-mono font-semibold text-white">{s.model.split('/').pop()}</td>
+                      <td className="px-6 py-4 font-mono text-violet-300 font-bold">{s.score.toFixed(4)}</td>
+                      <td className="px-6 py-4 font-mono text-zinc-300">{s.intelligence.toFixed(3)}</td>
+                      <td className="px-6 py-4 font-mono text-zinc-300">{s.speed.toFixed(3)}</td>
+                      <td className="px-6 py-4">
+                        {s.unhealthy ? (
+                          <Badge variant="err">Unhealthy</Badge>
+                        ) : (
+                          <span className="font-mono text-emerald-400 font-semibold">{s.health.toFixed(3)}</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </CardBody>
         </Card>
       )}

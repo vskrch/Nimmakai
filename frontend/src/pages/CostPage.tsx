@@ -1,10 +1,20 @@
-import { useState } from 'react'
-import { Card, CardBody, CardHeader, Button, Input, Spinner, StatBox } from '../components/ui'
+import React, { useState } from 'react'
+import { Card, CardBody, CardHeader, Button, Input, Spinner, StatBox, Badge } from '../components/ui'
 import { HorizontalBars } from '../components/charts'
 import { useBreakdown, useCostRates, useAnalyticsSummary } from '../hooks/useAnalytics'
 import { RangePicker } from '../components/RangePicker'
 import { fmtUsd, fmtTokens } from '../lib/format'
 import { api, errMsg, okBody } from '../lib/api'
+import {
+  Coins,
+  Save,
+  Download,
+  Key,
+  Cpu,
+  DollarSign,
+  CheckCircle2,
+  AlertCircle
+} from 'lucide-react'
 
 export default function CostPage() {
   const [range, setRange] = useState('24h')
@@ -28,11 +38,11 @@ export default function CostPage() {
     })
     setSaving(false)
     if (okBody(r)) {
-      setMsg({ text: 'Rate saved', ok: true })
+      setMsg({ text: 'Rate override saved', ok: true })
       reloadRates()
       reloadSummary()
     } else {
-      setMsg({ text: errMsg(r, 'Failed to save rate'), ok: false })
+      setMsg({ text: errMsg(r, 'Failed to save rate override'), ok: false })
     }
   }
 
@@ -45,11 +55,11 @@ export default function CostPage() {
     setImporting(false)
     if (okBody(r)) {
       const d = r as Record<string, unknown>
-      setMsg({ text: `Imported ${d.imported} rates (${d.skipped} skipped)`, ok: true })
+      setMsg({ text: `Imported ${d.imported} cost rates (${d.skipped} skipped)`, ok: true })
       reloadRates()
       reloadSummary()
     } else {
-      setMsg({ text: errMsg(r, 'Import failed'), ok: false })
+      setMsg({ text: errMsg(r, 'Cost rate import failed'), ok: false })
     }
   }
 
@@ -58,43 +68,83 @@ export default function CostPage() {
     .sort((a, b) => b._cost - a._cost)
 
   return (
-    <div className="animate-[fadeIn_0.3s_ease]">
-      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
-        <h2 className="text-xl font-semibold">Cost Center</h2>
+    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+      {/* Header controls */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Coins className="w-5 h-5 text-violet-400" />
+          <h2 className="text-lg font-bold text-white tracking-tight">Financial & Token Cost Center</h2>
+        </div>
         <RangePicker value={range} onChange={setRange} />
       </div>
 
       {msg && (
-        <div className={`mb-4 p-3 rounded-lg text-[13px] ${msg.ok ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
-          {msg.text}
-          <button className="ml-3 text-xs opacity-60" onClick={() => setMsg(null)}>dismiss</button>
+        <div className={`p-4 rounded-xl text-xs flex items-center justify-between font-medium ${
+          msg.ok ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
+        }`}>
+          <div className="flex items-center gap-2">
+            {msg.ok ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertCircle className="w-4 h-4 text-rose-400" />}
+            <span>{msg.text}</span>
+          </div>
+          <button className="text-zinc-400 hover:text-white" onClick={() => setMsg(null)}>Dismiss</button>
         </div>
       )}
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(160px,1fr))] gap-4 mb-8">
-        <StatBox label="Estimated spend" value={fmtUsd(summary?.estimated_cost_usd)} sub={range} />
-        <StatBox label="Tokens" value={fmtTokens(summary?.total_tokens)} sub={`${fmtTokens(summary?.total_prompt_tokens)} in`} />
-        <StatBox label="Requests" value={(summary?.total_requests ?? 0).toLocaleString()} />
+      {/* Primary Financial Overview Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <StatBox
+          label="Estimated Expenditure"
+          value={fmtUsd(summary?.estimated_cost_usd)}
+          sub={`Cost window: ${range}`}
+          icon={Coins}
+        />
+        <StatBox
+          label="Token Volume"
+          value={fmtTokens(summary?.total_tokens)}
+          sub={`${fmtTokens(summary?.total_prompt_tokens)} prompt tokens`}
+          icon={Cpu}
+        />
+        <StatBox
+          label="Total API Requests"
+          value={(summary?.total_requests ?? 0).toLocaleString()}
+          sub="Requests processed"
+          icon={DollarSign}
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
-          <CardHeader><h3 className="text-sm font-semibold">Cost by Model</h3></CardHeader>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-violet-400" />
+              <h3 className="text-sm font-semibold text-white">Expenditure by Model</h3>
+            </div>
+          </CardHeader>
           <CardBody>
-            {!costItems.length ? <div className="text-sm text-zinc-500">No spend data</div> : (
-              <div className="flex flex-col gap-2">
+            {!costItems.length ? (
+              <div className="text-xs text-zinc-500 py-8 text-center">No spend data in selected range</div>
+            ) : (
+              <div className="space-y-3 text-xs">
                 {costItems.slice(0, 12).map((it, i) => (
-                  <div key={it.key + i} className="flex justify-between text-[13px]">
-                    <span className="text-zinc-400 truncate max-w-[60%]">{it.key.split('/').pop()}</span>
-                    <span className="tabular-nums">{fmtUsd(it._cost)}</span>
+                  <div key={it.key + i} className="flex justify-between items-center p-3 rounded-xl bg-zinc-950/60 border border-white/[0.06]">
+                    <span className="text-zinc-300 font-mono truncate max-w-[220px]" title={it.key}>
+                      {it.key.split('/').pop()}
+                    </span>
+                    <span className="font-mono text-violet-300 font-semibold">{fmtUsd(it._cost)}</span>
                   </div>
                 ))}
               </div>
             )}
           </CardBody>
         </Card>
+
         <Card>
-          <CardHeader><h3 className="text-sm font-semibold">Usage by API Key</h3></CardHeader>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <Key className="w-4 h-4 text-violet-400" />
+              <h3 className="text-sm font-semibold text-white">Usage Distribution by API Key</h3>
+            </div>
+          </CardHeader>
           <CardBody>
             <HorizontalBars
               items={keys.map(k => ({
@@ -106,55 +156,102 @@ export default function CostPage() {
         </Card>
       </div>
 
+      {/* Model Pricing Rate Configuration */}
       <Card>
-        <CardHeader><h3 className="text-sm font-semibold">Custom Cost Rates ($/M tokens)</h3></CardHeader>
-        <CardBody>
-          <div className="flex gap-2 flex-wrap mb-4">
-            <Input placeholder="model id" value={modelId} onChange={e => setModelId(e.target.value)} className="max-w-[220px]" />
-            <Input placeholder="input $/M" value={inp} onChange={e => setInp(e.target.value)} className="max-w-[120px]" />
-            <Input placeholder="output $/M" value={out} onChange={e => setOut(e.target.value)} className="max-w-[120px]" />
-            <Button onClick={saveOverride} disabled={saving}>{saving ? 'Saving…' : 'Save override'}</Button>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <DollarSign className="w-4 h-4 text-violet-400" />
+            <h3 className="text-sm font-semibold text-white">Model Cost Rates ($ / 1M Tokens)</h3>
           </div>
-          <div className="flex gap-2 flex-wrap mb-4">
-            <Button size="sm" onClick={() => bulkImport(false)} disabled={importing}>
-              {importing ? 'Importing…' : 'Auto-fill from models.dev'}
-            </Button>
-            <Button size="sm" variant="danger" onClick={() => bulkImport(true)} disabled={importing}>
-              {importing ? 'Importing…' : 'Overwrite all from models.dev'}
-            </Button>
-            <span className="text-xs text-zinc-500 self-center">Import pricing for all live models</span>
+        </CardHeader>
+        <CardBody className="space-y-6">
+          {/* Custom Override Form */}
+          <div className="space-y-2">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Add Rate Override</h4>
+            <div className="flex gap-2 flex-wrap">
+              <Input
+                placeholder="Model ID (e.g. opencode/mimo-v2.5-free)"
+                value={modelId}
+                onChange={e => setModelId(e.target.value)}
+                className="max-w-[260px]"
+              />
+              <Input
+                placeholder="Input $/1M"
+                value={inp}
+                onChange={e => setInp(e.target.value)}
+                className="max-w-[130px]"
+              />
+              <Input
+                placeholder="Output $/1M"
+                value={out}
+                onChange={e => setOut(e.target.value)}
+                className="max-w-[130px]"
+              />
+              <Button onClick={saveOverride} disabled={saving} variant="primary">
+                <Save className="w-3.5 h-3.5" />
+                <span>{saving ? 'Saving…' : 'Save Override'}</span>
+              </Button>
+            </div>
           </div>
+
+          {/* Bulk Import Options */}
+          <div className="p-4 rounded-xl bg-zinc-950/60 border border-white/[0.06] flex items-center justify-between gap-4 flex-wrap">
+            <div>
+              <h4 className="text-xs font-semibold text-white">Sync Pricing from models.dev</h4>
+              <p className="text-[11px] text-zinc-400">Import community benchmark rates for input and output token pricing.</p>
+            </div>
+            <div className="flex gap-2">
+              <Button size="sm" variant="secondary" onClick={() => bulkImport(false)} disabled={importing}>
+                <Download className="w-3.5 h-3.5" />
+                <span>{importing ? 'Importing…' : 'Auto-fill Missing Rates'}</span>
+              </Button>
+              <Button size="sm" variant="danger" onClick={() => bulkImport(true)} disabled={importing}>
+                <span>{importing ? 'Importing…' : 'Overwrite All Rates'}</span>
+              </Button>
+            </div>
+          </div>
+
           {ratesError && (
-            <div className="mb-3 text-sm text-red-400">{ratesError}</div>
+            <div className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 p-3 rounded-xl">
+              {ratesError}
+            </div>
           )}
-          {ratesLoading && !rates ? <Spinner /> : !rates ? (
-            <div className="text-sm text-zinc-500">No rate data</div>
+
+          {/* Rates Table */}
+          {ratesLoading && !rates ? (
+            <Spinner />
+          ) : !rates ? (
+            <div className="text-xs text-zinc-500 py-6 text-center">No cost rate data available</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
+              <table className="w-full text-left text-xs">
                 <thead>
-                  <tr className="text-left border-b border-white/[0.08]">
-                    <th className="px-3 py-2 text-zinc-400 text-[11px] uppercase">Model</th>
-                    <th className="px-3 py-2 text-zinc-400 text-[11px] uppercase">Input</th>
-                    <th className="px-3 py-2 text-zinc-400 text-[11px] uppercase">Output</th>
-                    <th className="px-3 py-2 text-zinc-400 text-[11px] uppercase">Source</th>
+                  <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
+                    <th className="px-5 py-3.5 font-semibold">Model ID</th>
+                    <th className="px-5 py-3.5 font-semibold">Input $/1M Tokens</th>
+                    <th className="px-5 py-3.5 font-semibold">Output $/1M Tokens</th>
+                    <th className="px-5 py-3.5 font-semibold">Pricing Source</th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-white/[0.06]">
                   {(rates.overrides || []).map(r => (
-                    <tr key={`o-${r.model_id}`} className="border-b border-white/[0.05]">
-                      <td className="px-3 py-2 font-mono">{r.model_id}</td>
-                      <td className="px-3 py-2">${r.input_per_m}</td>
-                      <td className="px-3 py-2">${r.output_per_m}</td>
-                      <td className="px-3 py-2 text-violet-300">override</td>
+                    <tr key={`o-${r.model_id}`} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="px-5 py-3.5 font-mono text-white font-semibold">{r.model_id}</td>
+                      <td className="px-5 py-3.5 font-mono text-zinc-200">${r.input_per_m}</td>
+                      <td className="px-5 py-3.5 font-mono text-zinc-200">${r.output_per_m}</td>
+                      <td className="px-5 py-3.5">
+                        <Badge variant="accent">custom override</Badge>
+                      </td>
                     </tr>
                   ))}
                   {(rates.defaults || []).slice(0, 20).map(r => (
-                    <tr key={`d-${r.model_id}`} className="border-b border-white/[0.05]">
-                      <td className="px-3 py-2 font-mono text-zinc-400">{r.model_id}</td>
-                      <td className="px-3 py-2 text-zinc-400">${r.input_per_m}</td>
-                      <td className="px-3 py-2 text-zinc-400">${r.output_per_m}</td>
-                      <td className="px-3 py-2 text-zinc-500">default</td>
+                    <tr key={`d-${r.model_id}`} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="px-5 py-3.5 font-mono text-zinc-400">{r.model_id}</td>
+                      <td className="px-5 py-3.5 font-mono text-zinc-400">${r.input_per_m}</td>
+                      <td className="px-5 py-3.5 font-mono text-zinc-400">${r.output_per_m}</td>
+                      <td className="px-5 py-3.5">
+                        <Badge variant="default">models.dev</Badge>
+                      </td>
                     </tr>
                   ))}
                 </tbody>

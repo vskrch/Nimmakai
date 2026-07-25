@@ -3,7 +3,8 @@ import { api, ap, clearAuthKey } from '../lib/api'
 import type { AuthSession } from '../components/AuthModal'
 import type {
   HealthResponse, StatsResponse, ProvidersResponse, CatalogResponse,
-  RankingsResponse, ProviderHealthData, Preference, SSEHealthEvent
+  RankingsResponse, ProviderHealthData, Preference, SSEHealthEvent,
+  ExtensibilityResponse
 } from '../types'
 
 export function useAuth() {

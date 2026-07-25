@@ -1,8 +1,19 @@
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { Card, CardBody, CardHeader, Badge, Button, StatusDot, StatBox } from '../components/ui'
 import { useAnalyticsSSE, useAnalyticsSummary } from '../hooks/useAnalytics'
 import { fmtMs, fmtTokens, fmtUsd, fmtTime, fmtPct } from '../lib/format'
 import { api, okBody, errMsg } from '../lib/api'
+import {
+  Radio,
+  Play,
+  Pause,
+  RefreshCw,
+  FileText,
+  AlertTriangle,
+  Zap,
+  Clock,
+  Cpu
+} from 'lucide-react'
 
 export default function LiveFeedPage() {
   const { connected, events, paused, togglePause, authError, reconnect } = useAnalyticsSSE(true)
@@ -44,63 +55,86 @@ export default function LiveFeedPage() {
   }
 
   return (
-    <div className="animate-[fadeIn_0.3s_ease]">
-      <div className="flex items-center justify-between mb-6 gap-3 flex-wrap">
+    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+      {/* Header controls */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div className="flex items-center gap-3">
-          <h2 className="text-xl font-semibold">Live Feed</h2>
+          <div className="flex items-center gap-2">
+            <Radio className="w-5 h-5 text-violet-400" />
+            <h2 className="text-lg font-bold text-white tracking-tight">Live Request Pipeline</h2>
+          </div>
           <Badge variant={connected ? 'ok' : 'err'}>
             <StatusDot ok={connected} />
-            {connected ? 'LIVE' : 'Disconnected'}
+            {connected ? 'SSE CONNECTED' : 'DISCONNECTED'}
           </Badge>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {logEnabled !== null && (
-            <Button size="sm" onClick={toggleLogging} disabled={logBusy}>
-              {logBusy ? '…' : logEnabled ? 'File logging: ON' : 'File logging: OFF'}
+            <Button size="sm" variant={logEnabled ? 'secondary' : 'default'} onClick={toggleLogging} disabled={logBusy}>
+              <FileText className="w-3.5 h-3.5" />
+              <span>{logBusy ? 'Updating…' : logEnabled ? 'File Logging: ON' : 'File Logging: OFF'}</span>
             </Button>
           )}
           {!connected && (
-            <Button size="sm" onClick={reconnect}>Reconnect</Button>
+            <Button size="sm" variant="primary" onClick={reconnect}>
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Reconnect</span>
+            </Button>
           )}
-          <Button size="sm" onClick={togglePause}>{paused ? 'Resume' : 'Pause'}</Button>
+          <Button size="sm" variant="default" onClick={togglePause}>
+            {paused ? <Play className="w-3.5 h-3.5 text-emerald-400" /> : <Pause className="w-3.5 h-3.5 text-amber-400" />}
+            <span>{paused ? 'Resume Feed' : 'Pause Stream'}</span>
+          </Button>
         </div>
       </div>
 
       {logMsg && (
-        <div className="mb-3 text-xs text-zinc-400">
-          {logMsg}
+        <div className="text-xs text-zinc-300 bg-zinc-900 border border-white/[0.08] p-3 rounded-xl flex items-center gap-2 font-mono">
+          <FileText className="w-4 h-4 text-violet-400 shrink-0" />
+          <span>{logMsg}</span>
           {(logDir || logPath) && (
-            <span className="ml-2 font-mono text-zinc-500">{logDir || logPath}</span>
+            <span className="text-zinc-500 ml-auto">[{logDir || logPath}]</span>
           )}
         </div>
       )}
 
       {authError && (
-        <div className="mb-4 text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-          Live feed is having trouble staying connected. Try Reconnect, or confirm you are
-          signed in / have an API key set. Events still appear once the stream recovers.
+        <div className="text-xs text-amber-200 bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 flex items-center gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+          <div>
+            <strong>Stream Connection Warning: </strong>
+            Live SSE feed is attempting reconnection. Ensure your API session or API key is active.
+          </div>
         </div>
       )}
 
-      <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3 mb-6">
-        <StatBox label="RPM" value={(summary?.requests_per_minute ?? 0).toFixed(1)} />
-        <StatBox label="Error" value={fmtPct(summary?.error_rate)} color="text-red-400" />
-        <StatBox label="TTFT" value={fmtMs(summary?.avg_ttft_ms)} />
-        <StatBox label="Active models" value={summary?.unique_models ?? 0} />
+      {/* Summary Banner */}
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+        <StatBox label="Live RPM" value={(summary?.requests_per_minute ?? 0).toFixed(1)} icon={Zap} />
+        <StatBox label="Error Rate" value={fmtPct(summary?.error_rate)} color="text-rose-400" icon={AlertTriangle} />
+        <StatBox label="Avg TTFT" value={fmtMs(summary?.avg_ttft_ms)} icon={Clock} />
+        <StatBox label="Active Models" value={summary?.unique_models ?? 0} icon={Cpu} />
       </div>
 
+      {/* Live Event Stream */}
       <Card>
         <CardHeader>
-          <h3 className="text-sm font-semibold">Request stream</h3>
-          <span className="text-xs text-zinc-500">{events.length} buffered</span>
+          <div className="flex items-center gap-2">
+            <Radio className="w-4 h-4 text-emerald-400 animate-pulse" />
+            <h3 className="text-sm font-semibold text-white">Event Ingress Feed</h3>
+          </div>
+          <Badge variant="default" className="font-mono">
+            {events.length} events buffered
+          </Badge>
         </CardHeader>
-        <CardBody className="p-0 max-h-[60vh] overflow-y-auto">
+        <CardBody className="p-0 max-h-[65vh] overflow-y-auto custom-scrollbar">
           {!events.length && (
-            <div className="p-8 text-center text-zinc-500 text-sm">
-              Waiting for requests… Send a chat completion to see live events.
+            <div className="p-16 text-center text-zinc-500 text-xs flex flex-col items-center gap-2">
+              <Zap className="w-8 h-8 text-zinc-600 stroke-1" />
+              <span>Waiting for live requests... Send a chat completion request to stream live telemetry events.</span>
               {logEnabled && (
-                <div className="mt-2 text-xs text-zinc-600">
-                  File logging is on — rotating dated logs (50 MB/file, 90‑day retention) beside the DB.
+                <div className="mt-2 text-[11px] text-zinc-400 font-mono">
+                  File logging enabled — storing rotating log files (50 MB/file) under DB storage directory.
                 </div>
               )}
             </div>
@@ -110,37 +144,40 @@ export default function LiveFeedPage() {
             const ok = e.success !== false && !(e.status_code && e.status_code >= 400)
             const model = (e.model_routed || e.model_requested || '—')
             const ts = e.created_at || e.ts
+
             return (
               <div
                 key={(e.trace_id || e.id || '') + String(i)}
-                className={`px-5 py-3 border-b border-white/[0.06] animate-[fadeIn_0.25s_ease] ${
-                  !ok ? 'bg-red-500/[0.06]' : ''
+                className={`p-4 border-b border-white/[0.06] hover:bg-white/[0.02] transition-colors text-xs space-y-2 animate-[fadeIn_0.2s_ease-out] ${
+                  !ok ? 'bg-rose-500/5' : ''
                 }`}
               >
-                <div className="flex items-center gap-3 text-[13px]">
-                  <span className="text-zinc-500 font-mono text-[11px] w-16 shrink-0">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-zinc-500 font-mono text-[11px] shrink-0">
                     {fmtTime(typeof ts === 'number' ? ts : undefined)}
                   </span>
                   <StatusDot ok={ok} />
                   {isReq && <Badge variant="accent">req</Badge>}
-                  <span className="text-zinc-300">{e.intent || e.path || '—'}</span>
+                  <span className="text-zinc-200 font-semibold">{e.intent || e.path || '—'}</span>
                   <span className="text-zinc-500">→</span>
-                  <span className="font-medium">
+                  <span className="font-mono text-violet-300 font-semibold">
                     {typeof model === 'string' ? model.split('/').pop() : '—'}
                   </span>
                   {(e.fallback_index ?? 0) > 0 && (
-                    <Badge variant="accent">fallback[{e.fallback_index}]</Badge>
+                    <Badge variant="warn">fallback[{e.fallback_index}]</Badge>
                   )}
                   {e.status_code != null && (
-                    <span className="text-zinc-500 tabular-nums">{e.status_code}</span>
+                    <Badge variant={ok ? 'ok' : 'err'}>
+                      {e.status_code}
+                    </Badge>
                   )}
                 </div>
-                <div className="mt-1 ml-[4.5rem] text-[12px] text-zinc-500 flex gap-4 flex-wrap">
-                  <span>{fmtMs(e.duration_ms)}</span>
-                  {e.total_tokens != null && <span>{fmtTokens(e.total_tokens)} tokens</span>}
-                  {e.estimated_cost_usd != null && <span>{fmtUsd(e.estimated_cost_usd)}</span>}
-                  {e.error_message && <span className="text-red-400">{e.error_message}</span>}
-                  {e.error && !e.error_message && <span className="text-red-400">{e.error}</span>}
+                <div className="ml-[4.5rem] text-[11px] text-zinc-400 flex gap-4 flex-wrap font-mono">
+                  <span>Latency: {fmtMs(e.duration_ms)}</span>
+                  {e.total_tokens != null && <span>Tokens: {fmtTokens(e.total_tokens)}</span>}
+                  {e.estimated_cost_usd != null && <span>Cost: {fmtUsd(e.estimated_cost_usd)}</span>}
+                  {e.error_message && <span className="text-rose-400 font-sans">{e.error_message}</span>}
+                  {e.error && !e.error_message && <span className="text-rose-400 font-sans">{e.error}</span>}
                 </div>
               </div>
             )

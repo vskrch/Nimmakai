@@ -1,5 +1,16 @@
+import React from 'react'
 import { Card, CardHeader, CardBody, Badge, Button, Spinner, StatusDot } from '../components/ui'
 import { useProviderHealth } from '../hooks/useApi'
+import {
+  Activity,
+  RefreshCw,
+  ShieldCheck,
+  AlertTriangle,
+  Cpu,
+  Zap,
+  Clock,
+  Server
+} from 'lucide-react'
 
 export default function HealthPage() {
   const { data, reload } = useProviderHealth()
@@ -10,77 +21,97 @@ export default function HealthPage() {
   const keys = Object.keys(providers).sort()
 
   return (
-    <div className="animate-[fadeIn_0.3s_ease]">
-      <div className="flex items-center gap-3 mb-6">
-        <h2 className="text-xl font-semibold">Provider Health</h2>
-        <Button size="sm" onClick={reload}>Refresh</Button>
+    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+      {/* Header controls */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div className="flex items-center gap-2">
+          <Activity className="w-5 h-5 text-violet-400" />
+          <h2 className="text-lg font-bold text-white tracking-tight">Provider Health & Circuit Breakers</h2>
+        </div>
+        <Button size="sm" variant="secondary" onClick={reload}>
+          <RefreshCw className="w-3.5 h-3.5" />
+          <span>Refresh Telemetry</span>
+        </Button>
       </div>
 
       {keys.length === 0 && (
         <Card>
-          <CardBody className="text-center text-zinc-400">No providers configured.</CardBody>
+          <CardBody className="p-12 text-center text-zinc-500 text-xs flex flex-col items-center gap-2">
+            <Server className="w-8 h-8 text-zinc-600 stroke-1" />
+            <span>No providers configured in the routing hub</span>
+          </CardBody>
         </Card>
       )}
 
       {keys.map(pid => {
         const p = providers[pid]
         const hScore = p.aggregate_health ?? 1
-        const barColor = hScore > 0.8 ? 'bg-emerald-500' : hScore > 0.5 ? 'bg-blue-500' : 'bg-red-500'
-        const textColor = hScore > 0.8 ? 'text-emerald-400' : hScore > 0.5 ? 'text-blue-400' : 'text-red-400'
-        const cbColor = p.circuit_breaker === 'open' ? 'text-red-400' : p.circuit_breaker === 'half_open' ? 'text-blue-400' : 'text-emerald-400'
+        const barColor = hScore > 0.8 ? 'bg-emerald-500' : hScore > 0.5 ? 'bg-amber-500' : 'bg-rose-500'
+        const textColor = hScore > 0.8 ? 'text-emerald-400' : hScore > 0.5 ? 'text-amber-400' : 'text-rose-400'
+        const cbColor = p.circuit_breaker === 'open' ? 'text-rose-400' : p.circuit_breaker === 'half_open' ? 'text-amber-400' : 'text-emerald-400'
         const models = p.models || {}
         const modelKeys = Object.keys(models).sort()
 
         return (
           <Card key={pid}>
             <CardHeader>
-              <div className="flex items-center gap-3 flex-1">
-                <strong className="text-[15px]">{pid}</strong>
+              <div className="flex items-center gap-3 flex-1 flex-wrap">
+                <strong className="text-sm font-bold text-white font-mono">{pid}</strong>
                 <Badge variant={p.enabled && p.runtime ? 'ok' : 'err'}>
-                  {p.enabled && p.runtime ? 'Active' : 'Inactive'}
+                  <StatusDot ok={!!(p.enabled && p.runtime)} />
+                  {p.enabled && p.runtime ? 'Active In Pool' : 'Inactive'}
                 </Badge>
-                <span className={`text-[11px] font-semibold ${cbColor}`}>CB: {p.circuit_breaker}</span>
+                <span className={`text-xs font-semibold flex items-center gap-1 ${cbColor}`}>
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  CB Status: {p.circuit_breaker}
+                </span>
               </div>
-              <div className="flex items-center gap-3">
-                <span className="text-xs text-zinc-400">{p.model_count} models · {p.available_keys} keys</span>
-                <div className="w-20 h-1.5 bg-[#050505] rounded overflow-hidden">
-                  <div className={`h-full rounded ${barColor}`} style={{ width: `${(hScore * 100)}%` }} />
+              <div className="flex items-center gap-4">
+                <span className="text-xs text-zinc-400 font-mono">{p.model_count} models · {p.available_keys} keys</span>
+                <div className="w-24 h-2 bg-zinc-950 rounded-full overflow-hidden border border-white/[0.08]">
+                  <div className={`h-full rounded-full ${barColor} transition-all duration-500`} style={{ width: `${(hScore * 100)}%` }} />
                 </div>
-                <span className={`text-xs font-semibold ${textColor}`}>{(hScore * 100).toFixed(0)}%</span>
+                <span className={`text-xs font-bold font-mono ${textColor}`}>{(hScore * 100).toFixed(0)}%</span>
               </div>
             </CardHeader>
+
             {modelKeys.length > 0 && (
               <CardBody className="p-0">
-                <table className="w-full">
-                  <thead>
-                    <tr className="text-left border-b border-white/[0.08]">
-                      <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Model</th>
-                      <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Status</th>
-                      <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">TPS</th>
-                      <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Latency</th>
-                      <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Error Rate</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {modelKeys.map(mid => {
-                      const m = models[mid]
-                      const ok = m.ok !== false
-                      return (
-                        <tr key={mid} className="border-b border-white/[0.08] last:border-0 hover:bg-white/[0.01]">
-                          <td className="px-6 py-3 text-[12px]">{mid.split('/').slice(1).join('/')}</td>
-                          <td className="px-6 py-3">
-                            <Badge variant={ok ? 'ok' : 'err'}>{ok ? 'Healthy' : m.cooldown ? 'Cooldown' : 'Unhealthy'}</Badge>
-                          </td>
-                          <td className="px-6 py-3 text-[12px] text-zinc-400">{m.ewma_tok_per_s || '—'}</td>
-                          <td className="px-6 py-3 text-[12px] text-zinc-400">{m.ewma_latency_ms != null ? `${m.ewma_latency_ms}ms` : '—'}</td>
-                          <td className={`px-6 py-3 text-[12px] ${m.error_rate > 0.3 ? 'text-red-400' : 'text-zinc-400'}`}>
-                            {m.error_rate != null ? `${(m.error_rate * 100).toFixed(1)}%` : '—'}
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead>
+                      <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
+                        <th className="px-6 py-3.5 font-semibold">Model Slug</th>
+                        <th className="px-6 py-3.5 font-semibold">Health Status</th>
+                        <th className="px-6 py-3.5 font-semibold">Measured TPS</th>
+                        <th className="px-6 py-3.5 font-semibold">EWMA Latency</th>
+                        <th className="px-6 py-3.5 font-semibold">Error Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-white/[0.06]">
+                      {modelKeys.map(mid => {
+                        const m = models[mid]
+                        const ok = m.ok !== false
+                        return (
+                          <tr key={mid} className="hover:bg-white/[0.02] transition-colors">
+                            <td className="px-6 py-3.5 font-mono text-zinc-200 font-semibold">{mid.split('/').slice(1).join('/')}</td>
+                            <td className="px-6 py-3.5">
+                              <Badge variant={ok ? 'ok' : 'err'}>
+                                <StatusDot ok={ok} />
+                                {ok ? 'Healthy' : m.cooldown ? 'Cooldown Active' : 'Degraded'}
+                              </Badge>
+                            </td>
+                            <td className="px-6 py-3.5 font-mono text-violet-300 font-semibold">{m.ewma_tok_per_s || '—'} tok/s</td>
+                            <td className="px-6 py-3.5 font-mono text-zinc-300">{m.ewma_latency_ms != null ? `${m.ewma_latency_ms}ms` : '—'}</td>
+                            <td className={`px-6 py-3.5 font-mono font-semibold ${m.error_rate > 0.3 ? 'text-rose-400' : 'text-emerald-400'}`}>
+                              {m.error_rate != null ? `${(m.error_rate * 100).toFixed(1)}%` : '0%'}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </CardBody>
             )}
           </Card>

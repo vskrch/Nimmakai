@@ -1,7 +1,21 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { Card, CardHeader, CardBody, Badge, Button, Input, Spinner, StatusDot } from '../components/ui'
 import { useProviders } from '../hooks/useApi'
 import { ad, ap, errMsg } from '../lib/api'
+import {
+  Server,
+  Plus,
+  RefreshCw,
+  Key,
+  Cpu,
+  CheckCircle2,
+  Trash2,
+  Play,
+  X,
+  Zap,
+  Sparkles,
+  ExternalLink
+} from 'lucide-react'
 
 export default function ProvidersPage() {
   const { data, reload } = useProviders()
@@ -21,7 +35,7 @@ export default function ProvidersPage() {
     const keys = form.api_keys ? form.api_keys.split(',').map(s => s.trim()).filter(Boolean) : []
     const isEdit = providers.some(p => p.id === form.id)
     if (!isEdit && keys.length === 0) {
-      setMsg({ text: 'Paste at least one API key (OpenCode Zen uses the key from opencode.ai/auth)', ok: false })
+      setMsg({ text: 'Paste at least one API key (OpenCode Zen uses key from opencode.ai/auth)', ok: false })
       return
     }
     setSaving(true)
@@ -29,24 +43,23 @@ export default function ProvidersPage() {
       ...form,
       api_keys: keys,
     }
-    // Only force-enable when new keys are supplied (or creating)
     if (keys.length > 0 || !isEdit) {
       payload.enabled = true
     }
     const r = await ap('/admin/providers', payload)
     setSaving(false)
     if (r && (r as Record<string, unknown>).ok) {
-      setMsg({ text: (r as Record<string, unknown>).message as string || 'Saved', ok: true })
+      setMsg({ text: (r as Record<string, unknown>).message as string || 'Provider credentials saved', ok: true })
       setShowAdd(false)
       setForm({ id: '', name: '', base_url: '', api_keys: '', rpm_limit: 40, rpd_limit: 2000 })
       reload()
     } else {
-      setMsg({ text: errMsg(r, 'Failed'), ok: false })
+      setMsg({ text: errMsg(r, 'Failed to save provider'), ok: false })
     }
   }
 
   async function handleTest(pid: string) {
-    setMsg({ text: 'Testing...', ok: true })
+    setMsg({ text: 'Testing provider endpoint...', ok: true })
     const keys = form.api_keys ? form.api_keys.split(',').map(s => s.trim()).filter(Boolean) : []
     const r = await ap('/admin/providers/test', {
       id: pid || undefined,
@@ -60,69 +73,94 @@ export default function ProvidersPage() {
     const r = await ad(`/admin/providers/${pid}`)
     if (r && (r as Record<string, unknown>).ok !== false) {
       reload()
-      setMsg({ text: 'Deleted', ok: true })
+      setMsg({ text: 'Provider removed from gateway configuration', ok: true })
     } else {
       setMsg({ text: errMsg(r, 'Delete failed'), ok: false })
     }
   }
 
   return (
-    <div className="animate-[fadeIn_0.3s_ease]">
-      <div className="flex justify-between items-start mb-6 gap-4 flex-wrap">
+    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+      {/* Header controls */}
+      <div className="flex justify-between items-start gap-4 flex-wrap">
         <div>
-          <h2 className="text-xl font-semibold">Providers</h2>
-          <p className="text-zinc-400 text-[13px] mt-1 max-w-[560px]">
-            Add OpenAI-compatible endpoints. Keys stored in local SQLite. Every provider's models join the shared pool.
+          <div className="flex items-center gap-2">
+            <Server className="w-5 h-5 text-violet-400" />
+            <h2 className="text-lg font-bold text-white tracking-tight">LLM Endpoint Providers</h2>
+          </div>
+          <p className="text-zinc-400 text-xs mt-1 max-w-[600px]">
+            Connect OpenAI-compatible API providers (OpenCode, Groq, Cerebras, OpenRouter, Gemini, etc.). Keys are securely stored in SQLite and merged into the active routing ladder.
           </p>
         </div>
         <div className="flex gap-2">
-          <Button onClick={reload}>Refresh Pool</Button>
-          <Button variant="primary" onClick={() => setShowAdd(true)}>+ Custom Endpoint</Button>
+          <Button variant="secondary" onClick={reload}>
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Refresh Pool</span>
+          </Button>
+          <Button variant="primary" onClick={() => setShowAdd(true)}>
+            <Plus className="w-4 h-4" />
+            <span>Custom Endpoint</span>
+          </Button>
         </div>
       </div>
 
       {msg && (
-        <div className={`mb-4 p-3 rounded-lg text-[13px] ${msg.ok ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : 'bg-red-500/10 text-red-400 border border-red-500/20'}`}>
-          {msg.text}
-          <button className="ml-3 text-xs opacity-60" onClick={() => setMsg(null)}>dismiss</button>
+        <div className={`p-4 rounded-xl text-xs flex items-center justify-between font-medium ${
+          msg.ok ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
+        }`}>
+          <span>{msg.text}</span>
+          <button className="text-zinc-400 hover:text-white" onClick={() => setMsg(null)}>Dismiss</button>
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2.5 mb-6">
-        <div className="bg-white/[0.03] border border-white/[0.08] rounded-full px-3 py-1.5 text-xs text-zinc-400">
-          <strong className="text-white mr-1">{pool.live_models ?? 0}</strong> models in pool
+      {/* Pool Overview Badges */}
+      <div className="flex flex-wrap gap-2.5">
+        <div className="bg-zinc-900 border border-white/[0.08] rounded-xl px-3.5 py-2 text-xs text-zinc-300 flex items-center gap-2">
+          <Cpu className="w-3.5 h-3.5 text-violet-400" />
+          <span><strong className="text-white">{pool.live_models ?? 0}</strong> live models in pool</span>
         </div>
-        <div className="bg-white/[0.03] border border-white/[0.08] rounded-full px-3 py-1.5 text-xs text-zinc-400">
-          <strong className="text-white mr-1">{pool.active_providers ?? 0}</strong> active providers
+        <div className="bg-zinc-900 border border-white/[0.08] rounded-xl px-3.5 py-2 text-xs text-zinc-300 flex items-center gap-2">
+          <Server className="w-3.5 h-3.5 text-emerald-400" />
+          <span><strong className="text-white">{pool.active_providers ?? 0}</strong> active providers</span>
         </div>
         {Object.keys(pool.models_by_provider || {}).sort().map(pid => (
-          <div key={pid} className="bg-white/[0.03] border border-white/[0.08] rounded-full px-3 py-1.5 text-xs text-zinc-400">
-            <strong className="text-white mr-1">{pid}</strong> {pool.models_by_provider[pid]} models
+          <div key={pid} className="bg-zinc-900 border border-white/[0.08] rounded-xl px-3.5 py-2 text-xs text-zinc-400 font-mono">
+            <span className="text-white font-semibold">{pid}:</span> {pool.models_by_provider[pid]} models
           </div>
         ))}
       </div>
 
+      {/* Quick Setup Presets */}
       {presets.length > 0 && (
         <Card>
           <CardHeader>
-            <h3 className="text-sm font-semibold">Free / Popular Endpoints</h3>
-            <span className="text-xs text-zinc-400">Click to configure</span>
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-violet-400" />
+              <h3 className="text-sm font-semibold text-white">Popular & Free Provider Presets</h3>
+            </div>
+            <span className="text-xs text-zinc-400">Click any card to populate configuration</span>
           </CardHeader>
           <CardBody>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
               {presets.map(p => (
                 <button
                   key={p.id}
                   onClick={() => { setForm(f => ({ ...f, id: p.id, name: p.name, base_url: p.base_url })); setShowAdd(true) }}
-                  className={`bg-white/[0.03] border border-white/[0.08] rounded-xl p-4 text-left transition-all hover:border-violet-500/50 hover:bg-white/[0.05] flex flex-col gap-2 min-h-[140px] ${p.already_configured ? 'opacity-80 border-emerald-500/30' : ''}`}
+                  className={`bg-zinc-950/60 border border-white/[0.08] rounded-2xl p-4 text-left transition-all duration-200 hover:border-violet-500/50 hover:bg-violet-500/[0.04] flex flex-col justify-between gap-3 group relative overflow-hidden ${
+                    p.already_configured ? 'border-emerald-500/30 bg-emerald-500/[0.02]' : ''
+                  }`}
                 >
-                  <h4 className="text-sm font-semibold">{p.name}</h4>
-                  <p className="text-xs text-zinc-400 leading-relaxed flex-1">{p.base_url}</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {p.free_tier && <Badge variant="free">Free</Badge>}
-                    {p.speed_tier === 'ultra' && <Badge variant="fast">Ultra</Badge>}
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <h4 className="text-xs font-bold text-white group-hover:text-violet-300 transition-colors">{p.name}</h4>
+                      {p.already_configured && <Badge variant="ok">Configured</Badge>}
+                    </div>
+                    <p className="text-[11px] text-zinc-400 font-mono truncate">{p.base_url}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 pt-2 border-t border-white/[0.06]">
+                    {p.free_tier && <Badge variant="free">Free Tier</Badge>}
+                    {p.speed_tier === 'ultra' && <Badge variant="fast">Ultra TPS</Badge>}
                     {p.speed_tier === 'fast' && <Badge variant="fast">Fast</Badge>}
-                    {p.already_configured && <Badge variant="ok">Configured</Badge>}
                   </div>
                 </button>
               ))}
@@ -131,84 +169,120 @@ export default function ProvidersPage() {
         </Card>
       )}
 
+      {/* Add / Edit Form Drawer Card */}
       {showAdd && (
-        <Card className="border-violet-500/20">
+        <Card className="border-violet-500/40 shadow-[0_0_30px_rgba(139,92,246,0.15)]">
           <CardHeader>
-            <h3 className="text-sm font-semibold">Add Endpoint</h3>
-            <button className="text-zinc-400 hover:text-white text-lg" onClick={() => setShowAdd(false)}>×</button>
-          </CardHeader>
-          <CardBody className="flex flex-col gap-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div><label className="block text-xs text-zinc-400 mb-1.5">Provider ID</label><Input value={form.id} onChange={e => setForm(f => ({ ...f, id: e.target.value }))} placeholder="e.g. groq" /></div>
-              <div><label className="block text-xs text-zinc-400 mb-1.5">Display Name</label><Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Groq" /></div>
+            <div className="flex items-center gap-2">
+              <Plus className="w-4 h-4 text-violet-400" />
+              <h3 className="text-sm font-semibold text-white">Configure Provider Endpoint</h3>
             </div>
-            <div><label className="block text-xs text-zinc-400 mb-1.5">Base URL (OpenAI-compatible /v1)</label><Input value={form.base_url} onChange={e => setForm(f => ({ ...f, base_url: e.target.value }))} placeholder="https://api.groq.com/openai/v1" /></div>
+            <button className="text-zinc-400 hover:text-white p-1 rounded-lg" onClick={() => setShowAdd(false)}>
+              <X className="w-4 h-4" />
+            </button>
+          </CardHeader>
+          <CardBody className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Provider Unique ID</label>
+                <Input value={form.id} onChange={e => setForm(f => ({ ...f, id: e.target.value }))} placeholder="e.g. groq or opencode" />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Display Name</label>
+                <Input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Groq Inference Engine" />
+              </div>
+            </div>
             <div>
-              <label className="block text-xs text-zinc-400 mb-1.5">API Keys (comma-separated)</label>
-              <Input value={form.api_keys} onChange={e => setForm(f => ({ ...f, api_keys: e.target.value }))} placeholder="Paste key from opencode.ai/auth or provider console" />
+              <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Base URL (OpenAI-compatible /v1 Root)</label>
+              <Input value={form.base_url} onChange={e => setForm(f => ({ ...f, base_url: e.target.value }))} placeholder="https://api.groq.com/openai/v1" />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-zinc-300 mb-1.5">API Keys (Comma-separated for multi-key round robin)</label>
+              <Input value={form.api_keys} onChange={e => setForm(f => ({ ...f, api_keys: e.target.value }))} placeholder="Paste API keys from provider console..." />
               {form.id === 'zen' && (
-                <p className="text-[11px] text-zinc-500 mt-1.5">
-                  OpenCode Zen and OpenCode API key are the same credential — one key for{' '}
-                  <code className="text-zinc-400">https://opencode.ai/zen/v1</code>.
+                <p className="text-[11px] text-zinc-400 mt-2 font-mono bg-violet-500/10 p-2.5 rounded-xl border border-violet-500/20">
+                  OpenCode Zen uses the standard API key from <a href="https://opencode.ai/auth" target="_blank" rel="noreferrer" className="text-violet-300 underline inline-flex items-center gap-1">opencode.ai/auth <ExternalLink className="w-3 h-3" /></a>.
                 </p>
               )}
             </div>
-            <div className="flex gap-2 justify-end">
-              <Button onClick={() => setShowAdd(false)}>Cancel</Button>
-              <Button onClick={() => handleTest(form.id)}>Test</Button>
-              <Button variant="primary" onClick={handleAdd} disabled={saving}>{saving ? 'Saving...' : 'Save & Merge'}</Button>
+            <div className="flex gap-2 justify-end pt-2">
+              <Button variant="default" onClick={() => setShowAdd(false)}>Cancel</Button>
+              <Button variant="secondary" onClick={() => handleTest(form.id)}>
+                <Play className="w-3.5 h-3.5" />
+                <span>Test Connection</span>
+              </Button>
+              <Button variant="primary" onClick={handleAdd} disabled={saving}>
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>{saving ? 'Saving…' : 'Save & Join Pool'}</span>
+              </Button>
             </div>
           </CardBody>
         </Card>
       )}
 
-      <h3 className="text-sm font-semibold mb-3">Configured Providers</h3>
-      <Card className="p-0">
-        <table className="w-full">
-          <thead>
-            <tr className="text-left border-b border-white/[0.08]">
-              <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Provider</th>
-              <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Base URL</th>
-              <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Keys</th>
-              <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Models</th>
-              <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Status</th>
-              <th className="px-6 py-3 text-[11px] font-semibold text-zinc-400 uppercase tracking-[1px]">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {providers.map(p => {
-              const active = p.runtime || (p.enabled && (p.key_count || 0) > 0)
-              return (
-                <tr key={p.id} className="border-b border-white/[0.08] last:border-0 hover:bg-white/[0.01]">
-                  <td className="px-6 py-3.5 text-[13px]">
-                    <strong>{p.name}</strong>
-                    {p.free_tier && <Badge variant="free">Free</Badge>}
-                    {(p.speed_tier === 'ultra' || p.speed_tier === 'fast') && <Badge variant="fast">{p.speed_tier === 'ultra' ? 'Ultra' : 'Fast'}</Badge>}
-                    <div className="text-[11px] text-zinc-500 mt-0.5">{p.id}/...</div>
-                  </td>
-                  <td className="px-6 py-3.5 text-[13px] text-zinc-400 max-w-[220px] truncate" title={p.base_url}>{p.base_url}</td>
-                  <td className="px-6 py-3.5 text-[13px] text-zinc-400">
-                    {p.key_count ?? 0}
-                    {p.available_keys != null && <span className="text-zinc-500 ml-1">({p.available_keys} ready)</span>}
-                  </td>
-                  <td className="px-6 py-3.5 text-[13px] text-violet-400 font-semibold">{p.model_count ?? 0}</td>
-                  <td className="px-6 py-3.5">
-                    <Badge variant={active ? 'ok' : !p.enabled ? 'default' : 'err'}>
-                      <StatusDot ok={!!active} />
-                      {!p.enabled ? 'Disabled' : active ? 'In pool' : 'No keys'}
-                    </Badge>
-                  </td>
-                  <td className="px-6 py-3.5 flex gap-1.5 flex-wrap">
-                    <Button size="sm" onClick={() => { setForm({ id: p.id, name: p.name, base_url: p.base_url, api_keys: '', rpm_limit: p.rpm_limit, rpd_limit: p.rpd_limit }); setShowAdd(true) }}>Edit</Button>
-                    <Button size="sm" onClick={() => handleTest(p.id)}>Test</Button>
-                    {!p.builtin && <Button size="sm" variant="danger" onClick={() => handleDelete(p.id)}>Delete</Button>}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </Card>
+      {/* Configured Provider Table */}
+      <div>
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-400 mb-3">Configured Upstream Providers</h3>
+        <Card>
+          <CardBody className="p-0">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
+                    <th className="px-6 py-3.5 font-semibold">Provider Name</th>
+                    <th className="px-6 py-3.5 font-semibold">Base URL</th>
+                    <th className="px-6 py-3.5 font-semibold">Active Keys</th>
+                    <th className="px-6 py-3.5 font-semibold">Live Models</th>
+                    <th className="px-6 py-3.5 font-semibold">Status</th>
+                    <th className="px-6 py-3.5 font-semibold">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-white/[0.06]">
+                  {providers.map(p => {
+                    const active = p.runtime || (p.enabled && (p.key_count || 0) > 0)
+
+                    return (
+                      <tr key={p.id} className="hover:bg-white/[0.02] transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="flex items-center gap-2">
+                            <strong className="text-white text-xs">{p.name}</strong>
+                            {p.free_tier && <Badge variant="free">Free</Badge>}
+                            {(p.speed_tier === 'ultra' || p.speed_tier === 'fast') && <Badge variant="fast">{p.speed_tier === 'ultra' ? 'Ultra' : 'Fast'}</Badge>}
+                          </div>
+                          <div className="text-[11px] text-zinc-500 font-mono mt-0.5">{p.id}</div>
+                        </td>
+                        <td className="px-6 py-4 font-mono text-zinc-300 max-w-[220px] truncate" title={p.base_url}>{p.base_url}</td>
+                        <td className="px-6 py-4 text-zinc-300 font-mono">
+                          {p.key_count ?? 0} keys
+                          {p.available_keys != null && <span className="text-emerald-400 ml-1">({p.available_keys} ready)</span>}
+                        </td>
+                        <td className="px-6 py-4 font-mono text-violet-300 font-semibold">{p.model_count ?? 0} models</td>
+                        <td className="px-6 py-4">
+                          <Badge variant={active ? 'ok' : !p.enabled ? 'default' : 'err'}>
+                            <StatusDot ok={!!active} />
+                            {!p.enabled ? 'Disabled' : active ? 'Active in Pool' : 'No Active Keys'}
+                          </Badge>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex gap-2">
+                            <Button size="xs" variant="default" onClick={() => { setForm({ id: p.id, name: p.name, base_url: p.base_url, api_keys: '', rpm_limit: p.rpm_limit, rpd_limit: p.rpd_limit }); setShowAdd(true) }}>Edit</Button>
+                            <Button size="xs" variant="secondary" onClick={() => handleTest(p.id)}>Test</Button>
+                            {!p.builtin && (
+                              <Button size="xs" variant="danger" onClick={() => handleDelete(p.id)}>
+                                <Trash2 className="w-3 h-3" />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CardBody>
+        </Card>
+      </div>
     </div>
   )
 }
