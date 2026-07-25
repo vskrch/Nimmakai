@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Nimmakai (🍋) All-in-One Deployment & Setup Script for DigitalOcean / Linux
+# Nimmakai (🍋) All-in-One Deployment & Setup Script
+# Cross-Platform: Linux (Debian, Ubuntu, Mint, Fedora, CentOS, Arch) & macOS
 #
 # Usage:
-#   sudo bash deploy.sh
-#   OR
-#   curl -fsSL https://raw.githubusercontent.com/vskrch/Nimmakai/main/deploy.sh | sudo bash
+#   Linux: sudo bash deploy.sh
+#   macOS: bash deploy.sh
 # ==============================================================================
 set -euo pipefail
 
@@ -28,41 +28,114 @@ echo "                   🍋 NIMMAKAI (API GATEWAY) DEPLOYMENT                 
 echo "=============================================================================="
 echo -e "${NC}"
 
-# 1. Root Privilege Check
-if [[ $EUID -ne 0 ]]; then
-   err "This deployment script must be run as root. Try: sudo bash deploy.sh"
+OS="$(uname -s)"
+# 1. OS-Specific Privileges Check
+if [[ "$OS" == "Linux" ]]; then
+    if [[ $EUID -ne 0 ]]; then
+        err "On Linux, this deployment script must be run as root. Try: sudo bash deploy.sh"
+    fi
+elif [[ "$OS" == "Darwin" ]]; then
+    if [[ $EUID -eq 0 ]]; then
+        warn "Running as root on macOS is not recommended (Homebrew may fail). Proceeding, but you may encounter issues."
+    fi
+else
+    warn "Unsupported OS detected: $OS. Attempting to proceed anyway..."
 fi
 
-INSTALL_DIR="/opt/nimmakai"
+INSTALL_DIR="${INSTALL_DIR:-/opt/nimmakai}"
+if [[ "$OS" == "Darwin" ]]; then
+    # On macOS, use a user-local directory if they can't write to /opt
+    if [[ ! -w "/opt" && $EUID -ne 0 ]]; then
+        INSTALL_DIR="${HOME}/.nimmakai"
+        log "Using local install dir on macOS: ${INSTALL_DIR}"
+    fi
+fi
+
 DOMAIN_NAME="${DOMAIN_NAME:-}"
 PROXY_KEY="${PROXY_API_KEYS:-}"
 ADMIN_PASS="${ADMIN_PASSWORD:-}"
 NIM_KEY="${NIM_API_KEYS:-}"
 
-# 2. System Dependency Installation
-log "Installing dependencies (curl, git, openssl, jq, ca-certificates)..."
-export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq ca-certificates curl git jq openssl ufw >/dev/null
+# 2. Package Manager Detection & Dependency Installation
+detect_pm() {
+    if command -v apt-get &>/dev/null; then echo "apt";
+    elif command -v dnf &>/dev/null; then echo "dnf";
+    elif command -v yum &>/dev/null; then echo "yum";
+    elif command -v pacman &>/dev/null; then echo "pacman";
+    elif command -v brew &>/dev/null; then echo "brew";
+    else echo "unknown";
+    fi
+}
+PM=$(detect_pm)
+log "Detected Package Manager: ${PM}"
+
+install_deps() {
+    log "Installing dependencies (curl, git, openssl, jq, ca-certificates)..."
+    case $PM in
+        apt)
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq ca-certificates curl git jq openssl >/dev/null
+            ;;
+        dnf|yum)
+            $PM install -y -q ca-certificates curl git jq openssl >/dev/null
+            ;;
+        pacman)
+            pacman -Sy --noconfirm --needed ca-certificates curl git jq openssl >/dev/null
+            ;;
+        brew)
+            brew install curl git openssl jq >/dev/null
+            ;;
+        *)
+            warn "Could not auto-install dependencies. Please ensure curl, git, openssl, and jq are installed."
+            ;;
+    esac
+}
+install_deps
 
 # 3. Docker Engine & Compose Check
 if ! command -v docker &>/dev/null; then
-    log "Docker Engine not detected. Installing Docker via official script..."
-    curl -fsSL https://get.docker.com | sh >/dev/null
-    systemctl enable --now docker
+    if [[ "$OS" == "Darwin" ]]; then
+        err "Docker is not installed. Please install Docker Desktop for macOS: https://docs.docker.com/desktop/install/mac-install/"
+    else
+        log "Docker Engine not detected. Installing Docker via official script..."
+        curl -fsSL https://get.docker.com | sh >/dev/null
+        systemctl enable --now docker
+    fi
 fi
 
 if ! docker compose version &>/dev/null; then
-    log "Installing Docker Compose plugin..."
-    apt-get install -y -qq docker-compose-plugin >/dev/null
+    if [[ "$OS" == "Linux" ]]; then
+        log "Installing Docker Compose plugin..."
+        if [[ "$PM" == "apt" ]]; then
+            apt-get install -y -qq docker-compose-plugin >/dev/null
+        elif [[ "$PM" == "dnf" || "$PM" == "yum" ]]; then
+            $PM install -y -q docker-compose-plugin >/dev/null
+        fi
+    else
+        warn "Docker compose command not found. Ensure Docker Desktop is fully installed."
+    fi
 fi
+
+if ! docker info &>/dev/null; then
+    err "Docker daemon is not running. Please start Docker and try again."
+fi
+
 ok "Docker & Docker Compose are ready."
 
 # 4. Clone / Prepare Workspace
 if [[ ! -f "docker-compose.do.yml" ]]; then
     log "Cloning Nimmakai repository into ${INSTALL_DIR}..."
-    rm -rf "${INSTALL_DIR}"
-    git clone --depth 1 https://github.com/vskrch/Nimmakai.git "${INSTALL_DIR}"
+    if [[ ! -d "${INSTALL_DIR}" ]]; then
+        mkdir -p "${INSTALL_DIR}"
+    fi
+    # Use a clean clone if it's not already a repository
+    if [[ ! -d "${INSTALL_DIR}/.git" ]]; then
+        rm -rf "${INSTALL_DIR:?}/"* || true
+        git clone --depth 1 https://github.com/vskrch/Nimmakai.git "${INSTALL_DIR}"
+    else
+        log "Repository already cloned in ${INSTALL_DIR}."
+    fi
     cd "${INSTALL_DIR}"
 fi
 
@@ -113,29 +186,89 @@ if [[ ${READY} -ne 1 ]]; then
 fi
 ok "Nimmakai Gateway container is running and HEALTHY!"
 
-# 8. Firewall Configuration
-log "Configuring UFW firewall rules (22, 80, 443)..."
-ufw allow 22/tcp >/dev/null 2>&1 || true
-ufw allow 80/tcp >/dev/null 2>&1 || true
-ufw allow 443/tcp >/dev/null 2>&1 || true
-ufw --force enable >/dev/null 2>&1 || true
+# 8. Firewall Configuration (Linux Only)
+if [[ "$OS" == "Linux" ]]; then
+    log "Configuring firewall rules (22, 80, 443)..."
+    if command -v ufw &>/dev/null; then
+        ufw allow 22/tcp >/dev/null 2>&1 || true
+        ufw allow 80/tcp >/dev/null 2>&1 || true
+        ufw allow 443/tcp >/dev/null 2>&1 || true
+        ufw --force enable >/dev/null 2>&1 || true
+        log "UFW configured."
+    elif command -v firewall-cmd &>/dev/null; then
+        firewall-cmd --permanent --add-port=22/tcp >/dev/null 2>&1 || true
+        firewall-cmd --permanent --add-port=80/tcp >/dev/null 2>&1 || true
+        firewall-cmd --permanent --add-port=443/tcp >/dev/null 2>&1 || true
+        firewall-cmd --reload >/dev/null 2>&1 || true
+        log "firewalld configured."
+    else
+        warn "No supported firewall manager found (ufw/firewalld). Skipping firewall config."
+    fi
+else
+    log "Skipping firewall configuration on macOS/Non-Linux."
+fi
 
 # 9. Automatic SSL / Caddy Setup (Optional / Auto)
-PUBLIC_IP=$(curl -fsS http://checkip.amazonaws.com 2>/dev/null || curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address 2>/dev/null || echo "localhost")
+PUBLIC_IP=$(curl -fsS http://checkip.amazonaws.com 2>/dev/null || curl -fsS http://169.254.169.254/metadata/v1/interfaces/public/0/ipv4/address 2>/dev/null || echo "127.0.0.1")
 
 if [[ -n "${DOMAIN_NAME}" ]]; then
     log "Configuring Caddy for automatic Let's Encrypt SSL on ${DOMAIN_NAME}..."
     if ! command -v caddy &>/dev/null; then
-        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-        curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
-        apt-get update -qq && apt-get install -y -qq caddy >/dev/null
+        case $PM in
+            apt)
+                apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https >/dev/null
+                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+                curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list
+                apt-get update -qq && apt-get install -y -qq caddy >/dev/null
+                ;;
+            dnf)
+                dnf install -y 'dnf-command(copr)' >/dev/null
+                dnf copr enable -y @caddy/caddy >/dev/null
+                dnf install -y caddy >/dev/null
+                ;;
+            yum)
+                yum install -y yum-plugin-copr >/dev/null
+                yum copr enable -y @caddy/caddy >/dev/null
+                yum install -y caddy >/dev/null
+                ;;
+            pacman)
+                pacman -Sy --noconfirm caddy >/dev/null
+                ;;
+            brew)
+                brew install caddy >/dev/null
+                ;;
+            *)
+                err "Could not automatically install Caddy using ${PM}. Please install Caddy manually."
+                ;;
+        esac
     fi
-    cat <<EOF > /etc/caddy/Caddyfile
+
+    # Determine Caddyfile location
+    if [[ "$OS" == "Darwin" ]]; then
+        CADDY_FILE="/usr/local/etc/Caddyfile"
+        if command -v brew &>/dev/null && [[ -d "$(brew --prefix)/etc" ]]; then
+            CADDY_FILE="$(brew --prefix)/etc/Caddyfile"
+        fi
+    else
+        CADDY_FILE="/etc/caddy/Caddyfile"
+    fi
+
+    cat <<EOF > "${CADDY_FILE}"
 ${DOMAIN_NAME} {
     reverse_proxy 127.0.0.1:8080
 }
 EOF
-    systemctl reload caddy || systemctl restart caddy
+
+    if command -v systemctl &>/dev/null; then
+        systemctl enable --now caddy
+        systemctl reload caddy || systemctl restart caddy
+    elif command -v brew &>/dev/null && [[ "$OS" == "Darwin" ]]; then
+        brew services restart caddy
+    else
+        warn "Could not restart Caddy daemon automatically via systemd/brew. Attempting manual start..."
+        caddy start --config "${CADDY_FILE}" || warn "Manual start failed. Please run: caddy start --config \"${CADDY_FILE}\""
+    fi
+    
     PUBLIC_URL="https://${DOMAIN_NAME}"
 else
     PUBLIC_URL="http://${PUBLIC_IP}"
