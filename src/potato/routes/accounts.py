@@ -461,17 +461,19 @@ async def admin_suspend_user(user_id: str, request: Request) -> JSONResponse:
 @router.get("/v1/account/provider-keys")
 async def list_user_provider_keys(request: Request) -> JSONResponse:
     """List authenticated user's BYOK provider keys (masked)."""
-    user, _ = resolve_auth(request, _store(request))
-    if not user:
+    settings = _settings(request)
+    try:
+        auth_ctx = resolve_auth(request, settings)
+        user_id = auth_ctx.user_id or "admin"
+    except Exception:
         return JSONResponse({"error": {"message": "Authentication required", "code": "unauthorized"}}, status_code=401)
 
     from potato.catalog.db import get_db
     from potato.accounts.byok import decrypt_api_key, mask_key
-    settings = _settings(request)
     db = get_db(settings.sqlite_path)
-    master_secret = str(getattr(settings, "admin_password", None) or settings.proxy_api_keys[0] if settings.proxy_api_keys else "potato-secret")
+    master_secret = str(getattr(settings, "admin_password", None) or (settings.proxy_api_keys[0] if settings.proxy_api_keys else "potato-secret"))
 
-    raw_keys = db.load_user_provider_keys(user["id"])
+    raw_keys = db.load_user_provider_keys(user_id)
     out = []
     for k in raw_keys:
         masked = ""
@@ -495,8 +497,11 @@ async def list_user_provider_keys(request: Request) -> JSONResponse:
 @router.post("/v1/account/provider-keys")
 async def save_user_provider_key(request: Request) -> JSONResponse:
     """Save or update user's BYOK provider key (encrypted at rest)."""
-    user, _ = resolve_auth(request, _store(request))
-    if not user:
+    settings = _settings(request)
+    try:
+        auth_ctx = resolve_auth(request, settings)
+        user_id = auth_ctx.user_id or "admin"
+    except Exception:
         return JSONResponse({"error": {"message": "Authentication required", "code": "unauthorized"}}, status_code=401)
 
     try:
@@ -515,14 +520,13 @@ async def save_user_provider_key(request: Request) -> JSONResponse:
     from potato.catalog.db import get_db
     from potato.accounts.byok import encrypt_api_key, mask_key
     import time
-    settings = _settings(request)
     db = get_db(settings.sqlite_path)
-    master_secret = str(getattr(settings, "admin_password", None) or settings.proxy_api_keys[0] if settings.proxy_api_keys else "potato-secret")
+    master_secret = str(getattr(settings, "admin_password", None) or (settings.proxy_api_keys[0] if settings.proxy_api_keys else "potato-secret"))
 
     ciphertext = encrypt_api_key(raw_api_key, master_secret)
     updated_at = time.time()
     db.upsert_user_provider_key(
-        account_id=user["id"],
+        account_id=user_id,
         provider_id=provider_id,
         api_key_ciphertext=ciphertext,
         enabled=1 if enabled else 0,
@@ -545,13 +549,15 @@ async def save_user_provider_key(request: Request) -> JSONResponse:
 @router.delete("/v1/account/provider-keys/{provider_id}")
 async def delete_user_provider_key(provider_id: str, request: Request) -> JSONResponse:
     """Delete user's BYOK provider key."""
-    user, _ = resolve_auth(request, _store(request))
-    if not user:
+    settings = _settings(request)
+    try:
+        auth_ctx = resolve_auth(request, settings)
+        user_id = auth_ctx.user_id or "admin"
+    except Exception:
         return JSONResponse({"error": {"message": "Authentication required", "code": "unauthorized"}}, status_code=401)
 
     from potato.catalog.db import get_db
-    settings = _settings(request)
     db = get_db(settings.sqlite_path)
-    db.delete_user_provider_key(user["id"], provider_id.lower())
+    db.delete_user_provider_key(user_id, provider_id.lower())
 
     return JSONResponse({"ok": True, "deleted_provider": provider_id.lower()})
