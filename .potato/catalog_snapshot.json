@@ -100,12 +100,12 @@
   },
   "live_ids": [
     "minimaxai/minimax-m3",
-    "nim/nv-embed-v1",
+    "nim/my-catalog-model",
     "nvidia/nemotron-3-super-120b-a12b",
     "qwen/qwen3.5-122b-a10b",
     "stepfun/step-3.7-flash",
     "zai/glm-5.2"
   ],
   "probed_ok": [],
-  "saved_at": 1785096169.223354
+  "saved_at": 1785096660.8088
 }

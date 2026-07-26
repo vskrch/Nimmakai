@@ -85,12 +85,27 @@ async def test_health_endpoint():
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as c:
-        r = await c.get("/health")
+        r = await c.get("/health", headers=AUTH)
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "ok"
         assert "version" in body
         assert "providers" in body
+
+
+@pytest.mark.asyncio
+async def test_health_endpoint_anonymous():
+    app = _make_app()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as c:
+        r = await c.get("/health")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["status"] == "ok"
+        assert "version" in body
+        assert "providers" not in body
+        assert "keys_configured" not in body
 
 
 @pytest.mark.asyncio

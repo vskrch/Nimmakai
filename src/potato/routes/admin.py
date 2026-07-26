@@ -11,7 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from potato import __version__
-from potato.auth import require_admin, require_proxy_auth
+from potato.auth import require_admin, require_proxy_auth, resolve_auth
 from potato.catalog.providers import provider_from_request_body
 from potato.config import get_settings
 
@@ -191,22 +191,33 @@ async def health(request: Request) -> JSONResponse:
     )
     if no_keys or failed_catalog:
         status = "degraded"
-    return JSONResponse(
-        {
-            "status": status,
-            "version": __version__,
-            "nim_keys_configured": keys,  # legacy field (default pool size)
-            "keys_configured": total_keys,
-            "keys_available": keys_available,
-            "active_providers": active_providers,
-            "live_models": live_models,
-            "catalog_ok": catalog_ok,
-            "proxy_auth_configured": proxy_configured,
-            "providers": providers,
-            "routing_enabled": getattr(settings, "routing_enabled", True),
-            "dashboard": "/dashboard",
-        }
-    )
+    is_auth = False
+    try:
+        ctx = resolve_auth(request, settings)
+        is_auth = ctx.is_admin or ctx.role != "anonymous"
+    except Exception:
+        is_auth = False
+
+    payload: dict[str, Any] = {
+        "status": status,
+        "version": __version__,
+        "active_providers": active_providers,
+        "live_models": live_models,
+        "catalog_ok": catalog_ok,
+        "proxy_auth_configured": proxy_configured,
+        "routing_enabled": getattr(settings, "routing_enabled", True),
+        "dashboard": "/dashboard",
+    }
+    if is_auth:
+        payload.update(
+            {
+                "nim_keys_configured": keys,  # legacy field (default pool size)
+                "keys_configured": total_keys,
+                "keys_available": keys_available,
+                "providers": providers,
+            }
+        )
+    return JSONResponse(payload)
 
 
 @router.get("/ready")

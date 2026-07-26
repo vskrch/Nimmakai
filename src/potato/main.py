@@ -695,11 +695,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.get("/dashboard", response_class=HTMLResponse)
+    @app.get("/dashboard/{path:path}", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:
         """Serve the web dashboard."""
         return _dashboard_html()
 
     @app.get("/chat", response_class=HTMLResponse)
+    @app.get("/chat/{path:path}", response_class=HTMLResponse)
     async def chat_ui() -> HTMLResponse:
         """Serve the standalone Claude-style chat app (same SPA, client-routed)."""
         return _dashboard_html()
