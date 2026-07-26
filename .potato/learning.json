@@ -84,7 +84,7 @@
         "empty_replies": 0,
         "ewma_quality": 0.3,
         "failures": 0,
-        "last_updated": 1785100491.7433212,
+        "last_updated": 1785106969.461204,
         "score_delta": 3.6,
         "successes": 1,
         "thompson_alpha": 2.0,
@@ -112,7 +112,7 @@
         "empty_replies": 0,
         "ewma_quality": 0.51,
         "failures": 0,
-        "last_updated": 1785100493.5843241,
+        "last_updated": 1785106971.012473,
         "score_delta": 6.12,
         "successes": 2,
         "thompson_alpha": 3.0,
@@ -126,7 +126,7 @@
         "empty_replies": 0,
         "ewma_quality": 0.3,
         "failures": 0,
-        "last_updated": 1785100492.782012,
+        "last_updated": 1785106970.062987,
         "score_delta": 3.6,
         "successes": 1,
         "thompson_alpha": 2.0,
@@ -326,5 +326,5 @@
       }
     }
   },
-  "saved_at": 1785100493.584852
+  "saved_at": 1785106971.012693
 }

@@ -119,6 +119,7 @@ def transform_anthropic_to_openai(body: dict[str, Any]) -> dict[str, Any]:
                 openai_msgs.append({"role": role, "content": content_raw})
             elif isinstance(content_raw, list):
                 text_parts = []
+                image_blocks = []
                 tool_calls = []
                 tool_results = []
 
@@ -128,6 +129,22 @@ def transform_anthropic_to_openai(body: dict[str, Any]) -> dict[str, Any]:
                     btype = block.get("type")
                     if btype == "text":
                         text_parts.append(block.get("text", ""))
+                    elif btype == "image":
+                        source = block.get("source", {})
+                        if isinstance(source, dict):
+                            stype = source.get("type")
+                            if stype == "base64":
+                                mtype = source.get("media_type", "image/jpeg")
+                                b64 = source.get("data", "")
+                                image_blocks.append({
+                                    "type": "image_url",
+                                    "image_url": {"url": f"data:{mtype};base64,{b64}"},
+                                })
+                            elif stype == "url":
+                                image_blocks.append({
+                                    "type": "image_url",
+                                    "image_url": {"url": source.get("url", "")},
+                                })
                     elif btype == "tool_use":
                         tool_calls.append({
                             "id": block.get("id", f"toolu_{uuid.uuid4().hex[:12]}"),
@@ -153,7 +170,13 @@ def transform_anthropic_to_openai(body: dict[str, Any]) -> dict[str, Any]:
                         asst_msg["tool_calls"] = tool_calls
                     openai_msgs.append(asst_msg)
                 else:  # user role
-                    if text_parts:
+                    if image_blocks:
+                        multi_content: list[dict[str, Any]] = []
+                        if text_parts:
+                            multi_content.append({"type": "text", "text": "\n".join(text_parts)})
+                        multi_content.extend(image_blocks)
+                        openai_msgs.append({"role": "user", "content": multi_content})
+                    elif text_parts:
                         openai_msgs.append({"role": "user", "content": "\n".join(text_parts)})
                     for tr in tool_results:
                         openai_msgs.append(tr)
