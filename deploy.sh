@@ -426,6 +426,13 @@ setup_cloudflare_tunnel() {
         elif [[ "$OS" == "Darwin" ]]; then
             if command -v brew &>/dev/null; then
                 brew install cloudflared >/dev/null 2>&1 || true
+            else
+                curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-${CF_ARCH}.tgz" -o /tmp/cloudflared.tgz >/dev/null 2>&1 || true
+                if [[ -f /tmp/cloudflared.tgz ]]; then
+                    tar -xzf /tmp/cloudflared.tgz -C /usr/local/bin >/dev/null 2>&1 || true
+                    chmod +x /usr/local/bin/cloudflared 2>/dev/null || true
+                    rm -f /tmp/cloudflared.tgz
+                fi
             fi
         fi
     fi
@@ -434,6 +441,7 @@ setup_cloudflare_tunnel() {
         warn "cloudflared binary installation failed. Falling back to default URL: ${PUBLIC_URL}"
         return
     fi
+    CLOUDFLARED_BIN="$(command -v cloudflared || echo /usr/local/bin/cloudflared)"
 
     if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
         log "Provisioning persistent Cloudflare Token Tunnel service..."
@@ -447,7 +455,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/cloudflared tunnel --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+ExecStart=${CLOUDFLARED_BIN} tunnel --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
 Restart=always
 RestartSec=5s
 
@@ -469,7 +477,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=root
-ExecStart=/usr/local/bin/cloudflared tunnel --protocol http2 --metrics 127.0.0.1:45678 --url http://127.0.0.1:8080
+ExecStart=${CLOUDFLARED_BIN} tunnel --protocol http2 --metrics 127.0.0.1:45678 --url http://127.0.0.1:8080
 Restart=always
 RestartSec=5s
 
@@ -480,7 +488,7 @@ EOF
             systemctl enable --now cloudflared-potato >/dev/null 2>&1 || true
         else
             pkill -f "cloudflared tunnel" || true
-            nohup cloudflared tunnel --protocol http2 --metrics 127.0.0.1:45678 --url http://127.0.0.1:8080 >/tmp/cloudflared.log 2>&1 &
+            nohup "${CLOUDFLARED_BIN}" tunnel --protocol http2 --metrics 127.0.0.1:45678 --url http://127.0.0.1:8080 >/tmp/cloudflared.log 2>&1 &
         fi
     fi
 
