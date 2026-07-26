@@ -55,6 +55,8 @@ fi
 ENABLE_CLOUDFLARE_TUNNEL="${ENABLE_CLOUDFLARE_TUNNEL:-false}"
 CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-}"
 
+USE_DOCKER="${USE_DOCKER:-true}"
+
 for arg in "$@"; do
     case $arg in
         --tunnel|-t)
@@ -66,6 +68,9 @@ for arg in "$@"; do
             ;;
         --domain=*)
             DOMAIN_NAME="${arg#*=}"
+            ;;
+        --native|-n)
+            USE_DOCKER="false"
             ;;
     esac
 done
@@ -133,35 +138,23 @@ install_deps() {
 }
 install_deps
 
-# 3. Docker Engine & Compose Check
-if ! command -v docker &>/dev/null; then
-    if [[ "$OS" == "Darwin" ]]; then
-        err "Docker is not installed. Please install Docker Desktop for macOS: https://docs.docker.com/desktop/install/mac-install/"
-    else
-        log "Docker Engine not detected. Installing Docker via official script..."
-        curl -fsSL https://get.docker.com | sh >/dev/null
-        systemctl enable --now docker
-    fi
-fi
-
-if ! docker compose version &>/dev/null; then
-    if [[ "$OS" == "Linux" ]]; then
-        log "Installing Docker Compose plugin..."
-        if [[ "$PM" == "apt" ]]; then
-            apt-get install -y -qq docker-compose-plugin >/dev/null
-        elif [[ "$PM" == "dnf" || "$PM" == "yum" ]]; then
-            $PM install -y -q docker-compose-plugin >/dev/null
+# 3. Docker Engine & Native Fallback Verification
+if [[ "${USE_DOCKER}" == "true" ]]; then
+    if ! command -v docker &>/dev/null || ! docker info &>/dev/null; then
+        if [[ "$OS" == "Linux" ]]; then
+            log "Docker Engine not active. Attempting automatic Docker installation..."
+            curl -fsSL https://get.docker.com | sh >/dev/null 2>&1 || true
+            systemctl enable --now docker >/dev/null 2>&1 || true
         fi
+    fi
+
+    if ! command -v docker &>/dev/null || ! docker info &>/dev/null; then
+        warn "Docker Engine is not running or unprivileged. Auto-switching to Native Python Mode..."
+        USE_DOCKER="false"
     else
-        warn "Docker compose command not found. Ensure Docker Desktop is fully installed."
+        ok "Docker Engine & Daemon active."
     fi
 fi
-
-if ! docker info &>/dev/null; then
-    err "Docker daemon is not running. Please start Docker and try again."
-fi
-
-ok "Docker & Docker Compose are ready."
 
 # 4. Clone / Prepare Workspace
 if [[ ! -f "docker-compose.do.yml" ]]; then
@@ -258,9 +251,55 @@ log "Writing production configuration (.env)..."
 chmod 600 .env
 ok "Production credentials configured in .env"
 
-# 6. Build & Launch Docker Container
-log "Building and starting Potato Gateway container..."
-docker compose -f docker-compose.do.yml up -d --build
+# 6. Build & Launch Potato Gateway Service (Docker vs Native)
+if [[ "${USE_DOCKER}" == "true" ]]; then
+    log "Building and starting Potato Gateway Docker container..."
+    docker compose -f docker-compose.do.yml up -d --build
+else
+    log "Preparing Native Python 3 environment..."
+    if ! command -v python3 &>/dev/null; then
+        case $PM in
+            apt) apt-get install -y -qq python3 python3-venv python3-pip >/dev/null 2>&1 || true ;;
+            dnf|yum) $PM install -y -q python3 python3-pip >/dev/null 2>&1 || true ;;
+            pacman) pacman -Sy --noconfirm python python-pip >/dev/null 2>&1 || true ;;
+            brew) brew install python >/dev/null 2>&1 || true ;;
+        esac
+    fi
+    PYTHON_BIN="$(command -v python3 || echo python)"
+    if [[ ! -d .venv ]]; then
+        log "Creating Python virtual environment (.venv)..."
+        "${PYTHON_BIN}" -m venv .venv
+    fi
+    log "Installing Potato Gateway Python dependencies..."
+    .venv/bin/python -m pip install -q --upgrade pip >/dev/null 2>&1 || true
+    .venv/bin/python -m pip install -q -e . >/dev/null 2>&1 || true
+
+    log "Starting Potato Gateway native service (uvicorn)..."
+    if command -v systemctl &>/dev/null && [[ "$OS" == "Linux" ]]; then
+        cat <<EOF > /etc/systemd/system/potato.service
+[Unit]
+Description=Potato Gateway Native Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=$(pwd)
+EnvironmentFile=$(pwd)/.env
+ExecStart=$(pwd)/.venv/bin/python -m uvicorn potato.main:app --host 0.0.0.0 --port 8080
+Restart=always
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        systemctl enable --now potato >/dev/null 2>&1 || true
+    else
+        pkill -f "uvicorn potato.main:app" || true
+        nohup .venv/bin/python -m uvicorn potato.main:app --host 0.0.0.0 --port 8080 > /tmp/potato.log 2>&1 &
+    fi
+fi
 
 # 7. Health Check Verification Loop
 log "Waiting for Potato container healthcheck (/ready or /health)..."
