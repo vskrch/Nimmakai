@@ -105,9 +105,7 @@ async def test_signup_verify_approve_issues_key():
         assert v.json()["user"]["status"] == "pending_approval"
 
         # User cannot call /v1 yet
-        bad = await client.get(
-            "/v1/models", headers={"Authorization": "Bearer sk-nk-fake"}
-        )
+        bad = await client.get("/v1/models", headers={"Authorization": "Bearer sk-nk-fake"})
         assert bad.status_code == 401
 
         # Admin approves with break-glass key
@@ -127,15 +125,11 @@ async def test_signup_verify_approve_issues_key():
         assert api_key.startswith("sk-nk-")
 
         # Active key auth works (stats requires auth)
-        stats = await client.get(
-            "/stats", headers={"Authorization": f"Bearer {api_key}"}
-        )
+        stats = await client.get("/stats", headers={"Authorization": f"Bearer {api_key}"})
         assert stats.status_code == 200
 
         # Pending/inactive keys rejected — rotate requires active user session
-        me = await client.get(
-            "/auth/me", headers={"Authorization": f"Bearer {api_key}"}
-        )
+        me = await client.get("/auth/me", headers={"Authorization": f"Bearer {api_key}"})
         assert me.status_code == 200
         assert me.json()["authenticated"] is True
         assert me.json()["user"]["status"] == "active"
@@ -217,7 +211,7 @@ async def test_suspended_admin_session_loses_proxy_and_admin_access():
 async def test_suspend_endpoint_revokes_sessions():
     app, _settings = _make_app()
     store: AccountStore = app.state.accounts
-    admin = store.create_user(
+    store.create_user(
         "revoker@example.com",
         "password123",
         role="admin",
@@ -270,9 +264,7 @@ async def test_bearer_api_key_overrides_stale_session_cookie():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         # Establish a session for a different suspended user
-        other = store.create_user(
-            "stale@example.com", "password123", role="user", status="active"
-        )
+        other = store.create_user("stale@example.com", "password123", role="user", status="active")
         await client.post(
             "/auth/login",
             json={"email": "stale@example.com", "password": "password123"},
@@ -322,16 +314,12 @@ async def test_analytics_scoped_to_user():
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        r1 = await client.get(
-            "/analytics/traces", headers={"Authorization": f"Bearer {k1}"}
-        )
+        r1 = await client.get("/analytics/traces", headers={"Authorization": f"Bearer {k1}"})
         assert r1.status_code == 200
         ids1 = {t["trace_id"] for t in r1.json()["traces"]}
         assert ids1 == {"t-u1"}
 
-        r2 = await client.get(
-            "/analytics/traces", headers={"Authorization": f"Bearer {k2}"}
-        )
+        r2 = await client.get("/analytics/traces", headers={"Authorization": f"Bearer {k2}"})
         ids2 = {t["trace_id"] for t in r2.json()["traces"]}
         assert ids2 == {"t-u2"}
 
@@ -352,9 +340,7 @@ async def test_non_admin_cannot_list_users():
     key = store.issue_api_key(u["id"])["api_key"]
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        r = await client.get(
-            "/admin/users", headers={"Authorization": f"Bearer {key}"}
-        )
+        r = await client.get("/admin/users", headers={"Authorization": f"Bearer {key}"})
         assert r.status_code == 403
 
 
@@ -384,9 +370,7 @@ def test_concurrent_approve_issues_one_key():
     results: list[dict] = []
 
     def _approve():
-        results.append(
-            store.approve_and_issue_key(u["id"], approved_by="admin-a")
-        )
+        results.append(store.approve_and_issue_key(u["id"], approved_by="admin-a"))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
         futs = [pool.submit(_approve) for _ in range(2)]

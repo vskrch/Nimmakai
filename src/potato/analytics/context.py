@@ -7,9 +7,7 @@ from typing import Any
 
 from potato.analytics.models import TraceSpan
 
-_spans_cv: ContextVar[list[TraceSpan] | None] = ContextVar(
-    "potato_trace_spans", default=None
-)
+_spans_cv: ContextVar[list[TraceSpan] | None] = ContextVar("potato_trace_spans", default=None)
 
 
 def begin_span_collection() -> list[TraceSpan]:

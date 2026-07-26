@@ -172,9 +172,7 @@ async def test_context_overflow_advances() -> None:
     result = await ex.execute_json("/chat/completions", {"messages": []}, decision)
     assert result.status_code == 200
     assert result.model == "model-b"
-    headers = ex.routing_headers(
-        decision, model=result.model, key_id="key-1", fallback_index=1
-    )
+    headers = ex.routing_headers(decision, model=result.model, key_id="key-1", fallback_index=1)
     assert headers.get("X-Potato-Context-Length") == "131072"
 
     settings = Settings(nim_api_keys=["k"])
@@ -188,6 +186,7 @@ async def test_context_overflow_advances() -> None:
     d = sel.resolve("potato/auto", intent)
     assert d.mode == "auto"
     assert d.chain
+
 
 @pytest.mark.asyncio
 async def test_auto_chain_expands_related_intents() -> None:
@@ -306,14 +305,17 @@ async def test_streaming_watchdog_ttft_stall(monkeypatch: pytest.MonkeyPatch) ->
         if model == "model-a":
             # Simulate a stream that connects (returns 200) but never yields chunks
             import asyncio
+
             async def stalled_iter():
                 await asyncio.sleep(2.0)
                 yield b"never reached"
+
             return 200, stalled_iter(), {}, _key()
         else:
             # Model B succeeds immediately
             async def ok_iter():
                 yield b"ok"
+
             return 200, ok_iter(), {}, _key(1)
 
     upstream = AsyncMock()
@@ -327,11 +329,13 @@ async def test_streaming_watchdog_ttft_stall(monkeypatch: pytest.MonkeyPatch) ->
         requested_model="auto",
     )
     ex = FallbackExecutor(upstream, reg, settings)
-    
+
     import asyncio
+
     original_wait_for = asyncio.wait_for
-    
+
     call_count = 0
+
     async def mock_wait_for(fut, timeout):
         nonlocal call_count
         call_count += 1
@@ -340,22 +344,22 @@ async def test_streaming_watchdog_ttft_stall(monkeypatch: pytest.MonkeyPatch) ->
             # cancel it (closing the generator cleanly) instead of abandoning it.
             return await original_wait_for(fut, 0.0)
         return await original_wait_for(fut, timeout)
-        
+
     monkeypatch.setattr(asyncio, "wait_for", mock_wait_for)
-    
+
     result = await original_wait_for(
-        ex.execute_stream("/chat/completions", {"messages": []}, decision),
-        timeout=2.0
+        ex.execute_stream("/chat/completions", {"messages": []}, decision), timeout=2.0
     )
-    
+
     assert result.status_code == 200
     assert result.model == "model-b"
     assert result.fallback_index == 1
-    
+
     # ensure we can consume it, restoring wait_for so the inner logic works
     monkeypatch.setattr(asyncio, "wait_for", original_wait_for)
     chunks = [c async for c in result.byte_iter]
     assert chunks == [b"ok"]
+
 
 @pytest.mark.asyncio
 async def test_token_accounting_json() -> None:
@@ -364,7 +368,17 @@ async def test_token_accounting_json() -> None:
     reg.live_ids = {"model-a"}
 
     async def fake_json(method, path, **kwargs):
-        return 200, {"id": "ok", "model": "model-a", "choices": [], "usage": {"prompt_tokens": 10, "completion_tokens": 5}}, {}, _key()
+        return (
+            200,
+            {
+                "id": "ok",
+                "model": "model-a",
+                "choices": [],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+            {},
+            _key(),
+        )
 
     upstream = AsyncMock()
     upstream.request_json = fake_json
@@ -378,9 +392,10 @@ async def test_token_accounting_json() -> None:
     )
     ex = FallbackExecutor(upstream, reg, settings)
     await ex.execute_json("/chat/completions", {"messages": []}, decision)
-    
+
     assert ex.stats.model_tokens["model-a"].prompt_tokens == 10
     assert ex.stats.model_tokens["model-a"].completion_tokens == 5
+
 
 @pytest.mark.asyncio
 async def test_token_accounting_stream() -> None:
@@ -392,6 +407,7 @@ async def test_token_accounting_stream() -> None:
         async def ok_iter():
             yield b'data: {"choices": [{"delta": {"content": "hello"}}]}\n\n'
             yield b'data: {"choices": [], "usage": {"prompt_tokens": 20, "completion_tokens": 10}}\n\n'
+
         return 200, ok_iter(), {}, _key()
 
     upstream = AsyncMock()
@@ -406,10 +422,10 @@ async def test_token_accounting_stream() -> None:
     )
     ex = FallbackExecutor(upstream, reg, settings)
     result = await ex.execute_stream("/chat/completions", {"messages": []}, decision)
-    
+
     # consume
-    chunks = [c async for c in result.byte_iter]
-    
+    [c async for c in result.byte_iter]
+
     assert ex.stats.model_tokens["model-a"].prompt_tokens == 20
     assert ex.stats.model_tokens["model-a"].completion_tokens == 10
 
@@ -684,9 +700,7 @@ async def test_graceful_fallback_tries_any_live_model(
 ) -> None:
     """When the entire intent chain fails, graceful fallback casts the
     widest net: any live model whose provider has a runtime."""
-    settings = Settings(
-        nim_api_keys=["k"], max_model_fallbacks=2, request_deadline_seconds=10.0
-    )
+    settings = Settings(nim_api_keys=["k"], max_model_fallbacks=2, request_deadline_seconds=10.0)
     reg = ModelRegistry.from_yaml(YAML)
     reg.live_ids = {"model-a", "model-b", "model-c"}
 

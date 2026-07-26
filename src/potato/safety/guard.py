@@ -61,9 +61,7 @@ class AccountGuard:
         preferred = None
         preferred_model = None
         if self.settings.sticky_sessions_enabled:
-            session_id = self.sticky.resolve_session_id(
-                headers, proxy_token=proxy_token, body=body
-            )
+            session_id = self.sticky.resolve_session_id(headers, proxy_token=proxy_token, body=body)
             preferred = self.sticky.get(session_id)
             preferred_model = self.sticky.get_model(session_id)
 
@@ -93,9 +91,7 @@ class AccountGuard:
         pin_model: bool = False,
     ) -> None:
         await self.gate.release()
-        if not (
-            self.settings.sticky_sessions_enabled and ctx.session_id and success
-        ):
+        if not (self.settings.sticky_sessions_enabled and ctx.session_id and success):
             return
         # OpenRouter: only pin model on success; failed routes re-select next turn
         if pin_model and model_id:
@@ -107,8 +103,7 @@ class AccountGuard:
         return {
             "error": {
                 "message": (
-                    "All NIM keys unavailable (quarantined, budget, or rate-limited). "
-                    "Retry later."
+                    "All NIM keys unavailable (quarantined, budget, or rate-limited). Retry later."
                 ),
                 "type": "server_error",
                 "code": "potato_pool_exhausted",

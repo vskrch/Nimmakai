@@ -83,9 +83,7 @@ class TraceWriter:
                 self._flushed += len(batch)
                 self._publish_batch(batch)
             except Exception:
-                logger.exception(
-                    "analytics final drain failed (n=%s); dropping", len(batch)
-                )
+                logger.exception("analytics final drain failed (n=%s); dropping", len(batch))
                 self._dropped += len(batch)
         logger.info(
             "analytics writer stopped flushed=%s dropped=%s",
@@ -100,9 +98,7 @@ class TraceWriter:
         except asyncio.QueueFull:
             self._dropped += 1
             if self._dropped % 100 == 1:
-                logger.warning(
-                    "analytics queue full — dropped %s traces", self._dropped
-                )
+                logger.warning("analytics queue full — dropped %s traces", self._dropped)
             return
         # Immediate live publish (don't wait for SQLite flush)
         if self._event_bus is not None:
@@ -115,9 +111,7 @@ class TraceWriter:
         while not self._stopped:
             batch: list[TraceRecord] = []
             try:
-                item = await asyncio.wait_for(
-                    self._queue.get(), timeout=self._flush_interval
-                )
+                item = await asyncio.wait_for(self._queue.get(), timeout=self._flush_interval)
                 batch.append(item)
             except TimeoutError:
                 pass

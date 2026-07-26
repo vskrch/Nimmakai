@@ -135,9 +135,7 @@ def test_auth_flows_through_dashboard_signin():
     _init_accounts(app, settings)
 
     async def _run():
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as client:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             r = await client.post(
                 "/auth/login",
                 json={"email": "admin@localhost", "password": "hunter2"},

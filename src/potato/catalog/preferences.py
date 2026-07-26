@@ -62,9 +62,7 @@ class IntentPreference:
 class UserPreferences:
     """Persistent user overrides for per-intent model selection."""
 
-    path: Path = field(
-        default_factory=lambda: Path(".potato/user_preferences.json")
-    )
+    path: Path = field(default_factory=lambda: Path(".potato/user_preferences.json"))
     preferences: dict[str, IntentPreference] = field(default_factory=dict)
     db_path: Path | None = None
     _db: Any = field(default=None, repr=False)
@@ -85,9 +83,7 @@ class UserPreferences:
         note: str = "",
     ) -> IntentPreference:
         if intent not in VALID_INTENTS:
-            raise ValueError(
-                f"Invalid intent '{intent}'. Must be one of: {VALID_INTENTS}"
-            )
+            raise ValueError(f"Invalid intent '{intent}'. Must be one of: {VALID_INTENTS}")
         pref = IntentPreference(
             intent=intent,
             chain=list(chain),
@@ -115,10 +111,7 @@ class UserPreferences:
         self.save()
 
     def list_all(self) -> list[dict[str, Any]]:
-        return [
-            p.to_dict()
-            for p in sorted(self.preferences.values(), key=lambda x: x.intent)
-        ]
+        return [p.to_dict() for p in sorted(self.preferences.values(), key=lambda x: x.intent)]
 
     def save(self) -> None:
         if self._db is not None:
@@ -130,16 +123,12 @@ class UserPreferences:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             payload = {
-                "preferences": {
-                    k: v.to_dict() for k, v in self.preferences.items()
-                },
+                "preferences": {k: v.to_dict() for k, v in self.preferences.items()},
                 "saved_at": time.time(),
                 "backend": "sqlite" if self._db is not None else "json",
             }
             tmp = self.path.with_suffix(".tmp")
-            tmp.write_text(
-                json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
-            )
+            tmp.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
             tmp.replace(self.path)
         except Exception:
             logger.exception("failed to write preferences json backup")
@@ -156,9 +145,7 @@ class UserPreferences:
                 self.preferences.clear()
                 for row in rows:
                     if row.get("intent"):
-                        self.preferences[row["intent"]] = IntentPreference.from_dict(
-                            row
-                        )
+                        self.preferences[row["intent"]] = IntentPreference.from_dict(row)
                 logger.info(
                     "loaded user preferences from sqlite (%s intents)",
                     len(self.preferences),
@@ -184,8 +171,6 @@ class UserPreferences:
             for k, v in (raw.get("preferences") or {}).items():
                 if isinstance(v, dict) and v.get("intent"):
                     self.preferences[k] = IntentPreference.from_dict(v)
-            logger.info(
-                "loaded user preferences (%s intents)", len(self.preferences)
-            )
+            logger.info("loaded user preferences (%s intents)", len(self.preferences))
         except Exception:
             logger.exception("failed to load user preferences")

@@ -23,13 +23,15 @@ def test_extensibility_features_roundtrip():
     """Set and get extensibility features."""
     d = tempfile.mkdtemp()
     db = PotatoDB(os.path.join(d, "ext.db"))
-    db.set_extensibility_features({
-        "prompt_understanding_enabled": True,
-        "prompt_understanding_model": "zen/mimo-v2.5-free",
-        "custom_catalog_enabled": True,
-        "ollama_enabled": True,
-        "opencode_go_enabled": False,
-    })
+    db.set_extensibility_features(
+        {
+            "prompt_understanding_enabled": True,
+            "prompt_understanding_model": "zen/mimo-v2.5-free",
+            "custom_catalog_enabled": True,
+            "ollama_enabled": True,
+            "opencode_go_enabled": False,
+        }
+    )
     feats = db.get_extensibility_features()
     assert feats["prompt_understanding_enabled"] is True
     assert feats["prompt_understanding_model"] == "zen/mimo-v2.5-free"
@@ -50,11 +52,13 @@ def test_custom_catalog_mappings_roundtrip():
     """Set and get custom catalog mappings."""
     d = tempfile.mkdtemp()
     db = PotatoDB(os.path.join(d, "ext.db"))
-    db.set_custom_catalog_mappings({
-        "coding_agentic": "zen/mimo-v2.5-free",
-        "chat_fast": "nim/nemotron-3-ultra-550b",
-        "reasoning": "deepseek/deepseek-r1",
-    })
+    db.set_custom_catalog_mappings(
+        {
+            "coding_agentic": "zen/mimo-v2.5-free",
+            "chat_fast": "nim/nemotron-3-ultra-550b",
+            "reasoning": "deepseek/deepseek-r1",
+        }
+    )
     mappings = db.get_custom_catalog_mappings()
     assert mappings["coding_agentic"] == "zen/mimo-v2.5-free"
     assert mappings["chat_fast"] == "nim/nemotron-3-ultra-550b"

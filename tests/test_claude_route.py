@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -19,7 +16,12 @@ from potato.routes.claude import (
 def test_is_anthropic_request():
     assert is_anthropic_request({"system": "Hello"}, "/chat") is True
     assert is_anthropic_request({}, "/v1/messages") is True
-    assert is_anthropic_request({"messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]}, "/chat") is True
+    assert (
+        is_anthropic_request(
+            {"messages": [{"role": "user", "content": [{"type": "text", "text": "hi"}]}]}, "/chat"
+        )
+        is True
+    )
     assert is_anthropic_request({"messages": [{"role": "user", "content": "hi"}]}, "/chat") is False
 
 
@@ -65,6 +67,7 @@ def test_transform_openai_to_anthropic_json():
 @pytest.fixture
 def client(tmp_path):
     from potato.config import Settings
+
     settings = Settings(
         proxy_api_keys=["sk-test"],
         allow_insecure_auth=True,
@@ -96,6 +99,7 @@ def test_chat_endpoint_default_model(client, monkeypatch):
         )
 
     from potato.upstream import UpstreamClient
+
     monkeypatch.setattr(UpstreamClient, "request_json", fake_request_json)
 
     res = client.post(
@@ -127,6 +131,7 @@ def test_v1_messages_anthropic_endpoint(client, monkeypatch):
         )
 
     from potato.upstream import UpstreamClient
+
     monkeypatch.setattr(UpstreamClient, "request_json", fake_request_json)
 
     res = client.post(

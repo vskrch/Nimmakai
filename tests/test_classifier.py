@@ -37,8 +37,7 @@ def test_agent_fingerprint() -> None:
                 {
                     "role": "system",
                     "content": (
-                        "You are a powerful agentic AI coding assistant. "
-                        "Cursor tools follow."
+                        "You are a powerful agentic AI coding assistant. Cursor tools follow."
                     ),
                 },
                 {"role": "user", "content": "refactor auth"},

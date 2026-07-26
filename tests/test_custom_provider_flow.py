@@ -1,28 +1,26 @@
 """NMK-601: Integration test — custom provider → model registration → routing."""
 
-import pytest
-from potato.catalog.hub import ProviderHub
-from potato.catalog.providers import ProviderConfig, ProviderStore, namespace_model
+from potato.catalog.providers import ProviderConfig
 from potato.catalog.registry import ModelRegistry
-from potato.catalog.ladder import LadderService
-from potato.catalog.health import ModelHealthStore
-from potato.routing.optimizer import score_model_live
 
 
 def _make_registry():
     from potato.catalog.schema import catalog_from_dict
-    cat = catalog_from_dict({
-        "version": "1",
-        "updated": "2026-01-01",
-        "defaults": {"dynamic_families": True, "auto_mode_model_tokens": []},
-        "families": {"chat_primary": "nim", "coding_primary": "nim", "fallbacks": []},
-        "intents": {
-            "coding_agentic": {"chain": []},
-            "chat_fast": {"chain": []},
-        },
-        "aliases": {},
-        "models": {},
-    })
+
+    cat = catalog_from_dict(
+        {
+            "version": "1",
+            "updated": "2026-01-01",
+            "defaults": {"dynamic_families": True, "auto_mode_model_tokens": []},
+            "families": {"chat_primary": "nim", "coding_primary": "nim", "fallbacks": []},
+            "intents": {
+                "coding_agentic": {"chain": []},
+                "chat_fast": {"chain": []},
+            },
+            "aliases": {},
+            "models": {},
+        }
+    )
     reg = ModelRegistry(cat)
     return reg
 
@@ -44,8 +42,11 @@ def test_quality_override_ranks_high():
 def test_whitelist_filters_models():
     """NMK-103: Per-provider whitelist should filter models during ingestion."""
     rt_config = ProviderConfig(
-        id="groq", name="Groq", base_url="https://groq.com/v1",
-        api_keys=["test"], model_whitelist=["llama"],
+        id="groq",
+        name="Groq",
+        base_url="https://groq.com/v1",
+        api_keys=["test"],
+        model_whitelist=["llama"],
     )
     items = [
         {"id": "llama-3.3-70b"},
@@ -55,9 +56,13 @@ def test_whitelist_filters_models():
     result = []
     for item in items:
         low_uid = item["id"].lower()
-        if rt_config.model_blacklist and any(b.lower() in low_uid for b in rt_config.model_blacklist):
+        if rt_config.model_blacklist and any(
+            b.lower() in low_uid for b in rt_config.model_blacklist
+        ):
             continue
-        if rt_config.model_whitelist and not any(w.lower() in low_uid for w in rt_config.model_whitelist):
+        if rt_config.model_whitelist and not any(
+            w.lower() in low_uid for w in rt_config.model_whitelist
+        ):
             continue
         result.append(item["id"])
     assert "llama-3.3-70b" in result

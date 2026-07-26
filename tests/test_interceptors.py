@@ -79,9 +79,7 @@ def test_custom_catalog_unmapped_intent_stays_auto():
     reg = FakeRegistry(live_ids={"zen/mimo-v2.5-free"})
     icc = CustomCatalogInterceptor(db=db)
     body = {"model": "auto", "messages": []}
-    result = asyncio.run(
-        icc.intercept(body, intent=_intent(Intent.CHAT_FAST), registry=reg)
-    )
+    result = asyncio.run(icc.intercept(body, intent=_intent(Intent.CHAT_FAST), registry=reg))
     assert result["model"] == "auto"
 
 
@@ -166,9 +164,7 @@ def test_prompt_understanding_timeout_falls_back():
     db.set_extensibility_features(
         {"prompt_understanding_enabled": True, "prompt_understanding_model": "m"}
     )
-    pui = PromptUnderstandingInterceptor(
-        db=db, upstream=SlowUpstream(), timeout_ms=100
-    )
+    pui = PromptUnderstandingInterceptor(db=db, upstream=SlowUpstream(), timeout_ms=100)
     body = {"model": "auto", "messages": [{"role": "user", "content": "hello"}]}
     result = asyncio.run(pui.intercept(body, intent=_intent(), registry=FakeRegistry()))
     assert result["model"] == "auto"
@@ -176,6 +172,7 @@ def test_prompt_understanding_timeout_falls_back():
 
 def test_prompt_understanding_llm_error_falls_back():
     """LLM call raises → stays auto."""
+
     class ErrorUpstream:
         async def request_json(self, *args, **kw):
             raise RuntimeError("upstream down")
@@ -184,9 +181,7 @@ def test_prompt_understanding_llm_error_falls_back():
     db.set_extensibility_features(
         {"prompt_understanding_enabled": True, "prompt_understanding_model": "m"}
     )
-    pui = PromptUnderstandingInterceptor(
-        db=db, upstream=ErrorUpstream(), timeout_ms=5000
-    )
+    pui = PromptUnderstandingInterceptor(db=db, upstream=ErrorUpstream(), timeout_ms=5000)
     body = {"model": "auto", "messages": [{"role": "user", "content": "hello"}]}
     result = asyncio.run(pui.intercept(body, intent=_intent(), registry=FakeRegistry()))
     assert result["model"] == "auto"
@@ -194,22 +189,22 @@ def test_prompt_understanding_llm_error_falls_back():
 
 def test_prompt_understanding_selects_model():
     """LLM returns a valid model → body is mutated."""
+
     class GoodUpstream:
         async def request_json(self, *args, **kw):
-            return 200, {
-                "choices": [
-                    {"message": {"content": '{"model": "zen/mimo-v2.5-free"}'}}
-                ]
-            }, {}, None
+            return (
+                200,
+                {"choices": [{"message": {"content": '{"model": "zen/mimo-v2.5-free"}'}}]},
+                {},
+                None,
+            )
 
     db = _tmp_db()
     db.set_extensibility_features(
         {"prompt_understanding_enabled": True, "prompt_understanding_model": "m"}
     )
     reg = FakeRegistry(live_ids={"zen/mimo-v2.5-free", "other/model"})
-    pui = PromptUnderstandingInterceptor(
-        db=db, upstream=GoodUpstream(), timeout_ms=5000
-    )
+    pui = PromptUnderstandingInterceptor(db=db, upstream=GoodUpstream(), timeout_ms=5000)
     body = {"model": "auto", "messages": [{"role": "user", "content": "write code"}]}
     result = asyncio.run(pui.intercept(body, intent=_intent(), registry=reg))
     assert result["model"] == "zen/mimo-v2.5-free"
@@ -217,22 +212,22 @@ def test_prompt_understanding_selects_model():
 
 def test_prompt_understanding_selects_non_live_falls_back():
     """LLM returns a non-live model → stays auto."""
+
     class GoodUpstream:
         async def request_json(self, *args, **kw):
-            return 200, {
-                "choices": [
-                    {"message": {"content": '{"model": "nonexistent/model"}'}}
-                ]
-            }, {}, None
+            return (
+                200,
+                {"choices": [{"message": {"content": '{"model": "nonexistent/model"}'}}]},
+                {},
+                None,
+            )
 
     db = _tmp_db()
     db.set_extensibility_features(
         {"prompt_understanding_enabled": True, "prompt_understanding_model": "m"}
     )
     reg = FakeRegistry(live_ids={"zen/mimo-v2.5-free"})
-    pui = PromptUnderstandingInterceptor(
-        db=db, upstream=GoodUpstream(), timeout_ms=5000
-    )
+    pui = PromptUnderstandingInterceptor(db=db, upstream=GoodUpstream(), timeout_ms=5000)
     body = {"model": "auto", "messages": [{"role": "user", "content": "write code"}]}
     result = asyncio.run(pui.intercept(body, intent=_intent(), registry=reg))
     assert result["model"] == "auto"
@@ -240,9 +235,7 @@ def test_prompt_understanding_selects_non_live_falls_back():
 
 def test_parse_model_from_response_json():
     """Direct JSON response is parsed."""
-    m = PromptUnderstandingInterceptor._parse_model_from_response(
-        '{"model": "gpt-4o"}', ["gpt-4o"]
-    )
+    m = PromptUnderstandingInterceptor._parse_model_from_response('{"model": "gpt-4o"}', ["gpt-4o"])
     assert m == "gpt-4o"
 
 
@@ -265,9 +258,7 @@ def test_parse_model_from_response_fuzzy():
 
 def test_parse_model_from_response_invalid():
     """Invalid response returns None."""
-    m = PromptUnderstandingInterceptor._parse_model_from_response(
-        "I don't know.", ["gpt-4o"]
-    )
+    m = PromptUnderstandingInterceptor._parse_model_from_response("I don't know.", ["gpt-4o"])
     assert m is None
 
 
@@ -322,6 +313,7 @@ def test_chain_runs_in_order():
 
 def test_chain_exception_is_swallowed():
     """Interceptor exception is caught; body returned unchanged."""
+
     class BoomInterceptor:
         async def intercept(self, body, *, intent, registry):
             raise RuntimeError("boom")

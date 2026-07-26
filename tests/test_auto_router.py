@@ -210,26 +210,35 @@ def test_sticky_fits_intent_pool_strict_for_tools() -> None:
 
     pool = ["qwen/qwen3.5-122b-a10b", "nvidia/nemotron-3-super-120b-a12b"]
     # High confidence coding: chat-only pin outside pool is rejected
-    assert sticky_fits_intent_pool(
-        "zen/mimo-v2.5-free",
-        pool,
-        confidence=0.98,
-        force_intent=True,
-    ) is False
+    assert (
+        sticky_fits_intent_pool(
+            "zen/mimo-v2.5-free",
+            pool,
+            confidence=0.98,
+            force_intent=True,
+        )
+        is False
+    )
     # Same pin accepted when already in pool
-    assert sticky_fits_intent_pool(
-        "qwen/qwen3.5-122b-a10b",
-        pool,
-        confidence=0.98,
-        force_intent=True,
-    ) is True
+    assert (
+        sticky_fits_intent_pool(
+            "qwen/qwen3.5-122b-a10b",
+            pool,
+            confidence=0.98,
+            force_intent=True,
+        )
+        is True
+    )
     # Low confidence keeps continuity even outside pool
-    assert sticky_fits_intent_pool(
-        "zen/mimo-v2.5-free",
-        pool,
-        confidence=0.40,
-        force_intent=False,
-    ) is True
+    assert (
+        sticky_fits_intent_pool(
+            "zen/mimo-v2.5-free",
+            pool,
+            confidence=0.40,
+            force_intent=False,
+        )
+        is True
+    )
 
 
 def test_potato_auto_always_nonempty_when_live() -> None:
@@ -291,12 +300,8 @@ def test_build_intent_aware_pool_prefers_primary() -> None:
     from potato.routing.auto_router import build_intent_aware_pool
 
     s = _selector()
-    coding = build_intent_aware_pool(
-        s.registry, primary_intent="coding_agentic", max_n=8
-    )
-    chat = build_intent_aware_pool(
-        s.registry, primary_intent="chat_fast", max_n=8
-    )
+    coding = build_intent_aware_pool(s.registry, primary_intent="coding_agentic", max_n=8)
+    chat = build_intent_aware_pool(s.registry, primary_intent="chat_fast", max_n=8)
     assert coding
     assert chat
     # Pools should differ when ladders are distinct (best-effort)

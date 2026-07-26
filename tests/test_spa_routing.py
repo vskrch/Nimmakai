@@ -16,9 +16,7 @@ async def test_spa_catch_all_dashboard_and_chat():
         allow_insecure_auth=True,
     )
     app = create_app(settings)
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         # Deep link under /dashboard
         r_dash = await c.get("/dashboard/models", headers={"accept": "text/html"})
         assert "text/html" in r_dash.headers.get("content-type", "").lower()

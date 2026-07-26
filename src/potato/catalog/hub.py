@@ -102,8 +102,7 @@ class ProviderHub:
 
         if not keys:
             logger.warning(
-                "provider %s has no API keys — skipping runtime "
-                "(add keys via dashboard or config)",
+                "provider %s has no API keys — skipping runtime (add keys via dashboard or config)",
                 pid,
             )
             return None
@@ -138,18 +137,14 @@ class ProviderHub:
         )
         return rt
 
-    async def upsert_provider(
-        self, cfg: ProviderConfig, registry: Any = None
-    ) -> dict[str, Any]:
+    async def upsert_provider(self, cfg: ProviderConfig, registry: Any = None) -> dict[str, Any]:
         self.store.upsert(cfg)
         await self._ensure_runtime(self.store.providers[cfg.id.lower()])
         self._notify_capacity_change()
         # Immediate /models fetch into live pool (NMK-101)
         if registry is not None and self.has_runtime(cfg.id):
             try:
-                await registry.refresh_single_provider(
-                    cfg.id, self, recompute_rankings=True
-                )
+                await registry.refresh_single_provider(cfg.id, self, recompute_rankings=True)
             except Exception:
                 logger.exception("immediate model fetch failed for provider %s", cfg.id)
         return self.store.providers[cfg.id.lower()].mask()
@@ -200,9 +195,7 @@ class ProviderHub:
             # Last resort: if ALL providers are open, force-allow this one
             # (better to try and fail than to not try at all)
             if not self.circuit_breaker.any_closed(self.provider_ids):
-                logger.warning(
-                    "all provider circuits open — force-allowing %s", pid
-                )
+                logger.warning("all provider circuits open — force-allowing %s", pid)
                 self.circuit_breaker.force_allow(pid)
             else:
                 raise RuntimeError(
@@ -215,12 +208,8 @@ class ProviderHub:
         # Config states — don't trip the circuit breaker (only HTTP/transport
         # failures should do that). FallbackExecutor will advance to next model.
         if rt is None or not rt.config.enabled:
-            raise RuntimeError(
-                f"provider '{pid}' is not available for model '{model_id}'"
-            )
-        raise RuntimeError(
-            f"provider '{pid}' has no API keys for model '{model_id}'"
-        )
+            raise RuntimeError(f"provider '{pid}' is not available for model '{model_id}'")
+        raise RuntimeError(f"provider '{pid}' has no API keys for model '{model_id}'")
 
     def namespace(self, provider_id: str, upstream_model_id: str) -> str:
         return namespace_model(provider_id, upstream_model_id)

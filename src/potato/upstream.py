@@ -103,9 +103,7 @@ class UpstreamClient:
         return h
 
     @staticmethod
-    def _filter_headers(
-        headers: httpx.Headers, *, streaming: bool = False
-    ) -> dict[str, str]:
+    def _filter_headers(headers: httpx.Headers, *, streaming: bool = False) -> dict[str, str]:
         # For streaming responses, preserve connection-related headers so
         # downstream clients (Cursor agent mode, etc.) keep the SSE socket open.
         skip = {
@@ -167,8 +165,7 @@ class UpstreamClient:
                         retry_after=retry_after,
                     )
                     logger.info(
-                        "upstream 429 on %s; backoff %.2fs then rotate key "
-                        "(attempt %s)",
+                        "upstream 429 on %s; backoff %.2fs then rotate key (attempt %s)",
                         key.key_id,
                         delay,
                         attempt + 1,
@@ -244,9 +241,7 @@ class UpstreamClient:
                     method,
                     path,
                     json=json_body,
-                    headers=self._headers(
-                        key, forward_headers, accept_stream=True
-                    ),
+                    headers=self._headers(key, forward_headers, accept_stream=True),
                 )
                 resp = await self.client.send(req, stream=True)
 
@@ -270,8 +265,7 @@ class UpstreamClient:
                             retry_after=retry_after,
                         )
                         logger.info(
-                            "upstream stream 429 on %s; backoff %.2fs then rotate "
-                            "(attempt %s)",
+                            "upstream stream 429 on %s; backoff %.2fs then rotate (attempt %s)",
                             key.key_id,
                             delay,
                             attempt + 1,
@@ -290,18 +284,14 @@ class UpstreamClient:
                     async def err_429(p: bytes = payload) -> AsyncIterator[bytes]:
                         yield p
 
-                    headers_out: dict[str, str] = {
-                        "content-type": "text/event-stream"
-                    }
+                    headers_out: dict[str, str] = {"content-type": "text/event-stream"}
                     if ra_raw:
                         headers_out["Retry-After"] = str(ra_raw)
                     return (429, err_429(), headers_out, key)
 
                 if resp.status_code in {401, 403}:
                     await resp.aclose()
-                    await self.pool.release(
-                        key, success=False, status_code=resp.status_code
-                    )
+                    await self.pool.release(key, success=False, status_code=resp.status_code)
                     released = True
                     if attempt < max_retries - 1:
                         continue

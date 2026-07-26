@@ -1,13 +1,11 @@
 """NMK-602: Scoring algorithm property tests — invariants that must always hold."""
 
-import pytest
-from potato.catalog.health import ModelHealthStore, ModelHealth
+from potato.catalog.health import ModelHealthStore
 from potato.routing.optimizer import (
-    score_model_live,
-    _quality_prior,
-    _speed_factor,
     _availability_factor,
+    _quality_prior,
     optimize_chain,
+    score_model_live,
 )
 
 
@@ -52,8 +50,9 @@ def test_healthy_model_availability_high():
 
 def test_custom_override_precedence():
     """Quality override should take precedence over regex tier matching."""
-    from potato.catalog.ladder import LadderService
     from potato.catalog.health import ModelHealthStore
+    from potato.catalog.ladder import LadderService
+
     ls = LadderService(health=ModelHealthStore())
     ls.quality_overrides["nim/custom-model"] = 99.0
     score = ls._base_quality("custom-model", "nim/custom-model")
@@ -62,8 +61,9 @@ def test_custom_override_precedence():
 
 def test_frozen_ladder_deterministic():
     """Two rebuilds with same data should produce identical frozen ladders."""
-    from potato.catalog.ladder import LadderService
     from potato.catalog.health import ModelHealthStore
+    from potato.catalog.ladder import LadderService
+
     ls1 = LadderService(health=ModelHealthStore())
     ls2 = LadderService(health=ModelHealthStore())
     ids = {"nim/deepseek-v4-pro", "nim/gpt-4o", "nim/claude-sonnet-4"}
@@ -76,15 +76,20 @@ def test_frozen_ladder_deterministic():
 
 def test_optimize_chain_preserves_order_with_one_model():
     """Single model chain should be unchanged."""
-    from potato.catalog.schema import catalog_from_dict
     from potato.catalog.registry import ModelRegistry
-    cat = catalog_from_dict({
-        "version": "1", "updated": "2026-01-01",
-        "defaults": {"dynamic_families": True, "auto_mode_model_tokens": []},
-        "families": {"chat_primary": "nim", "coding_primary": "nim", "fallbacks": []},
-        "intents": {"coding_agentic": {"chain": []}},
-        "aliases": {}, "models": {},
-    })
+    from potato.catalog.schema import catalog_from_dict
+
+    cat = catalog_from_dict(
+        {
+            "version": "1",
+            "updated": "2026-01-01",
+            "defaults": {"dynamic_families": True, "auto_mode_model_tokens": []},
+            "families": {"chat_primary": "nim", "coding_primary": "nim", "fallbacks": []},
+            "intents": {"coding_agentic": {"chain": []}},
+            "aliases": {},
+            "models": {},
+        }
+    )
     reg = ModelRegistry(cat)
     out = optimize_chain(["m1"], reg, intent="coding_agentic")
     assert out == ["m1"]

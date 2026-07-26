@@ -275,9 +275,7 @@ async def analytics_status(request: Request) -> JSONResponse:
             "subscribers": bus.subscriber_count if bus else 0,
             "db": store.writer_stats_placeholder() if store else None,
             "retention_days": getattr(settings, "analytics_retention_days", 7),
-            "rollup_retention_days": getattr(
-                settings, "analytics_rollup_retention_days", 90
-            ),
+            "rollup_retention_days": getattr(settings, "analytics_rollup_retention_days", 90),
         }
     )
 
@@ -386,12 +384,14 @@ async def import_cost_rates(request: Request) -> JSONResponse:
         store.set_cost_override(mid, inp, out)
         imported += 1
 
-    return JSONResponse({
-        "ok": True,
-        "imported": imported,
-        "skipped": skipped,
-        "total_live": len(registry.active_live_ids()),
-    })
+    return JSONResponse(
+        {
+            "ok": True,
+            "imported": imported,
+            "skipped": skipped,
+            "total_live": len(registry.active_live_ids()),
+        }
+    )
 
 
 # ── export ──────────────────────────────────────────────────────────
@@ -460,9 +460,7 @@ async def export_traces(request: Request) -> StreamingResponse | JSONResponse:
     return StreamingResponse(
         _gen_csv(),
         media_type="text/csv",
-        headers={
-            "Content-Disposition": f'attachment; filename="traces-{int(time.time())}.csv"'
-        },
+        headers={"Content-Disposition": f'attachment; filename="traces-{int(time.time())}.csv"'},
     )
 
 

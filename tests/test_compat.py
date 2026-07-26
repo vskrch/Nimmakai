@@ -16,9 +16,7 @@ from potato.compat import (
 
 
 def test_sanitize_maps_max_completion_tokens() -> None:
-    body = sanitize_chat_body(
-        {"model": "auto", "max_completion_tokens": 100, "messages": []}
-    )
+    body = sanitize_chat_body({"model": "auto", "max_completion_tokens": 100, "messages": []})
     assert body["max_tokens"] == 100
     assert "max_completion_tokens" not in body
 

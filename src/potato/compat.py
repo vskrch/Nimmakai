@@ -214,9 +214,7 @@ def normalize_sse_chunk_json(
 _DATA_RE = re.compile(rb"^(data:\s*)(.*)$", re.I)
 
 
-def transform_sse_bytes(
-    chunk: bytes, *, routed_model: str | None = None
-) -> bytes:
+def transform_sse_bytes(chunk: bytes, *, routed_model: str | None = None) -> bytes:
     """
     Transform one or more SSE lines in a raw chunk.
     Safe to call on partial buffers only if caller splits by lines first.
@@ -262,9 +260,7 @@ _MODEL_FIELD_RE = re.compile(rb'"model"\s*:\s*"(?:\\.|[^"\\])*"')
 
 
 def _rewrite_model_bytes(chunk: bytes, routed_model: str) -> bytes:
-    replacement = b'"model":' + json.dumps(routed_model, ensure_ascii=False).encode(
-        "utf-8"
-    )
+    replacement = b'"model":' + json.dumps(routed_model, ensure_ascii=False).encode("utf-8")
     # Use lambda to avoid re.sub interpreting backslash escapes in the replacement
     return _MODEL_FIELD_RE.sub(lambda _: replacement, chunk, count=1)
 
@@ -345,12 +341,8 @@ def json_body_to_sse(body: Any, *, routed_model: str | None = None) -> bytes:
         }
         if isinstance(body.get("usage"), dict):
             chunk["usage"] = body["usage"]
-        chunks.append(
-            b"data: " + json.dumps(chunk, ensure_ascii=False).encode("utf-8") + b"\n\n"
-        )
+        chunks.append(b"data: " + json.dumps(chunk, ensure_ascii=False).encode("utf-8") + b"\n\n")
     else:
-        chunks.append(
-            b"data: " + json.dumps(body, ensure_ascii=False).encode("utf-8") + b"\n\n"
-        )
+        chunks.append(b"data: " + json.dumps(body, ensure_ascii=False).encode("utf-8") + b"\n\n")
     chunks.append(b"data: [DONE]\n\n")
     return b"".join(chunks)

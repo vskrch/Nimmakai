@@ -14,7 +14,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from potato.routing.rl_features import FEATURE_DIM, FEATURE_NAMES
+from potato.routing.rl_features import FEATURE_DIM
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +23,11 @@ logger = logging.getLogger(__name__)
 class ModelLinUCBState:
     model_id: str
     # 12x12 inverse covariance matrix (initialized to (1/lambda) * I_d)
-    a_inv: list[list[float]] = field(default_factory=lambda: [
-        [1.0 if i == j else 0.0 for j in range(FEATURE_DIM)] for i in range(FEATURE_DIM)
-    ])
+    a_inv: list[list[float]] = field(
+        default_factory=lambda: [
+            [1.0 if i == j else 0.0 for j in range(FEATURE_DIM)] for i in range(FEATURE_DIM)
+        ]
+    )
     # 12-D reward vector
     b: list[float] = field(default_factory=lambda: [0.0] * FEATURE_DIM)
     # 12-D parameter vector (theta = A_inv * b)
@@ -79,7 +81,10 @@ class LinUCBPolicyEngine:
                 init_val = 1.0 / max(1e-4, self.ridge_lambda)
                 state = ModelLinUCBState(
                     model_id=model_id,
-                    a_inv=[[init_val if i == j else 0.0 for j in range(FEATURE_DIM)] for i in range(FEATURE_DIM)],
+                    a_inv=[
+                        [init_val if i == j else 0.0 for j in range(FEATURE_DIM)]
+                        for i in range(FEATURE_DIM)
+                    ],
                 )
                 self._states[model_id] = state
             return self._states[model_id]
@@ -132,7 +137,10 @@ class LinUCBPolicyEngine:
                 init_val = 1.0 / max(1e-4, self.ridge_lambda)
                 self._states[model_id] = ModelLinUCBState(
                     model_id=model_id,
-                    a_inv=[[init_val if i == j else 0.0 for j in range(FEATURE_DIM)] for i in range(FEATURE_DIM)],
+                    a_inv=[
+                        [init_val if i == j else 0.0 for j in range(FEATURE_DIM)]
+                        for i in range(FEATURE_DIM)
+                    ],
                 )
             state = self._states[model_id]
 

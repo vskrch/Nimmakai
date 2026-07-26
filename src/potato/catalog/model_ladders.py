@@ -104,7 +104,4 @@ class ModelLadderStore:
             self._db.clear_model_ladders()
 
     def list_all(self) -> list[dict[str, Any]]:
-        return [
-            l.to_dict()
-            for l in sorted(self.ladders.values(), key=lambda x: x.model_id)
-        ]
+        return [l.to_dict() for l in sorted(self.ladders.values(), key=lambda x: x.model_id)]

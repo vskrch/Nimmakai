@@ -98,30 +98,25 @@ def test_set_model_enabled_handles_mixed_case_live_ids():
     The UI sends the exact id from /catalog, but registry.set_model_enabled
     normalizes the input to lowercase. It must still match the live id.
     """
-    _app, registry, _settings = _app_with_live_models(
-        ["sambanova/Meta-Llama-3.1-8B-Instruct"]
-    )
+    _app, registry, _settings = _app_with_live_models(["sambanova/Meta-Llama-3.1-8B-Instruct"])
     assert "sambanova/meta-llama-3.1-8b-instruct" in registry.live_ids
     # Frontend sends the exact mixed-case id shown in the model picker
-    result = registry.set_model_enabled(
-        "sambanova/Meta-Llama-3.1-8B-Instruct", False
-    )
+    result = registry.set_model_enabled("sambanova/Meta-Llama-3.1-8B-Instruct", False)
     assert result["enabled"] is False
     assert "sambanova/meta-llama-3.1-8b-instruct" not in registry.active_live_ids()
     assert "sambanova/meta-llama-3.1-8b-instruct" in registry.disabled_models
     # Original-case id preserved for upstream round-trip
-    assert registry.original_id("sambanova/meta-llama-3.1-8b-instruct") == "sambanova/Meta-Llama-3.1-8B-Instruct"
+    assert (
+        registry.original_id("sambanova/meta-llama-3.1-8b-instruct")
+        == "sambanova/Meta-Llama-3.1-8B-Instruct"
+    )
 
 
 def test_filter_available_never_fail_opens_disabled():
-    _app, registry, _ = _app_with_live_models(
-        ["zen/mimo-v2.5-free", "zen/big-pickle"]
-    )
+    _app, registry, _ = _app_with_live_models(["zen/mimo-v2.5-free", "zen/big-pickle"])
     registry.set_model_enabled("zen/mimo-v2.5-free", False)
     registry.set_model_enabled("zen/big-pickle", False)
-    out = registry._filter_available(
-        ["zen/mimo-v2.5-free", "zen/big-pickle", "missing/x"]
-    )
+    out = registry._filter_available(["zen/mimo-v2.5-free", "zen/big-pickle", "missing/x"])
     assert out == []
     registry.set_model_enabled("zen/big-pickle", True)
     out2 = registry._filter_available(["zen/mimo-v2.5-free", "zen/big-pickle"])
@@ -149,9 +144,7 @@ def test_executor_chain_strips_disabled_passthrough():
     from potato.routing.intents import Intent
     from potato.routing.selector import RouteDecision
 
-    _app, registry, settings = _app_with_live_models(
-        ["zen/mimo-v2.5-free", "zen/big-pickle"]
-    )
+    _app, registry, settings = _app_with_live_models(["zen/mimo-v2.5-free", "zen/big-pickle"])
     registry.set_model_enabled("zen/mimo-v2.5-free", False)
     executor = FallbackExecutor(
         upstream=None,  # type: ignore[arg-type]
@@ -172,9 +165,7 @@ def test_executor_chain_strips_disabled_passthrough():
 
 
 def test_explicit_embedding_model_leads_chain():
-    _app, registry, settings = _app_with_live_models(
-        ["nim/embed-a", "nim/embed-b"]
-    )
+    _app, registry, settings = _app_with_live_models(["nim/embed-a", "nim/embed-b"])
     # Seed embeddings intent chain with A first
     registry.dynamic_chains["embeddings"] = ["nim/embed-a", "nim/embed-b"]
     selector = ModelSelector(registry, settings)
@@ -184,9 +175,7 @@ def test_explicit_embedding_model_leads_chain():
 
 
 def test_disable_rolls_back_memory_when_sqlite_write_fails(monkeypatch):
-    _app, registry, _ = _app_with_live_models(
-        ["zen/mimo-v2.5-free", "zen/big-pickle"]
-    )
+    _app, registry, _ = _app_with_live_models(["zen/mimo-v2.5-free", "zen/big-pickle"])
 
     def fail_write(_key, _value):
         raise OSError("disk full")
@@ -204,9 +193,7 @@ def test_disable_rolls_back_memory_when_sqlite_write_fails(monkeypatch):
 
 
 def test_disabled_models_persist_across_bind():
-    app, registry, settings = _app_with_live_models(
-        ["zen/mimo-v2.5-free", "groq/llama-3"]
-    )
+    app, registry, settings = _app_with_live_models(["zen/mimo-v2.5-free", "groq/llama-3"])
     registry.set_model_enabled("groq/llama-3", False)
     # New registry + same sqlite
     reg2 = ModelRegistry.from_settings(settings)
@@ -221,12 +208,8 @@ def test_disabled_models_persist_across_bind():
 
 @pytest.mark.asyncio
 async def test_admin_set_enabled_and_catalog_fields():
-    app, registry, _ = _app_with_live_models(
-        ["zen/mimo-v2.5-free", "zen/big-pickle"]
-    )
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    app, registry, _ = _app_with_live_models(["zen/mimo-v2.5-free", "zen/big-pickle"])
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         cat = await c.get("/catalog", headers=AUTH)
         assert cat.status_code == 200
         body = cat.json()

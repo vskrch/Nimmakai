@@ -184,15 +184,11 @@ class RetentionManager:
                 """,
                 (cutoff,),
             )
-            cur = self._db._conn.execute(
-                "DELETE FROM traces WHERE created_at < ?", (cutoff,)
-            )
+            cur = self._db._conn.execute("DELETE FROM traces WHERE created_at < ?", (cutoff,))
             return cur.rowcount
 
     def _purge_rollups(self, now: float) -> int:
         cutoff = int(now - (self.rollup_retention_days * 86400))
         with self._db._lock:
-            cur = self._db._conn.execute(
-                "DELETE FROM trace_rollups WHERE bucket_ts < ?", (cutoff,)
-            )
+            cur = self._db._conn.execute("DELETE FROM trace_rollups WHERE bucket_ts < ?", (cutoff,))
             return cur.rowcount

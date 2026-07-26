@@ -146,17 +146,23 @@ def _compute_modalities(
             modalities.discard("text")
 
     # Fill unknowns from YAML hints
-    if "tools" not in modalities and (not bundle or bundle.supports_tools is None) and any(
-        _glob_match(slug, p) for p in hints.get("tools_true_patterns", [])
+    if (
+        "tools" not in modalities
+        and (not bundle or bundle.supports_tools is None)
+        and any(_glob_match(slug, p) for p in hints.get("tools_true_patterns", []))
     ):
         modalities.add("tools")
-    if "vision" not in modalities and (not bundle or bundle.supports_vision is None) and any(
-        _glob_match(slug, p) for p in hints.get("vision_true_patterns", [])
+    if (
+        "vision" not in modalities
+        and (not bundle or bundle.supports_vision is None)
+        and any(_glob_match(slug, p) for p in hints.get("vision_true_patterns", []))
     ):
         modalities.add("vision")
-    if "reasoning" not in modalities and (
-        not bundle or bundle.supports_reasoning is None
-    ) and any(_glob_match(slug, p) for p in hints.get("reasoning_true_patterns", [])):
+    if (
+        "reasoning" not in modalities
+        and (not bundle or bundle.supports_reasoning is None)
+        and any(_glob_match(slug, p) for p in hints.get("reasoning_true_patterns", []))
+    ):
         modalities.add("reasoning")
 
     return frozenset(modalities)
@@ -346,9 +352,7 @@ def _normalize_slug_from_id(model_id: str) -> str:
     return re.sub(r"-\d{4}-\d{2}-\d{2}$", "", bare)
 
 
-def _fuzzy_match_bundle(
-    slug: str, bundles: dict[str, IntelBundle]
-) -> IntelBundle | None:
+def _fuzzy_match_bundle(slug: str, bundles: dict[str, IntelBundle]) -> IntelBundle | None:
     """
     Deterministic fuzzy match for model bundles.
     Ensures model family AND parameter size tokens (e.g., 8b, 70b, 8x7b, 8x22b) match.

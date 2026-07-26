@@ -181,9 +181,7 @@ class LearningStore:
                     self._data.setdefault(intent, {})[mid] = st
             # Rebuild intent totals from loaded data
             for intent, models in self._data.items():
-                self._intent_totals[intent] = sum(
-                    s.total_requests for s in models.values()
-                )
+                self._intent_totals[intent] = sum(s.total_requests for s in models.values())
             logger.info("loaded learning store (%s intents)", len(self._data))
         except Exception:
             logger.exception("failed to load learning store")

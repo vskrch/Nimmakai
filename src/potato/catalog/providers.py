@@ -58,17 +58,19 @@ class ProviderConfig:
     # Keys that are obviously not real credentials (placeholders saved by seed
     # templates, tests, or deploy scripts before a real key is added).
     # Filtered from resolved_keys() so they never burn auth-failure budget.
-    _PLACEHOLDER_KEYS: frozenset[str] = frozenset({
-        "dummy-key",
-        "nvapi-key-1",
-        "nvapi-key-2",
-        "nvapi-key-3",
-        "nvapi-key-4",
-        "placeholder",
-        "your-api-key",
-        "your_api_key",
-        "xxx",
-    })
+    _PLACEHOLDER_KEYS: frozenset[str] = frozenset(
+        {
+            "dummy-key",
+            "nvapi-key-1",
+            "nvapi-key-2",
+            "nvapi-key-3",
+            "nvapi-key-4",
+            "placeholder",
+            "your-api-key",
+            "your_api_key",
+            "xxx",
+        }
+    )
 
     def resolved_keys(self) -> list[str]:
         keys = [k.strip() for k in self.api_keys if k and str(k).strip()]
@@ -219,9 +221,7 @@ class ProviderStore:
                 data = yaml.safe_load(f) or {}
             logger.info("loaded providers config from %s", p)
         else:
-            logger.warning(
-                "providers config not found at %s — using NIM env only", path
-            )
+            logger.warning("providers config not found at %s — using NIM env only", path)
         for item in data.get("providers") or []:
             if not isinstance(item, dict) or not item.get("id"):
                 continue
@@ -277,9 +277,7 @@ class ProviderStore:
             # saved key with an empty/stale env value. resolved_keys()
             # deduplicates at read time.
             if nim_api_keys:
-                merged = list(nim.api_keys) + [
-                    k for k in nim_api_keys if k not in nim.api_keys
-                ]
+                merged = list(nim.api_keys) + [k for k in nim_api_keys if k not in nim.api_keys]
                 nim.api_keys = merged
             nim.rpm_limit = nim_rpm
             nim.rpd_limit = nim_rpd
@@ -322,9 +320,7 @@ class ProviderStore:
                 n += 1
             if n:
                 self._persist_all()
-                logger.info(
-                    "migrated %s provider(s) from %s → sqlite", n, overlay
-                )
+                logger.info("migrated %s provider(s) from %s → sqlite", n, overlay)
             db.set_meta("migrated_providers_json", "1")
         except Exception:
             logger.exception("failed to migrate providers.json → sqlite")
@@ -406,9 +402,7 @@ class ProviderStore:
                     cfg.api_keys_env = env_name
                 if not cfg.enabled and cfg.resolved_keys():
                     cfg.enabled = True
-                    logger.info(
-                        "enabled free provider %s from env %s", preset_id, env_name
-                    )
+                    logger.info("enabled free provider %s from env %s", preset_id, env_name)
                 continue
             preset = get_preset(preset_id)
             if not preset or preset.get("custom"):
@@ -429,9 +423,7 @@ class ProviderStore:
                 api_style="openai",
                 builtin=False,
             )
-            logger.info(
-                "auto-registered free provider %s from env %s", preset_id, env_name
-            )
+            logger.info("auto-registered free provider %s from env %s", preset_id, env_name)
 
     def enabled_providers(self) -> list[ProviderConfig]:
         return [p for p in self.providers.values() if p.enabled]

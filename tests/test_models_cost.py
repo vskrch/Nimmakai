@@ -165,9 +165,7 @@ class TestModelsDevCostCache:
             assert mock_get.call_count == 2
 
     def test_network_error_graceful(self):
-        cache = ModelsDevCostCache(
-            url="http://localhost:99999/no-such-url", ttl_seconds=3600
-        )
+        cache = ModelsDevCostCache(url="http://localhost:99999/no-such-url", ttl_seconds=3600)
         err_patch = patch(
             "potato.analytics.models_cost.httpx.get",
             side_effect=Exception("network error"),

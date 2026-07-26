@@ -68,14 +68,9 @@ CREATE INDEX IF NOT EXISTS idx_email_tokens_hash ON email_tokens(token_hash);
 def migrate_accounts(conn: sqlite3.Connection) -> None:
     conn.executescript(ACCOUNTS_SCHEMA)
     # analytics: user_id on traces (idempotent)
-    cols = {
-        r[1]
-        for r in conn.execute("PRAGMA table_info(traces)").fetchall()
-    }
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(traces)").fetchall()}
     if cols and "user_id" not in cols:
         conn.execute("ALTER TABLE traces ADD COLUMN user_id TEXT")
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_traces_user_id ON traces(user_id, created_at)"
-        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_traces_user_id ON traces(user_id, created_at)")
         logger.info("added traces.user_id column")
     logger.debug("accounts schema migrated")

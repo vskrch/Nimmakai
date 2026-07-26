@@ -191,8 +191,7 @@ class AnalyticsStore:
                 f"SELECT COUNT(*) AS n FROM traces{clause}", params
             ).fetchone()["n"]
             rows = self._db._conn.execute(
-                f"SELECT * FROM traces{clause} ORDER BY {sort_col} {order_sql}"
-                f" LIMIT ? OFFSET ?",
+                f"SELECT * FROM traces{clause} ORDER BY {sort_col} {order_sql} LIMIT ? OFFSET ?",
                 [*params, limit, offset],
             ).fetchall()
 
@@ -441,9 +440,7 @@ class AnalyticsStore:
                 LIMIT ?
             """
             with self._db._lock:
-                rows = self._db._conn.execute(
-                    sql, (since, until, *user_params, limit)
-                ).fetchall()
+                rows = self._db._conn.execute(sql, (since, until, *user_params, limit)).fetchall()
             out = []
             for r in rows:
                 d = dict(r)
@@ -467,9 +464,7 @@ class AnalyticsStore:
                 LIMIT ?
             """
             with self._db._lock:
-                rows = self._db._conn.execute(
-                    sql, (since, until, *user_params, limit)
-                ).fetchall()
+                rows = self._db._conn.execute(sql, (since, until, *user_params, limit)).fetchall()
             return [dict(r) for r in rows]
 
         if dimension == "fallbacks":
@@ -485,9 +480,7 @@ class AnalyticsStore:
                 ORDER BY 1
             """
             with self._db._lock:
-                rows = self._db._conn.execute(
-                    sql, (since, until, *user_params)
-                ).fetchall()
+                rows = self._db._conn.execute(sql, (since, until, *user_params)).fetchall()
             return [dict(r) for r in rows]
 
         return []
@@ -607,9 +600,7 @@ class AnalyticsStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def set_cost_override(
-        self, model_id: str, input_per_m: float, output_per_m: float
-    ) -> None:
+    def set_cost_override(self, model_id: str, input_per_m: float, output_per_m: float) -> None:
         with self._db._lock:
             self._db._conn.execute(
                 """
@@ -643,10 +634,7 @@ class AnalyticsStore:
             return self._cost_cache
         gen = self._cost_cache_gen
         raw = self.list_cost_overrides()
-        cache = {
-            r["model_id"]: (float(r["input_per_m"]), float(r["output_per_m"]))
-            for r in raw
-        }
+        cache = {r["model_id"]: (float(r["input_per_m"]), float(r["output_per_m"])) for r in raw}
         # Discard if invalidate ran while we were reading
         if gen == self._cost_cache_gen:
             self._cost_cache = cache

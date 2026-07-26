@@ -21,11 +21,23 @@ def test_ladder_freeze_no_rescore() -> None:
     }
     # Install score cache: deepseek-v4-pro highest quality + tools
     bundles = {
-        "deepseek-v4-pro": IntelBundle(model_slug="deepseek-v4-pro", aa_intelligence_idx=98.0, supports_tools=True),
-        "gemma-2-2b-it": IntelBundle(model_slug="gemma-2-2b-it", aa_intelligence_idx=50.0, supports_tools=False),
-        "qwen3.5-122b-a10b": IntelBundle(model_slug="qwen3.5-122b-a10b", aa_intelligence_idx=80.0, supports_tools=False),
+        "deepseek-v4-pro": IntelBundle(
+            model_slug="deepseek-v4-pro", aa_intelligence_idx=98.0, supports_tools=True
+        ),
+        "gemma-2-2b-it": IntelBundle(
+            model_slug="gemma-2-2b-it", aa_intelligence_idx=50.0, supports_tools=False
+        ),
+        "qwen3.5-122b-a10b": IntelBundle(
+            model_slug="qwen3.5-122b-a10b", aa_intelligence_idx=80.0, supports_tools=False
+        ),
     }
-    cache = recompute(live_ids=live, intel_bundles=bundles, health=ModelHealthStore(), learning=LearningStore(), yaml_cfg={})
+    cache = recompute(
+        live_ids=live,
+        intel_bundles=bundles,
+        health=ModelHealthStore(),
+        learning=LearningStore(),
+        yaml_cfg={},
+    )
     ModelScoreCache.install(cache)
     try:
         svc = LadderService()

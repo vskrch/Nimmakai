@@ -28,9 +28,7 @@ class StubEmailSender:
     """Logs email and returns preview text for local / stub UX."""
 
     def send(self, msg: OutboundEmail) -> dict:
-        logger.info(
-            "email stub to=%s subject=%s\n%s", msg.to, msg.subject, msg.text
-        )
+        logger.info("email stub to=%s subject=%s\n%s", msg.to, msg.subject, msg.text)
         return {"ok": True, "backend": "stub", "preview_text": msg.text}
 
 
@@ -85,9 +83,7 @@ class SmtpEmailSender:
         try:
             self._deliver(email)
         except Exception as exc:
-            logger.exception(
-                "smtp send failed to=%s subject=%s", msg.to, msg.subject
-            )
+            logger.exception("smtp send failed to=%s subject=%s", msg.to, msg.subject)
             return {
                 "ok": False,
                 "backend": "smtp",
@@ -100,9 +96,7 @@ class SmtpEmailSender:
         cfg = self._cfg
         if cfg.use_ssl:
             context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(
-                cfg.host, cfg.port, timeout=cfg.timeout, context=context
-            ) as smtp:
+            with smtplib.SMTP_SSL(cfg.host, cfg.port, timeout=cfg.timeout, context=context) as smtp:
                 self._auth_and_send(smtp, email)
             return
 
@@ -136,10 +130,10 @@ def build_verify_email(
     )
     html = (
         f"<p>Welcome to {product_name}.</p>"
-        f"<p><a href=\"{verify_url}\">Verify your email</a></p>"
+        f'<p><a href="{verify_url}">Verify your email</a></p>'
         f"<p>After verification an admin must approve your account "
         f"before an API key is issued.</p>"
-        f"<p style=\"color:#888;font-size:12px\">If the button fails, open:<br>"
+        f'<p style="color:#888;font-size:12px">If the button fails, open:<br>'
         f"<code>{verify_url}</code></p>"
     )
     return OutboundEmail(
@@ -172,10 +166,10 @@ def build_otp_email(
     )
     html = (
         f"<p>Your {product_name} {purpose} code:</p>"
-        f"<p style=\"font-size:28px;letter-spacing:4px;font-weight:700\">"
+        f'<p style="font-size:28px;letter-spacing:4px;font-weight:700">'
         f"{code_n}</p>"
         f"<p>Expires in {expires_minutes} minutes.</p>"
-        f"<p style=\"color:#888;font-size:12px\">"
+        f'<p style="color:#888;font-size:12px">'
         f"If you did not request this, ignore this email.</p>"
     )
     return OutboundEmail(
@@ -193,9 +187,7 @@ def smtp_config_from_settings(settings: Any) -> SmtpConfig:
         port=int(getattr(settings, "smtp_port", 587) or 587),
         username=getattr(settings, "smtp_username", None) or None,
         password=getattr(settings, "smtp_password", None) or None,
-        from_address=str(
-            getattr(settings, "smtp_from", None) or "noreply@localhost"
-        ),
+        from_address=str(getattr(settings, "smtp_from", None) or "noreply@localhost"),
         from_name=str(getattr(settings, "smtp_from_name", None) or "Potato"),
         use_tls=bool(getattr(settings, "smtp_use_tls", True)),
         use_ssl=bool(getattr(settings, "smtp_use_ssl", False)),
@@ -220,9 +212,7 @@ def get_email_sender(
     name = (backend or "stub").strip().lower()
     if name == "smtp":
         if settings is None:
-            logger.warning(
-                "EMAIL_BACKEND=smtp but settings not passed — falling back to stub"
-            )
+            logger.warning("EMAIL_BACKEND=smtp but settings not passed — falling back to stub")
             return StubEmailSender()
         try:
             return SmtpEmailSender(smtp_config_from_settings(settings))

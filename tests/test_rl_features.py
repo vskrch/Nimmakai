@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import pytest
-from potato.routing.rl_features import extract_feature_vector, FEATURE_DIM, FEATURE_NAMES
+from potato.routing.rl_features import FEATURE_DIM, extract_feature_vector
 
 
 def test_extract_feature_vector_empty():
@@ -13,13 +12,16 @@ def test_extract_feature_vector_empty():
 def test_extract_feature_vector_coding_agent():
     body = {
         "messages": [
-            {"role": "user", "content": "def fib(n):\n    return n if n <= 1 else fib(n-1) + fib(n-2)\n```"}
+            {
+                "role": "user",
+                "content": "def fib(n):\n    return n if n <= 1 else fib(n-1) + fib(n-2)\n```",
+            }
         ],
-        "tools": [{"type": "function", "function": {"name": "read_file"}}]
+        "tools": [{"type": "function", "function": {"name": "read_file"}}],
     }
     headers = {"User-Agent": "Cursor/0.45.0"}
     x = extract_feature_vector(body, headers=headers, intent_name="coding_agentic")
-    
+
     assert len(x) == FEATURE_DIM
     # tool density > 0
     assert x[1] == 0.1
@@ -40,8 +42,8 @@ def test_extract_feature_vector_reasoning_multimodal():
                 "role": "user",
                 "content": [
                     {"type": "text", "text": "Please prove the mathematical theorem step by step."},
-                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
-                ]
+                    {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}},
+                ],
             }
         ]
     }

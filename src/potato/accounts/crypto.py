@@ -10,9 +10,7 @@ import secrets
 
 def hash_password(password: str) -> str:
     salt = os.urandom(16)
-    dk = hashlib.scrypt(
-        password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32
-    )
+    dk = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32)
     return f"scrypt${salt.hex()}${dk.hex()}"
 
 
@@ -23,9 +21,7 @@ def verify_password(password: str, stored: str) -> bool:
             return False
         salt = bytes.fromhex(salt_hex)
         expected = bytes.fromhex(hash_hex)
-        dk = hashlib.scrypt(
-            password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32
-        )
+        dk = hashlib.scrypt(password.encode("utf-8"), salt=salt, n=2**14, r=8, p=1, dklen=32)
         return hmac.compare_digest(dk, expected)
     except Exception:
         return False

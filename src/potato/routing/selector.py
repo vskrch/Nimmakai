@@ -178,14 +178,10 @@ class ModelSelector:
         if self.preferences is not None and self.preferences.has_preference(intent_key):
             pref = self.preferences.get(intent_key)
             if pref is not None and pref.chain:
-                mode: RouteMode = (
-                    "passthrough" if pref.strict else "passthrough_with_fallback"
-                )
+                mode: RouteMode = "passthrough" if pref.strict else "passthrough_with_fallback"
                 chain = list(pref.chain)
                 if not pref.strict:
-                    siblings = self.registry.chain_for_intent(
-                        intent_key, variant=variant
-                    )
+                    siblings = self.registry.chain_for_intent(intent_key, variant=variant)
                     chain = chain + [m for m in siblings if m not in chain]
                 chain = self._finalize_chain(
                     chain,
@@ -218,9 +214,7 @@ class ModelSelector:
                     chain = [resolved] + [m for m in chain if m != resolved]
                 elif not chain and looks_like_nim_id(raw):
                     # Unknown passthrough only when not admin-disabled
-                    disabled_hit = self.registry.resolve_live_id(
-                        raw, include_disabled=True
-                    )
+                    disabled_hit = self.registry.resolve_live_id(raw, include_disabled=True)
                     if disabled_hit in self.registry.disabled_models:
                         # ponytail: unreachable — a disabled model that's in
                         # live_ids is rejected at line 123-125 before reaching
@@ -229,9 +223,7 @@ class ModelSelector:
                     chain = [raw]
             elif not chain and raw and looks_like_nim_id(raw):
                 chain = [raw]
-            chain = self.registry.health_reorder(
-                chain, intent=intent_key, variant=variant
-            )
+            chain = self.registry.health_reorder(chain, intent=intent_key, variant=variant)
             # Keep explicit pin first after health reorder
             if raw and not self.registry.is_auto(raw):
                 resolved = self.registry.resolve_live_id(raw)
@@ -239,9 +231,7 @@ class ModelSelector:
                     chain = pin_model_first(chain, resolved)
             return RouteDecision(
                 chain=chain,
-                mode="auto"
-                if self.registry.is_auto(raw) or not raw
-                else "passthrough",
+                mode="auto" if self.registry.is_auto(raw) or not raw else "passthrough",
                 intent=intent,
                 rule_id=intent_result.rule_id,
                 requested_model=model_field,
@@ -252,9 +242,7 @@ class ModelSelector:
 
         if intent == Intent.VISION:
             chain = self.registry.chain_for_intent("vision", variant=variant)
-            chain = self.registry.health_reorder(
-                chain, intent="vision", variant=variant
-            )
+            chain = self.registry.health_reorder(chain, intent="vision", variant=variant)
             if not chain:
                 # Never route image requests to alphabetical text models (T19)
                 raise ValueError("no_vision_model")
@@ -314,8 +302,7 @@ class ModelSelector:
                 )
             # alias → concrete model
             target_model = (
-                self.registry.resolve_live_id(target.value, include_disabled=True)
-                or target.value
+                self.registry.resolve_live_id(target.value, include_disabled=True) or target.value
             )
             if target_model in self.registry.disabled_models:
                 raise ValueError("model_disabled")
@@ -325,9 +312,7 @@ class ModelSelector:
                 chain = chain + [m for m in siblings if m != target_model]
             # Health-reorder once for both branches; pin the alias target first
             # so the client never sees a surprise head model (F-08 invariant).
-            optimized = self.registry.health_reorder(
-                chain, intent=intent_key, variant=variant
-            )
+            optimized = self.registry.health_reorder(chain, intent=intent_key, variant=variant)
             head = target_model
             rest = [m for m in optimized if m != head]
             return RouteDecision(
@@ -345,9 +330,7 @@ class ModelSelector:
             if resolved is None:
                 # Disabled or unknown: reject disabled explicitly; unknown NIM ids
                 # may still passthrough if they are not in the disabled set.
-                disabled_hit = self.registry.resolve_live_id(
-                    raw, include_disabled=True
-                )
+                disabled_hit = self.registry.resolve_live_id(raw, include_disabled=True)
                 if disabled_hit in self.registry.disabled_models:
                     # ponytail: unreachable — disabled live models are rejected
                     # at line 123-125; non-live models yield disabled_hit=None.
@@ -362,30 +345,21 @@ class ModelSelector:
                     resolved = raw
             if resolved is not None:
                 if self.settings.enable_fallback_on_explicit:
-                    siblings = self.registry.chain_for_intent(
-                        intent_key, variant=variant
-                    )
+                    siblings = self.registry.chain_for_intent(intent_key, variant=variant)
                     bare = resolved.split("/")[-1] if "/" in resolved else resolved
                     horizontals = [
                         m
                         for m in siblings
-                        if (m.split("/")[-1] if "/" in m else m) == bare
-                        and m != resolved
+                        if (m.split("/")[-1] if "/" in m else m) == bare and m != resolved
                     ]
-                    rest = [
-                        m for m in siblings if m != resolved and m not in horizontals
-                    ]
+                    rest = [m for m in siblings if m != resolved and m not in horizontals]
                     rest_opt = self.registry.health_reorder(
                         rest, intent=intent_key, variant=variant
                     )
                     chain = (
                         [resolved]
                         + [m for m in horizontals if m != resolved]
-                        + [
-                            m
-                            for m in rest_opt
-                            if m != resolved and m not in horizontals
-                        ]
+                        + [m for m in rest_opt if m != resolved and m not in horizontals]
                     )
                     mode: RouteMode = "passthrough_with_fallback"
                 else:
@@ -394,9 +368,7 @@ class ModelSelector:
                 # For coding, rank candidates but keep the requested model pinned
                 # so _chain / sticky affinity is not silently discarded (F-08).
                 if intent_key == "coding_agentic":
-                    chain = self.registry.health_reorder(
-                        chain, intent=intent_key, variant=variant
-                    )
+                    chain = self.registry.health_reorder(chain, intent=intent_key, variant=variant)
                     chain = pin_model_first(chain, resolved)
                 return RouteDecision(
                     chain=chain,
@@ -531,20 +503,14 @@ class ModelSelector:
                 if resolved not in chain:
                     chain = chain + [resolved]
 
-        chain = self.registry.health_reorder(
-            chain, intent=intent_key, variant=variant
-        )
-        chain = filter_chain(
-            chain, allowed_models=allowed or None, free_only=free_only
-        )
+        chain = self.registry.health_reorder(chain, intent=intent_key, variant=variant)
+        chain = filter_chain(chain, allowed_models=allowed or None, free_only=free_only)
         # Drop admin-disabled models from every finalized route chain
         if self.registry.live_ids and self.registry.disabled_models:
             chain = [
                 m
                 for m in chain
-                if (
-                    self.registry.resolve_live_id(m, include_disabled=True) or m
-                )
+                if (self.registry.resolve_live_id(m, include_disabled=True) or m)
                 not in self.registry.disabled_models
             ]
 
@@ -552,7 +518,8 @@ class ModelSelector:
         if self.model_pools and chain:
             is_auto = bool(variant in ("auto", "default") or intent_key == "auto")
             chain = [
-                m for m in chain
+                m
+                for m in chain
                 if self.model_pools.is_allowed(m, intent_key, is_auto_router=is_auto)
             ]
         # Session model pin (OpenRouter sticky routing) — pin once after ranking

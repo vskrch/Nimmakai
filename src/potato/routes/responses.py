@@ -79,8 +79,17 @@ def transform_responses_to_chat(body: dict[str, Any]) -> dict[str, Any]:
     out: dict[str, Any] = {}
 
     # Scalar passthroughs shared by both APIs.
-    for key in ("model", "temperature", "top_p", "stream", "stop", "user",
-               "seed", "presence_penalty", "frequency_penalty"):
+    for key in (
+        "model",
+        "temperature",
+        "top_p",
+        "stream",
+        "stop",
+        "user",
+        "seed",
+        "presence_penalty",
+        "frequency_penalty",
+    ):
         if key in body and body[key] is not None:
             out[key] = body[key]
 
@@ -117,18 +126,22 @@ def transform_responses_to_chat(body: dict[str, Any]) -> dict[str, Any]:
             if itype == "function_call":
                 # An assistant's prior tool call, replayed as context.
                 # Shape: {type, call_id, name, arguments}
-                messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": item.get("call_id") or item.get("id") or "",
-                        "type": "function",
-                        "function": {
-                            "name": item.get("name") or "",
-                            "arguments": str(item.get("arguments") or ""),
-                        },
-                    }],
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": item.get("call_id") or item.get("id") or "",
+                                "type": "function",
+                                "function": {
+                                    "name": item.get("name") or "",
+                                    "arguments": str(item.get("arguments") or ""),
+                                },
+                            }
+                        ],
+                    }
+                )
                 continue
             if itype in ("reasoning",):
                 # Reasoning items don't carry chat text — skip.
@@ -154,15 +167,17 @@ def transform_responses_to_chat(body: dict[str, Any]) -> dict[str, Any]:
             if ttype == "function" or "name" in tool:
                 # Responses internally-tagged function tool:
                 # {type:"function", name, description, parameters, strict?}
-                chat_tools.append({
-                    "type": "function",
-                    "function": {
-                        "name": tool.get("name") or "",
-                        "description": tool.get("description") or "",
-                        "parameters": tool.get("parameters") or {},
-                        **({"strict": tool["strict"]} if "strict" in tool else {}),
-                    },
-                })
+                chat_tools.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": tool.get("name") or "",
+                            "description": tool.get("description") or "",
+                            "parameters": tool.get("parameters") or {},
+                            **({"strict": tool["strict"]} if "strict" in tool else {}),
+                        },
+                    }
+                )
                 continue
             # Other built-in tool types (web_search, file_search, …) have no
             # Chat equivalent — drop them; the chat model can't honor them.
@@ -224,35 +239,39 @@ def transform_chat_to_responses_json(
         if isinstance(content, str):
             output_text = content
         elif isinstance(content, list):
-            output_text = " ".join(
-                p.get("text", "") for p in content if isinstance(p, dict)
-            )
+            output_text = " ".join(p.get("text", "") for p in content if isinstance(p, dict))
         # Tool calls → function_call output items.
         tool_calls = msg.get("tool_calls") or []
         for tc in tool_calls:
             if not isinstance(tc, dict):
                 continue
             fn = tc.get("function") or {}
-            output_items.append({
-                "id": _fc_item_id(),
-                "type": "function_call",
-                "call_id": tc.get("id") or _fc_item_id(),
-                "name": fn.get("name") or "",
-                "arguments": fn.get("arguments") or "",
-                "status": "completed",
-            })
+            output_items.append(
+                {
+                    "id": _fc_item_id(),
+                    "type": "function_call",
+                    "call_id": tc.get("id") or _fc_item_id(),
+                    "name": fn.get("name") or "",
+                    "arguments": fn.get("arguments") or "",
+                    "status": "completed",
+                }
+            )
         # Always emit a message item (even if empty) — clients expect it.
-        output_items.append({
-            "id": _msg_item_id(),
-            "type": "message",
-            "status": "completed",
-            "role": "assistant",
-            "content": [{
-                "type": "output_text",
-                "text": output_text,
-                "annotations": [],
-            }],
-        })
+        output_items.append(
+            {
+                "id": _msg_item_id(),
+                "type": "message",
+                "status": "completed",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "text": output_text,
+                        "annotations": [],
+                    }
+                ],
+            }
+        )
 
     prompt_tokens = int(usage.get("prompt_tokens") or 0)
     completion_tokens = int(usage.get("completion_tokens") or 0)
@@ -293,18 +312,21 @@ async def transform_chat_sse_to_responses_sse(
         return f"event: {event_type}\ndata: {json.dumps(payload)}\n\n".encode()
 
     # response.created
-    yield frame("response.created", {
-        "type": "response.created",
-        "response": {
-            "id": rid,
-            "object": "response",
-            "created_at": created_at,
-            "model": model,
-            "status": "in_progress",
-            "output": [],
-            "usage": None,
+    yield frame(
+        "response.created",
+        {
+            "type": "response.created",
+            "response": {
+                "id": rid,
+                "object": "response",
+                "created_at": created_at,
+                "model": model,
+                "status": "in_progress",
+                "output": [],
+                "usage": None,
+            },
         },
-    })
+    )
 
     msg_item_id = _msg_item_id()
     msg_item = {
@@ -316,20 +338,26 @@ async def transform_chat_sse_to_responses_sse(
     }
 
     # response.output_item.added (the assistant message)
-    yield frame("response.output_item.added", {
-        "type": "response.output_item.added",
-        "output_index": 0,
-        "item": msg_item,
-    })
+    yield frame(
+        "response.output_item.added",
+        {
+            "type": "response.output_item.added",
+            "output_index": 0,
+            "item": msg_item,
+        },
+    )
 
     # response.content_part.added (output_text part)
-    yield frame("response.content_part.added", {
-        "type": "response.content_part.added",
-        "item_id": msg_item_id,
-        "output_index": 0,
-        "content_index": 0,
-        "part": {"type": "output_text", "text": "", "annotations": []},
-    })
+    yield frame(
+        "response.content_part.added",
+        {
+            "type": "response.content_part.added",
+            "item_id": msg_item_id,
+            "output_index": 0,
+            "content_index": 0,
+            "part": {"type": "output_text", "text": "", "annotations": []},
+        },
+    )
 
     accumulated_text: list[str] = []
     # Track in-flight tool calls by Chat tool_call id → Responses fc item.
@@ -371,13 +399,16 @@ async def transform_chat_sse_to_responses_sse(
             if isinstance(piece, str) and piece:
                 accumulated_text.append(piece)
                 out_tokens += 1
-                yield frame("response.output_text.delta", {
-                    "type": "response.output_text.delta",
-                    "item_id": msg_item_id,
-                    "output_index": 0,
-                    "content_index": 0,
-                    "delta": piece,
-                })
+                yield frame(
+                    "response.output_text.delta",
+                    {
+                        "type": "response.output_text.delta",
+                        "item_id": msg_item_id,
+                        "output_index": 0,
+                        "content_index": 0,
+                        "delta": piece,
+                    },
+                )
 
             # Tool call deltas
             tool_calls = delta.get("tool_calls") or []
@@ -398,23 +429,29 @@ async def transform_chat_sse_to_responses_sse(
                     tool_items[tc_id] = fc_item
                     tool_arg_buffers[tc_id] = ""
                     out_idx = len(tool_items)  # 1-based if after message
-                    yield frame("response.output_item.added", {
-                        "type": "response.output_item.added",
-                        "output_index": out_idx,
-                        "item": fc_item,
-                    })
+                    yield frame(
+                        "response.output_item.added",
+                        {
+                            "type": "response.output_item.added",
+                            "output_index": out_idx,
+                            "item": fc_item,
+                        },
+                    )
                 else:
                     fc_item = tool_items[tc_id]
                 fn = tc.get("function") or {}
                 arg_piece = fn.get("arguments") or ""
                 if arg_piece:
                     tool_arg_buffers[tc_id] += arg_piece
-                    yield frame("response.function_call_arguments.delta", {
-                        "type": "response.function_call_arguments.delta",
-                        "item_id": fc_item["id"],
-                        "output_index": list(tool_items).index(tc_id),
-                        "delta": arg_piece,
-                    })
+                    yield frame(
+                        "response.function_call_arguments.delta",
+                        {
+                            "type": "response.function_call_arguments.delta",
+                            "item_id": fc_item["id"],
+                            "output_index": list(tool_items).index(tc_id),
+                            "delta": arg_piece,
+                        },
+                    )
 
             finish = choice.get("finish_reason")
             if finish:
@@ -423,37 +460,49 @@ async def transform_chat_sse_to_responses_sse(
                     fc_item["arguments"] = tool_arg_buffers.get(tc_id, "")
                     fc_item["status"] = "completed"
                     out_idx = list(tool_items).index(tc_id)
-                    yield frame("response.function_call_arguments.done", {
-                        "type": "response.function_call_arguments.done",
-                        "item_id": fc_item["id"],
-                        "output_index": out_idx,
-                        "arguments": fc_item["arguments"],
-                    })
-                    yield frame("response.output_item.done", {
-                        "type": "response.output_item.done",
-                        "output_index": out_idx,
-                        "item": {**fc_item, "status": "completed"},
-                    })
+                    yield frame(
+                        "response.function_call_arguments.done",
+                        {
+                            "type": "response.function_call_arguments.done",
+                            "item_id": fc_item["id"],
+                            "output_index": out_idx,
+                            "arguments": fc_item["arguments"],
+                        },
+                    )
+                    yield frame(
+                        "response.output_item.done",
+                        {
+                            "type": "response.output_item.done",
+                            "output_index": out_idx,
+                            "item": {**fc_item, "status": "completed"},
+                        },
+                    )
 
     full_text = "".join(accumulated_text)
 
     # response.output_text.done
-    yield frame("response.output_text.done", {
-        "type": "response.output_text.done",
-        "item_id": msg_item_id,
-        "output_index": 0,
-        "content_index": 0,
-        "text": full_text,
-    })
+    yield frame(
+        "response.output_text.done",
+        {
+            "type": "response.output_text.done",
+            "item_id": msg_item_id,
+            "output_index": 0,
+            "content_index": 0,
+            "text": full_text,
+        },
+    )
 
     # response.content_part.done
-    yield frame("response.content_part.done", {
-        "type": "response.content_part.done",
-        "item_id": msg_item_id,
-        "output_index": 0,
-        "content_index": 0,
-        "part": {"type": "output_text", "text": full_text, "annotations": []},
-    })
+    yield frame(
+        "response.content_part.done",
+        {
+            "type": "response.content_part.done",
+            "item_id": msg_item_id,
+            "output_index": 0,
+            "content_index": 0,
+            "part": {"type": "output_text", "text": full_text, "annotations": []},
+        },
+    )
 
     # response.output_item.done (message)
     final_msg = {
@@ -463,30 +512,36 @@ async def transform_chat_sse_to_responses_sse(
         "role": "assistant",
         "content": [{"type": "output_text", "text": full_text, "annotations": []}],
     }
-    yield frame("response.output_item.done", {
-        "type": "response.output_item.done",
-        "output_index": 0,
-        "item": final_msg,
-    })
+    yield frame(
+        "response.output_item.done",
+        {
+            "type": "response.output_item.done",
+            "output_index": 0,
+            "item": final_msg,
+        },
+    )
 
     # response.completed
-    yield frame("response.completed", {
-        "type": "response.completed",
-        "response": {
-            "id": rid,
-            "object": "response",
-            "created_at": created_at,
-            "model": model,
-            "status": "completed",
-            "output": [final_msg, *tool_items.values()],
-            "output_text": full_text,
-            "usage": {
-                "input_tokens": 0,
-                "output_tokens": max(1, out_tokens),
-                "total_tokens": max(1, out_tokens),
+    yield frame(
+        "response.completed",
+        {
+            "type": "response.completed",
+            "response": {
+                "id": rid,
+                "object": "response",
+                "created_at": created_at,
+                "model": model,
+                "status": "completed",
+                "output": [final_msg, *tool_items.values()],
+                "output_text": full_text,
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": max(1, out_tokens),
+                    "total_tokens": max(1, out_tokens),
+                },
             },
         },
-    })
+    )
 
 
 async def _handle_responses(request: Request) -> JSONResponse | StreamingResponse:

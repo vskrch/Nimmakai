@@ -139,8 +139,7 @@ PROVIDER_PRESETS: list[dict[str, Any]] = [
         "speed_tier": "fast",
         "signup_url": "https://platform.deepseek.com/",
         "description": (
-            "DeepSeek V3 / R1 and newer models via OpenAI-compatible API "
-            "(free credits on signup)."
+            "DeepSeek V3 / R1 and newer models via OpenAI-compatible API (free credits on signup)."
         ),
         "tags": ["free-credits", "coding", "reasoning", "openai-compatible"],
     },

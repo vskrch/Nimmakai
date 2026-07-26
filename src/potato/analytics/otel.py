@@ -44,8 +44,7 @@ class OTLPExporter:
             logger.info("OTLP exporter enabled endpoint=%s", self.endpoint)
         except ImportError:
             logger.warning(
-                "OTLP requested but opentelemetry packages missing — "
-                "install potato[otel]"
+                "OTLP requested but opentelemetry packages missing — install potato[otel]"
             )
         except Exception:
             logger.exception("OTLP exporter init failed")

@@ -135,16 +135,12 @@ async def _fetch_artificial_analysis(
 
     bundles: dict[str, IntelBundle] = {}
     for m in models:
-        slug = _normalize_slug(
-            str(m.get("model_id") or m.get("id") or m.get("name") or "")
-        )
+        slug = _normalize_slug(str(m.get("model_id") or m.get("id") or m.get("name") or ""))
         if not slug:
             continue
         bundles[slug] = IntelBundle(
             model_slug=slug,
-            aa_intelligence_idx=_safe_float(
-                m.get("intelligence_index") or m.get("quality_index")
-            ),
+            aa_intelligence_idx=_safe_float(m.get("intelligence_index") or m.get("quality_index")),
             aa_tps=_safe_float(m.get("output_speed") or m.get("tokens_per_second")),
             sources=["artificialanalysis"],
             fetched_at=time.time(),
@@ -186,9 +182,7 @@ async def _fetch_hf_openeval(client: httpx.AsyncClient) -> dict[str, IntelBundle
         bundles[slug] = IntelBundle(
             model_slug=slug,
             hf_mmlu=_safe_float(row.get("mmlu") or row.get("mmlu_score")),
-            hf_humaneval=_safe_float(
-                row.get("humaneval") or row.get("humaneval_score")
-            ),
+            hf_humaneval=_safe_float(row.get("humaneval") or row.get("humaneval_score")),
             sources=["hf_openeval"],
             fetched_at=time.time(),
         )
@@ -205,18 +199,14 @@ async def _fetch_arena_leaderboard(client: httpx.AsyncClient) -> dict[str, Intel
         )
         resp.raise_for_status()
         data = resp.json()
-        entries = (
-            data if isinstance(data, list) else (data.get("data") or data.get("models") or [])
-        )
+        entries = data if isinstance(data, list) else (data.get("data") or data.get("models") or [])
     except Exception as exc:
         logger.warning("arena leaderboard fetch failed: %s", exc)
         return {}
 
     bundles: dict[str, IntelBundle] = {}
     for entry in entries:
-        name = str(
-            entry.get("model") or entry.get("model_name") or entry.get("name") or ""
-        )
+        name = str(entry.get("model") or entry.get("model_name") or entry.get("name") or "")
         slug = _normalize_slug(name)
         if not slug:
             continue
@@ -310,11 +300,7 @@ class IntelFetcher:
             for slug, d in (raw.get("bundles") or {}).items():
                 b = IntelBundle(
                     model_slug=slug,
-                    **{
-                        k: v
-                        for k, v in d.items()
-                        if k in all_field_names and k != "model_slug"
-                    },
+                    **{k: v for k, v in d.items() if k in all_field_names and k != "model_slug"},
                 )
                 result[slug] = b
             logger.info("intel disk cache loaded: %d bundles", len(result))

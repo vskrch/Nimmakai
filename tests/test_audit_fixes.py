@@ -139,9 +139,7 @@ async def test_completions_path_does_not_fanout_on_text_success() -> None:
         requested_model="auto",
     )
     ex = FallbackExecutor(upstream, reg, settings)
-    result = await ex.execute_json(
-        "/completions", {"prompt": "hi"}, decision
-    )
+    result = await ex.execute_json("/completions", {"prompt": "hi"}, decision)
     assert result.status_code == 200
     assert result.model == "model-a"
     assert result.fallback_index == 0

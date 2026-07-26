@@ -10,6 +10,7 @@ Parity goals (client-visible):
 
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import re
 from dataclasses import dataclass, field
@@ -208,10 +209,8 @@ def parse_auto_router_options(body: dict[str, Any] | None) -> AutoRouterOptions:
             if cq is None:
                 cq = p.get("costQualityTradeoff")
             if cq is not None:
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     opts.cost_quality_tradeoff = int(cq)
-                except (TypeError, ValueError):
-                    pass
             break
 
     raw_model = body.get("model")
@@ -353,15 +352,11 @@ def sticky_fits_intent_pool(
         return True
     pref = preferred.lower()
     bare = pref.rsplit("/", 1)[-1]
-    in_pool = any(
-        m.lower() == pref or m.lower().endswith("/" + bare) for m in intent_pool
-    )
+    in_pool = any(m.lower() == pref or m.lower().endswith("/" + bare) for m in intent_pool)
     if in_pool:
         return True
     # Strict intent path: do not pin a model outside the intent pool
-    if force_intent or confidence >= 0.70:
-        return False
-    return True
+    return not (force_intent or confidence >= 0.7)
 
 
 def merge_unique(*chains: list[str]) -> list[str]:
@@ -396,17 +391,11 @@ def build_intent_aware_pool(
       3. Emergency live catalog slice
     """
     primary = (primary_intent or "coding_agentic").strip().lower()
-    intents = (
-        intent_expansion_order(primary)
-        if include_related
-        else [primary]
-    )
+    intents = intent_expansion_order(primary) if include_related else [primary]
     parts: list[list[str]] = []
     for intent_key in intents:
         try:
-            part = list(
-                registry.chain_for_intent(intent_key, variant=variant) or []
-            )
+            part = list(registry.chain_for_intent(intent_key, variant=variant) or [])
         except Exception:
             part = []
         if part:
@@ -420,9 +409,7 @@ def build_intent_aware_pool(
     try:
         from potato.resilience import emergency_chain
 
-        emergency = emergency_chain(
-            registry, intent=primary, max_n=max(max_n, 8)
-        )
+        emergency = emergency_chain(registry, intent=primary, max_n=max(max_n, 8))
         if emergency:
             return list(emergency)[: max(1, max_n)] if max_n else list(emergency)
     except Exception:

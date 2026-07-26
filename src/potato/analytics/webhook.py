@@ -76,8 +76,6 @@ class WebhookBroadcaster:
                         attempt + 1,
                     )
             except Exception:
-                logger.exception(
-                    "analytics webhook failed attempt=%s", attempt + 1
-                )
+                logger.exception("analytics webhook failed attempt=%s", attempt + 1)
             await asyncio.sleep(delay)
             delay = min(delay * 2, 8.0)

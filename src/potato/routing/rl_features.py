@@ -12,28 +12,39 @@ from typing import Any
 
 FEATURE_DIM = 12
 FEATURE_NAMES = [
-    "token_length_tier",      # 0: log-scaled prompt token length
-    "tool_density",           # 1: number of tools / 10
-    "code_syntax_ratio",      # 2: presence of code fences & code keywords
-    "lang_python",            # 3: Python keywords / file extensions
-    "lang_typescript",        # 4: JS / TS / React keywords
-    "lang_go",                # 5: Go syntax keywords
-    "lang_rust_cpp",          # 6: Rust / C++ / systems syntax
-    "agent_harness",          # 7: Cursor, OpenCode, Cline, Windsurf signature
-    "modality_image",         # 8: Multimodal image input presence
-    "reasoning_intensity",    # 9: Math / proof / step-by-step keywords
-    "multi_turn_depth",       # 10: Conversation turn depth / session continuation
-    "intent_coding_prior",    # 11: Intent classifier prior for coding/agentic
+    "token_length_tier",  # 0: log-scaled prompt token length
+    "tool_density",  # 1: number of tools / 10
+    "code_syntax_ratio",  # 2: presence of code fences & code keywords
+    "lang_python",  # 3: Python keywords / file extensions
+    "lang_typescript",  # 4: JS / TS / React keywords
+    "lang_go",  # 5: Go syntax keywords
+    "lang_rust_cpp",  # 6: Rust / C++ / systems syntax
+    "agent_harness",  # 7: Cursor, OpenCode, Cline, Windsurf signature
+    "modality_image",  # 8: Multimodal image input presence
+    "reasoning_intensity",  # 9: Math / proof / step-by-step keywords
+    "multi_turn_depth",  # 10: Conversation turn depth / session continuation
+    "intent_coding_prior",  # 11: Intent classifier prior for coding/agentic
 ]
 
 # Regex patterns for language & feature detection
 _PY_RE = re.compile(r"\b(def|import|from|async\s+def|self|__init__|pytest|pydantic)\b", re.I)
-_TS_RE = re.compile(r"\b(const|let|interface|type\s+\w+|async\s+function|useEffect|useState|export\s+default)\b", re.I)
-_GO_RE = re.compile(r"\b(func\s+\w+|package\s+\w+|struct|interface\s*\{|go\s+func|chan|fmt\.P)\b", re.I)
-_RUST_RE = re.compile(r"\b(fn\s+\w+|impl|trait|pub\s+fn|mut|match|#\[derive|std::|#include|namespace)\b", re.I)
-_REASON_RE = re.compile(r"\b(prove|theorem|step[- ]by[- ]step|reason carefully|derivative|integral|logic)\b", re.I)
+_TS_RE = re.compile(
+    r"\b(const|let|interface|type\s+\w+|async\s+function|useEffect|useState|export\s+default)\b",
+    re.I,
+)
+_GO_RE = re.compile(
+    r"\b(func\s+\w+|package\s+\w+|struct|interface\s*\{|go\s+func|chan|fmt\.P)\b", re.I
+)
+_RUST_RE = re.compile(
+    r"\b(fn\s+\w+|impl|trait|pub\s+fn|mut|match|#\[derive|std::|#include|namespace)\b", re.I
+)
+_REASON_RE = re.compile(
+    r"\b(prove|theorem|step[- ]by[- ]step|reason carefully|derivative|integral|logic)\b", re.I
+)
 _CODE_FENCE_RE = re.compile(r"```")
-_AGENT_CLIENT_RE = re.compile(r"(cursor|opencode|cline|continue|windsurf|kiro|cascade|copilot)", re.I)
+_AGENT_CLIENT_RE = re.compile(
+    r"(cursor|opencode|cline|continue|windsurf|kiro|cascade|copilot)", re.I
+)
 
 
 def extract_feature_vector(
@@ -51,7 +62,7 @@ def extract_feature_vector(
     messages = body.get("messages") or body.get("input") or []
     if not isinstance(messages, list):
         messages = []
-    
+
     total_chars = 0
     turn_count = len(messages)
     has_image = False
@@ -68,7 +79,11 @@ def extract_feature_vector(
             for part in content:
                 if isinstance(part, dict):
                     ptype = str(part.get("type") or "")
-                    if ptype in {"image_url", "input_image"} or "image" in ptype or "image_url" in part:
+                    if (
+                        ptype in {"image_url", "input_image"}
+                        or "image" in ptype
+                        or "image_url" in part
+                    ):
                         has_image = True
                     if "text" in part and isinstance(part["text"], str):
                         total_chars += len(part["text"])

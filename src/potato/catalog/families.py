@@ -123,6 +123,3 @@ def latest_in_family(live_ids: set[str] | list[str], family: str) -> str | None:
 def all_in_family(live_ids: set[str] | list[str], family: str) -> list[str]:
     candidates = [m for m in live_ids if matches_family(m, family)]
     return sorted(candidates, key=version_key, reverse=True)
-
-
-

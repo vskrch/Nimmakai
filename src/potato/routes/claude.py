@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 import uuid
-from typing import Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -97,7 +97,9 @@ def transform_anthropic_to_openai(body: dict[str, Any]) -> dict[str, Any]:
     return openai_body
 
 
-def transform_openai_to_anthropic_json(openai_resp: dict[str, Any], requested_model: str) -> dict[str, Any]:
+def transform_openai_to_anthropic_json(
+    openai_resp: dict[str, Any], requested_model: str
+) -> dict[str, Any]:
     """Convert OpenAI Chat Completion JSON response into Anthropic Message JSON response."""
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
     choices = openai_resp.get("choices", [])
@@ -162,7 +164,7 @@ async def transform_openai_to_anthropic_sse_stream(
             "usage": {"input_tokens": 0, "output_tokens": 0},
         },
     }
-    yield f"event: message_start\ndata: {json.dumps(msg_start_event)}\n\n".encode("utf-8")
+    yield f"event: message_start\ndata: {json.dumps(msg_start_event)}\n\n".encode()
 
     # Emit content_block_start
     block_start_event = {
@@ -170,7 +172,7 @@ async def transform_openai_to_anthropic_sse_stream(
         "index": 0,
         "content_block": {"type": "text", "text": ""},
     }
-    yield f"event: content_block_start\ndata: {json.dumps(block_start_event)}\n\n".encode("utf-8")
+    yield f"event: content_block_start\ndata: {json.dumps(block_start_event)}\n\n".encode()
 
     out_tokens = 0
     buffer = ""
@@ -205,13 +207,13 @@ async def transform_openai_to_anthropic_sse_stream(
                                 "index": 0,
                                 "delta": {"type": "text_delta", "text": content_piece},
                             }
-                            yield f"event: content_block_delta\ndata: {json.dumps(delta_event)}\n\n".encode("utf-8")
+                            yield f"event: content_block_delta\ndata: {json.dumps(delta_event)}\n\n".encode()
                 except Exception:
                     pass
 
     # Emit content_block_stop
     block_stop_event = {"type": "content_block_stop", "index": 0}
-    yield f"event: content_block_stop\ndata: {json.dumps(block_stop_event)}\n\n".encode("utf-8")
+    yield f"event: content_block_stop\ndata: {json.dumps(block_stop_event)}\n\n".encode()
 
     # Emit message_delta
     msg_delta_event = {
@@ -219,11 +221,11 @@ async def transform_openai_to_anthropic_sse_stream(
         "delta": {"stop_reason": "end_turn", "stop_sequence": None},
         "usage": {"output_tokens": max(1, out_tokens)},
     }
-    yield f"event: message_delta\ndata: {json.dumps(msg_delta_event)}\n\n".encode("utf-8")
+    yield f"event: message_delta\ndata: {json.dumps(msg_delta_event)}\n\n".encode()
 
     # Emit message_stop
     msg_stop_event = {"type": "message_stop"}
-    yield f"event: message_stop\ndata: {json.dumps(msg_stop_event)}\n\n".encode("utf-8")
+    yield f"event: message_stop\ndata: {json.dumps(msg_stop_event)}\n\n".encode()
 
 
 async def _handle_claude_or_chat(request: Request) -> JSONResponse | StreamingResponse:
@@ -256,7 +258,7 @@ async def _handle_claude_or_chat(request: Request) -> JSONResponse | StreamingRe
     headers = list(scope.get("headers", []))
     x_api_key = request.headers.get("x-api-key") or request.headers.get("X-Api-Key")
     if x_api_key and not request.headers.get("authorization"):
-        headers.append((b"authorization", f"Bearer {x_api_key}".encode("utf-8")))
+        headers.append((b"authorization", f"Bearer {x_api_key}".encode()))
         scope["headers"] = headers
 
     # Replace receive method on request

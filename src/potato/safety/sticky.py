@@ -19,6 +19,7 @@ class StickyBinding:
 @dataclass
 class SessionContext:
     """Tracks cumulative token usage across a multi-turn agentic session."""
+
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
     turn_count: int = 0
@@ -135,11 +136,7 @@ class StickySessionStore:
             if sid:
                 return str(sid).strip() or None
 
-        explicit = (
-            _h("x-potato-session")
-            or _h("x-session-id")
-            or _h("X-Session-Id")
-        )
+        explicit = _h("x-potato-session") or _h("x-session-id") or _h("X-Session-Id")
         if explicit:
             return explicit
 
@@ -170,11 +167,7 @@ class StickySessionStore:
                 content = m.get("content")
                 if isinstance(content, list):
                     # multimodal — take text parts
-                    parts = [
-                        str(p.get("text") or "")
-                        for p in content
-                        if isinstance(p, dict)
-                    ]
+                    parts = [str(p.get("text") or "") for p in content if isinstance(p, dict)]
                     content = " ".join(parts)
                 text = str(content or "")[:400]
                 if role == "system" and not sys0:

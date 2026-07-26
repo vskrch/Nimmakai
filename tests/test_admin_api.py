@@ -20,6 +20,7 @@ _temp_dirs = []
 def _make_app():
     import tempfile
     from pathlib import Path
+
     td = tempfile.TemporaryDirectory()
     _temp_dirs.append(td)  # keep reference alive
 
@@ -82,9 +83,7 @@ AUTH = {"Authorization": "Bearer any"}
 @pytest.mark.asyncio
 async def test_health_endpoint():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/health", headers=AUTH)
         assert r.status_code == 200
         body = r.json()
@@ -96,9 +95,7 @@ async def test_health_endpoint():
 @pytest.mark.asyncio
 async def test_health_endpoint_anonymous():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/health")
         assert r.status_code == 200
         body = r.json()
@@ -111,9 +108,7 @@ async def test_health_endpoint_anonymous():
 @pytest.mark.asyncio
 async def test_ready_requires_live_models():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/ready")
         # Test app has no hub runtimes / live models → not ready
         assert r.status_code == 503
@@ -125,9 +120,7 @@ async def test_ready_requires_live_models():
 @pytest.mark.asyncio
 async def test_admin_logs_endpoint():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/admin/logs", headers=AUTH)
         assert r.status_code == 200
         body = r.json()
@@ -138,9 +131,7 @@ async def test_admin_logs_endpoint():
 @pytest.mark.asyncio
 async def test_root_endpoint():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/")
         assert r.status_code == 200
         body = r.json()
@@ -151,21 +142,16 @@ async def test_root_endpoint():
 @pytest.mark.asyncio
 async def test_auth_required():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         assert (await c.get("/health")).status_code == 200
-        for p in ["/stats", "/admin/providers", "/preferences",
-                  "/ladder", "/catalog"]:
+        for p in ["/stats", "/admin/providers", "/preferences", "/ladder", "/catalog"]:
             assert (await c.get(p)).status_code == 401
 
 
 @pytest.mark.asyncio
 async def test_list_providers():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/admin/providers", headers=AUTH)
         assert r.status_code == 200
         providers = r.json()["providers"]
@@ -178,16 +164,18 @@ async def test_list_providers():
 @pytest.mark.asyncio
 async def test_add_provider():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
-        r = await c.post("/admin/providers", headers=AUTH, json={
-            "id": "groq",
-            "name": "Groq",
-            "base_url": "https://api.groq.com/openai/v1",
-            "api_keys": ["gsk-test-key"],
-            "rpm_limit": 30,
-        })
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/admin/providers",
+            headers=AUTH,
+            json={
+                "id": "groq",
+                "name": "Groq",
+                "base_url": "https://api.groq.com/openai/v1",
+                "api_keys": ["gsk-test-key"],
+                "rpm_limit": 30,
+            },
+        )
         assert r.status_code == 200
         body = r.json()
         assert body["ok"] is True
@@ -198,14 +186,16 @@ async def test_add_provider():
 @pytest.mark.asyncio
 async def test_delete_provider():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
-        await c.post("/admin/providers", headers=AUTH, json={
-            "id": "temp",
-            "base_url": "https://temp.com/v1",
-            "api_keys": ["k"],
-        })
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        await c.post(
+            "/admin/providers",
+            headers=AUTH,
+            json={
+                "id": "temp",
+                "base_url": "https://temp.com/v1",
+                "api_keys": ["k"],
+            },
+        )
         r = await c.delete("/admin/providers/temp", headers=AUTH)
         assert r.status_code == 200
         assert r.json()["ok"] is True
@@ -217,9 +207,7 @@ async def test_delete_provider():
 @pytest.mark.asyncio
 async def test_delete_nonexistent_provider():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.delete("/admin/providers/nonexistent", headers=AUTH)
         assert r.status_code == 404
 
@@ -227,29 +215,27 @@ async def test_delete_nonexistent_provider():
 @pytest.mark.asyncio
 async def test_add_provider_missing_fields():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
-        r = await c.post(
-            "/admin/providers", headers=AUTH, json={"id": "no-url"}
-        )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post("/admin/providers", headers=AUTH, json={"id": "no-url"})
         assert r.status_code == 400
 
 
 @pytest.mark.asyncio
 async def test_preferences_crud():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/preferences", headers=AUTH)
         assert r.json()["preferences"] == []
 
-        r = await c.post("/preferences", headers=AUTH, json={
-            "intent": "coding_agentic",
-            "chain": ["groq/llama-3.3-70b"],
-            "note": "test",
-        })
+        r = await c.post(
+            "/preferences",
+            headers=AUTH,
+            json={
+                "intent": "coding_agentic",
+                "chain": ["groq/llama-3.3-70b"],
+                "note": "test",
+            },
+        )
         assert r.status_code == 200
         assert r.json()["ok"] is True
         assert r.json()["preference"]["chain"] == ["groq/llama-3.3-70b"]
@@ -269,12 +255,15 @@ async def test_preferences_crud():
 @pytest.mark.asyncio
 async def test_preferences_invalid_intent():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
-        r = await c.post("/preferences", headers=AUTH, json={
-            "intent": "bad_intent", "chain": ["x"],
-        })
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        r = await c.post(
+            "/preferences",
+            headers=AUTH,
+            json={
+                "intent": "bad_intent",
+                "chain": ["x"],
+            },
+        )
         assert r.status_code == 400
 
 
@@ -282,15 +271,23 @@ async def test_preferences_invalid_intent():
 async def test_preferences_empty_chain_clears():
     """Empty chain clears a preference (reverts to intelligent routing)."""
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
-        await c.post("/preferences", headers=AUTH, json={
-            "intent": "coding_agentic", "chain": ["nim/foo"],
-        })
-        r = await c.post("/preferences", headers=AUTH, json={
-            "intent": "coding_agentic", "chain": [],
-        })
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        await c.post(
+            "/preferences",
+            headers=AUTH,
+            json={
+                "intent": "coding_agentic",
+                "chain": ["nim/foo"],
+            },
+        )
+        r = await c.post(
+            "/preferences",
+            headers=AUTH,
+            json={
+                "intent": "coding_agentic",
+                "chain": [],
+            },
+        )
         assert r.status_code == 200
         body = r.json()
         assert body["ok"] is True
@@ -303,15 +300,23 @@ async def test_preferences_empty_chain_clears():
 @pytest.mark.asyncio
 async def test_clear_all_preferences():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
-        await c.post("/preferences", headers=AUTH, json={
-            "intent": "coding_agentic", "chain": ["a"],
-        })
-        await c.post("/preferences", headers=AUTH, json={
-            "intent": "chat_fast", "chain": ["b"],
-        })
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        await c.post(
+            "/preferences",
+            headers=AUTH,
+            json={
+                "intent": "coding_agentic",
+                "chain": ["a"],
+            },
+        )
+        await c.post(
+            "/preferences",
+            headers=AUTH,
+            json={
+                "intent": "chat_fast",
+                "chain": ["b"],
+            },
+        )
         r = await c.delete("/preferences", headers=AUTH)
         assert r.json()["ok"] is True
         r = await c.get("/preferences", headers=AUTH)
@@ -321,9 +326,7 @@ async def test_clear_all_preferences():
 @pytest.mark.asyncio
 async def test_stats_endpoint():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/stats", headers=AUTH)
         assert r.status_code == 200
         body = r.json()
@@ -334,9 +337,7 @@ async def test_stats_endpoint():
 @pytest.mark.asyncio
 async def test_ladder_endpoint():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         r = await c.get("/ladder", headers=AUTH)
         assert r.status_code in {200, 503}
 
@@ -344,24 +345,30 @@ async def test_ladder_endpoint():
 @pytest.mark.asyncio
 async def test_provider_partial_update():
     app = _make_app()
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         # Create initial provider
-        r = await c.post("/admin/providers", headers=AUTH, json={
-            "id": "groq",
-            "name": "Groq",
-            "base_url": "https://api.groq.com/openai/v1",
-            "api_keys": ["gsk-test-key"],
-            "rpm_limit": 30.0,
-        })
+        r = await c.post(
+            "/admin/providers",
+            headers=AUTH,
+            json={
+                "id": "groq",
+                "name": "Groq",
+                "base_url": "https://api.groq.com/openai/v1",
+                "api_keys": ["gsk-test-key"],
+                "rpm_limit": 30.0,
+            },
+        )
         assert r.status_code == 200
 
         # Perform partial update (toggle status only)
-        r = await c.post("/admin/providers", headers=AUTH, json={
-            "id": "groq",
-            "enabled": False,
-        })
+        r = await c.post(
+            "/admin/providers",
+            headers=AUTH,
+            json={
+                "id": "groq",
+                "enabled": False,
+            },
+        )
         assert r.status_code == 200
         body = r.json()
         assert body["ok"] is True
@@ -424,9 +431,7 @@ async def test_seeded_zen_keys_auto_enable():
     app.state.routing_stats = RoutingStats()
     app.state.preferences = UserPreferences()
 
-    async with AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         # Dashboard-style body: keys only, no explicit enabled (regression)
         r = await c.post(
             "/admin/providers",

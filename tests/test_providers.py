@@ -110,15 +110,17 @@ def test_nim_env_keys_merge_with_admin_ui_keys(tmp_path: Path) -> None:
         sqlite_path=db,
         seed_free_presets=False,
     )
-    store.upsert(ProviderConfig(
-        id="nim",
-        name="NVIDIA NIM",
-        base_url="https://n/v1",
-        api_keys=["nvapi-from-ui"],
-        api_keys_env="NIM_API_KEYS",
-        enabled=True,
-        builtin=True,
-    ))
+    store.upsert(
+        ProviderConfig(
+            id="nim",
+            name="NVIDIA NIM",
+            base_url="https://n/v1",
+            api_keys=["nvapi-from-ui"],
+            api_keys_env="NIM_API_KEYS",
+            enabled=True,
+            builtin=True,
+        )
+    )
     store2 = ProviderStore.load(
         yaml_path,
         tmp_path / "o.json",
@@ -145,15 +147,17 @@ def test_nim_env_empty_preserves_admin_ui_key(tmp_path: Path) -> None:
         sqlite_path=db,
         seed_free_presets=False,
     )
-    store.upsert(ProviderConfig(
-        id="nim",
-        name="NVIDIA NIM",
-        base_url="https://n/v1",
-        api_keys=["nvapi-saved-via-ui"],
-        api_keys_env="NIM_API_KEYS",
-        enabled=True,
-        builtin=True,
-    ))
+    store.upsert(
+        ProviderConfig(
+            id="nim",
+            name="NVIDIA NIM",
+            base_url="https://n/v1",
+            api_keys=["nvapi-saved-via-ui"],
+            api_keys_env="NIM_API_KEYS",
+            enabled=True,
+            builtin=True,
+        )
+    )
     store2 = ProviderStore.load(
         yaml_path,
         tmp_path / "o.json",

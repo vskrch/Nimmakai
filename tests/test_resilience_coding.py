@@ -31,14 +31,32 @@ def test_coding_prefers_mimo_and_deepseek_v4() -> None:
     }
     # Install score cache: coding-capable models get tools affinity boost
     bundles = {
-        "mimo-v2.5-free": IntelBundle(model_slug="mimo-v2.5-free", aa_intelligence_idx=99.0, supports_tools=True),
-        "deepseek-v4-flash-free": IntelBundle(model_slug="deepseek-v4-flash-free", aa_intelligence_idx=98.0, supports_tools=True),
-        "big-pickle": IntelBundle(model_slug="big-pickle", aa_intelligence_idx=96.0, supports_tools=True),
-        "deepseek-v4-pro": IntelBundle(model_slug="deepseek-v4-pro", aa_intelligence_idx=98.0, supports_tools=True),
-        "gemma-2-2b-it": IntelBundle(model_slug="gemma-2-2b-it", aa_intelligence_idx=50.0, supports_tools=False),
-        "nemotron-3-nano-30b-a3b": IntelBundle(model_slug="nemotron-3-nano-30b-a3b", aa_intelligence_idx=60.0, supports_tools=False),
+        "mimo-v2.5-free": IntelBundle(
+            model_slug="mimo-v2.5-free", aa_intelligence_idx=99.0, supports_tools=True
+        ),
+        "deepseek-v4-flash-free": IntelBundle(
+            model_slug="deepseek-v4-flash-free", aa_intelligence_idx=98.0, supports_tools=True
+        ),
+        "big-pickle": IntelBundle(
+            model_slug="big-pickle", aa_intelligence_idx=96.0, supports_tools=True
+        ),
+        "deepseek-v4-pro": IntelBundle(
+            model_slug="deepseek-v4-pro", aa_intelligence_idx=98.0, supports_tools=True
+        ),
+        "gemma-2-2b-it": IntelBundle(
+            model_slug="gemma-2-2b-it", aa_intelligence_idx=50.0, supports_tools=False
+        ),
+        "nemotron-3-nano-30b-a3b": IntelBundle(
+            model_slug="nemotron-3-nano-30b-a3b", aa_intelligence_idx=60.0, supports_tools=False
+        ),
     }
-    cache = recompute(live_ids=live, intel_bundles=bundles, health=ModelHealthStore(), learning=LearningStore(), yaml_cfg={})
+    cache = recompute(
+        live_ids=live,
+        intel_bundles=bundles,
+        health=ModelHealthStore(),
+        learning=LearningStore(),
+        yaml_cfg={},
+    )
     ModelScoreCache.install(cache)
     try:
         svc = LadderService()

@@ -84,9 +84,7 @@ class KeyPool:
             KeyStats(key_id=f"key-{i}", api_key=k) for i, k in enumerate(api_keys)
         ]
         if not self._keys:
-            logger.error(
-                "KeyPool has zero NIM keys — all upstream requests will fail closed"
-            )
+            logger.error("KeyPool has zero NIM keys — all upstream requests will fail closed")
         self._rr = 0
 
     def __len__(self) -> int:
@@ -119,9 +117,7 @@ class KeyPool:
             return False
         return self._rpm_used(stats, now) < self.rpm_limit
 
-    def _score(
-        self, stats: KeyStats, now: float, *, preferred_key_id: str | None = None
-    ) -> float:
+    def _score(self, stats: KeyStats, now: float, *, preferred_key_id: str | None = None) -> float:
         used = self._rpm_used(stats, now)
         headroom = max(0.0, self.rpm_limit - used - stats.in_flight * 0.5)
         latency = max(0.05, stats.ewma_latency)
@@ -147,9 +143,7 @@ class KeyPool:
         preferred_key_id: str | None = None,
     ) -> KeyStats:
         if not self._keys:
-            raise RuntimeError(
-                "No NIM API keys configured. Set NIM_API_KEYS in the environment."
-            )
+            raise RuntimeError("No NIM API keys configured. Set NIM_API_KEYS in the environment.")
         deadline = time.monotonic() + max_wait
         while True:
             async with self._lock:
@@ -212,9 +206,7 @@ class KeyPool:
                 stats.auth_failures += 1
                 stats.error_count += 1
                 if stats.auth_failures >= self.auth_fail_threshold:
-                    stats.quarantined_until = (
-                        time.monotonic() + self.auth_quarantine_seconds
-                    )
+                    stats.quarantined_until = time.monotonic() + self.auth_quarantine_seconds
                     logger.error(
                         "%s quarantined for %.0fs after %s auth failures (%s)",
                         stats.key_id,
@@ -230,9 +222,7 @@ class KeyPool:
                 cooldown = self.cooldown_seconds
                 if retry_after_seconds is not None and retry_after_seconds > 0:
                     cooldown = max(cooldown, retry_after_seconds)
-                stats.cooldown_until = max(
-                    stats.cooldown_until, time.monotonic() + cooldown
-                )
+                stats.cooldown_until = max(stats.cooldown_until, time.monotonic() + cooldown)
                 logger.warning(
                     "%s hit rate limit; cooling down %.0fs",
                     stats.key_id,
@@ -270,9 +260,7 @@ class KeyPool:
                     "available": self._is_available(k, now),
                     "auth_failures": k.auth_failures,
                     "quarantined": now < k.quarantined_until,
-                    "quarantine_remaining_s": max(
-                        0.0, round(k.quarantined_until - now, 1)
-                    ),
+                    "quarantine_remaining_s": max(0.0, round(k.quarantined_until - now, 1)),
                     "daily_count": k.daily_count,
                     "daily_limit": self.rpd_limit,
                     "daily_window": k.daily_window_start,

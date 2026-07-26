@@ -162,8 +162,7 @@ class TraceRecord:
             "status_code": self.status_code,
             "success": self.success,
             "duration_ms": self.duration_ms,
-            "total_tokens": self.total_tokens
-            or (self.prompt_tokens + self.completion_tokens),
+            "total_tokens": self.total_tokens or (self.prompt_tokens + self.completion_tokens),
             "fallback_index": self.fallback_index,
             "estimated_cost_usd": self.estimated_cost_usd,
             "error_message": self.error_message,

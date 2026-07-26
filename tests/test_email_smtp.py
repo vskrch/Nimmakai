@@ -20,9 +20,7 @@ from potato.accounts.email import (
 
 
 def test_build_verify_email_contains_link():
-    msg = build_verify_email(
-        to="a@b.co", verify_url="https://app.example/auth/verify?token=abc"
-    )
+    msg = build_verify_email(to="a@b.co", verify_url="https://app.example/auth/verify?token=abc")
     assert msg.to == "a@b.co"
     assert "https://app.example/auth/verify?token=abc" in msg.text
     assert msg.html is not None
@@ -101,9 +99,7 @@ def test_smtp_sender_starttls_send(mock_smtp_cls):
             use_tls=True,
         )
     )
-    result = sender.send(
-        OutboundEmail(to="a@b.co", subject="Hi", text="body", html="<p>body</p>")
-    )
+    result = sender.send(OutboundEmail(to="a@b.co", subject="Hi", text="body", html="<p>body</p>"))
     assert result["ok"] is True
     assert result["backend"] == "smtp"
     smtp.ehlo.assert_called()

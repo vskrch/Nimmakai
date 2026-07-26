@@ -17,8 +17,8 @@ Dead models never lead (availability gate near-zero).
 
 from __future__ import annotations
 
+import contextlib
 import logging
-import math
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -44,15 +44,13 @@ def load_intent_weights(yaml_scoring: dict) -> None:
     """Called at startup after yaml is loaded. Overrides default weights from YAML."""
     global _INTENT_WEIGHTS
     for intent, w in (yaml_scoring.get("intent_optimizer_weights") or {}).items():
-        try:
+        with contextlib.suppress(KeyError, TypeError, ValueError):
             _INTENT_WEIGHTS[intent] = (
                 float(w["intel"]),
                 float(w["speed"]),
                 float(w["avail"]),
                 float(w["prov"]),
             )
-        except (KeyError, TypeError, ValueError):
-            pass
 
 
 def _quality_prior(
@@ -95,10 +93,7 @@ def _speed_factor(health: Any, model_id: str) -> float:
 
     # Tokens/sec (normalize ~40 TPS = 1.0, 120+ = elite)
     tps = h.ewma_tok_per_s
-    if tps > 0:
-        tps_f = min(2.4, max(0.25, tps / 40.0))
-    else:
-        tps_f = 0.8
+    tps_f = min(2.4, max(0.25, tps / 40.0)) if tps > 0 else 0.8
 
     # Latency / TTFT (0.15s → boost, 1s → ~1.0, 3s+ → cut)
     lat = h.ewma_latency if h.ewma_latency > 0 else 1.0
@@ -123,10 +118,7 @@ def _provider_factor(model_id: str, provider_ids: set[str], health: Any = None) 
     prior = speed_prior_for_provider(pid)
     # NMK-403: weight provider prior by aggregate health
     if health is not None:
-        provider_models = {
-            m for m in getattr(health, "_by_model", {})
-            if m.startswith(pid + "/")
-        }
+        provider_models = {m for m in getattr(health, "_by_model", {}) if m.startswith(pid + "/")}
         if provider_models:
             agg_health = health.provider_health(provider_models, pid)
             prior *= max(0.5, agg_health)

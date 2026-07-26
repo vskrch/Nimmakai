@@ -34,9 +34,7 @@ async def sleep_backoff(
     cap: float = 16.0,
     retry_after: float | None = None,
 ) -> float:
-    delay = compute_backoff_seconds(
-        attempt, base=base, cap=cap, retry_after=retry_after
-    )
+    delay = compute_backoff_seconds(attempt, base=base, cap=cap, retry_after=retry_after)
     if delay > 0:
         await asyncio.sleep(delay)
     return delay

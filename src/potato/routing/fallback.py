@@ -73,6 +73,7 @@ class TokenStats:
     prompt_tokens: int = 0
     completion_tokens: int = 0
 
+
 @dataclass
 class RoutingStats:
     intents_total: dict[str, int] = field(default_factory=dict)
@@ -91,7 +92,7 @@ class RoutingStats:
             self.fallback_advances += 1
         self._recent_advances.append(advanced)
         if len(self._recent_advances) > self._max_advances_track:
-            self._recent_advances = self._recent_advances[-self._max_advances_track:]
+            self._recent_advances = self._recent_advances[-self._max_advances_track :]
 
     def should_rerank(self) -> bool:
         """True when >30% of recent requests advanced → rankings may be stale."""
@@ -104,12 +105,13 @@ class RoutingStats:
             self.model_tokens[model] = TokenStats()
         self.model_tokens[model].prompt_tokens += in_tok
         self.model_tokens[model].completion_tokens += out_tok
-        
+
         if key_id:
             if key_id not in self.key_tokens:
                 self.key_tokens[key_id] = TokenStats()
             self.key_tokens[key_id].prompt_tokens += in_tok
             self.key_tokens[key_id].completion_tokens += out_tok
+
 
 def _is_model_not_found(status: int, body: Any) -> bool:
     if status == 404:
@@ -122,8 +124,7 @@ def _is_model_not_found(status: int, body: Any) -> bool:
         text = body
     low = text.lower()
     return any(
-        s in low
-        for s in ("model not found", "unknown model", "does not exist", "invalid model")
+        s in low for s in ("model not found", "unknown model", "does not exist", "invalid model")
     )
 
 
@@ -183,9 +184,7 @@ def _is_context_overflow_message(msg: str) -> bool:
         )
     ):
         return True
-    return bool(
-        re.search(r"context.*exceed|exceeds.*context|maximum.*tokens", low)
-    )
+    return bool(re.search(r"context.*exceed|exceeds.*context|maximum.*tokens", low))
 
 
 def _is_non_retryable_client_error(status: int, body: Any) -> bool:
@@ -323,9 +322,7 @@ class FallbackExecutor:
         try:
             from potato.catalog.providers import split_provider_model
 
-            pid, _ = split_provider_model(
-                model, self.hub.provider_ids, default_provider="nim"
-            )
+            pid, _ = split_provider_model(model, self.hub.provider_ids, default_provider="nim")
             return pid
         except Exception:
             return None
@@ -386,9 +383,7 @@ class FallbackExecutor:
         try:
             from potato.catalog.providers import split_provider_model
 
-            pid, _ = split_provider_model(
-                model, self.hub.provider_ids, default_provider="nim"
-            )
+            pid, _ = split_provider_model(model, self.hub.provider_ids, default_provider="nim")
             return self.hub.has_runtime(pid)
         except Exception:
             logger.exception("provider availability check failed for model %s", model)
@@ -402,9 +397,7 @@ class FallbackExecutor:
         back to all live models rather than returning empty (serving > 503).
         """
         registry = self.registry
-        active = list(
-            getattr(registry, "active_live_ids", lambda: set())() or set()
-        )
+        active = list(getattr(registry, "active_live_ids", lambda: set())() or set())
         if not active:
             active = list(getattr(registry, "live_ids", set()) or set())
         available = [m for m in active if self._provider_available(m)]
@@ -413,8 +406,7 @@ class FallbackExecutor:
         if had_tools and hasattr(registry, "ladder"):
             caps = getattr(registry.ladder, "capabilities", {})
             tool_ok = [
-                m for m in available
-                if (caps.get(m) or {}).get("supports_tools") is not False
+                m for m in available if (caps.get(m) or {}).get("supports_tools") is not False
             ]
             non_ok = [m for m in available if m not in set(tool_ok)]
             return tool_ok + non_ok
@@ -458,9 +450,7 @@ class FallbackExecutor:
                     if ml and not attempt_body.get("max_tokens"):
                         attempt_body["max_tokens"] = ml
                     elif ml and attempt_body.get("max_tokens"):
-                        attempt_body["max_tokens"] = min(
-                            attempt_body["max_tokens"], ml
-                        )
+                        attempt_body["max_tokens"] = min(attempt_body["max_tokens"], ml)
             pid = self._provider_id_for(model)
             t_attempt = time.perf_counter()
             try:
@@ -479,7 +469,10 @@ class FallbackExecutor:
             except (TimeoutError, RuntimeError, httpx.HTTPError, OSError):
                 self._circuit_fail(pid)
                 self.registry.record_outcome(
-                    model, None, success=False, status_code=503,
+                    model,
+                    None,
+                    success=False,
+                    status_code=503,
                     intent=decision.intent.value,
                 )
                 continue
@@ -495,40 +488,53 @@ class FallbackExecutor:
                     ct = int(usage.get("completion_tokens") or 0)
                     cached = int(
                         usage.get("cached_tokens")
-                        or (usage.get("prompt_tokens_details") or {}).get(
-                            "cached_tokens", 0
-                        )
+                        or (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
                         or 0
                     )
                 self.registry.record_outcome(
-                    model, key.key_id if key else None,
-                    success=True, latency=lat / 1000, tokens=pt + ct,
-                    status_code=status, intent=decision.intent.value,
+                    model,
+                    key.key_id if key else None,
+                    success=True,
+                    latency=lat / 1000,
+                    tokens=pt + ct,
+                    status_code=status,
+                    intent=decision.intent.value,
                 )
                 self.stats.record(decision.intent.value, model, advanced=True)
                 self.stats.record_tokens(model, key.key_id if key else None, pt, ct)
                 if isinstance(resp_body, dict) and "model" in resp_body:
                     resp_body = {**resp_body, "model": model}
                 return UpstreamResult(
-                    status_code=status, body=resp_body, headers=headers,
-                    key=key, model=model,
+                    status_code=status,
+                    body=resp_body,
+                    headers=headers,
+                    key=key,
+                    model=model,
                     fallback_index=chain_len + offset,
-                    decision=decision, prompt_tokens=pt,
-                    completion_tokens=ct, cached_tokens=cached,
-                    upstream_ms=lat, provider_id=pid,
+                    decision=decision,
+                    prompt_tokens=pt,
+                    completion_tokens=ct,
+                    cached_tokens=cached,
+                    upstream_ms=lat,
+                    provider_id=pid,
                 )
             self._circuit_fail(pid)
             self.registry.record_outcome(
-                model, key.key_id if key else None,
-                success=False, status_code=status,
+                model,
+                key.key_id if key else None,
+                success=False,
+                status_code=status,
                 intent=decision.intent.value,
             )
             last = UpstreamResult(
                 status_code=status,
                 body=_wue(resp_body, status=status),
-                headers=headers, key=key, model=model,
+                headers=headers,
+                key=key,
+                model=model,
                 fallback_index=start_idx + offset,
-                decision=decision, upstream_ms=lat,
+                decision=decision,
+                upstream_ms=lat,
                 provider_id=pid,
             )
         return last
@@ -595,26 +601,19 @@ class FallbackExecutor:
             m
             for m in pool
             if self._provider_available(m)
-            and (
-                self.registry.resolve_live_id(m, include_disabled=True) or m
-            )
-            not in disabled
+            and (self.registry.resolve_live_id(m, include_disabled=True) or m) not in disabled
         ]
         if had_tools and hasattr(self.registry, "ladder"):
             caps = getattr(self.registry.ladder, "capabilities", {})
             tool_ok = [
-                m
-                for m in available
-                if (caps.get(m) or {}).get("supports_tools") is not False
+                m for m in available if (caps.get(m) or {}).get("supports_tools") is not False
             ]
             if tool_ok:
                 available = tool_ok
         allowed = list(getattr(decision, "allowed_models", None) or [])
         free_only = str(getattr(decision, "auto_tier", "") or "").lower() == "free"
         if allowed or free_only:
-            available = filter_chain(
-                available, allowed_models=allowed or None, free_only=free_only
-            )
+            available = filter_chain(available, allowed_models=allowed or None, free_only=free_only)
         return available
 
     def _chain(self, decision: RouteDecision, *, had_tools: bool = False) -> list[str]:
@@ -664,7 +663,8 @@ class FallbackExecutor:
                     # request that turns out to be agentic still reaches coding.
                     seen = {m.lower() for m in raw}
                     escalation_intents = [
-                        i for i in intent_expansion_order(decision.intent.value)
+                        i
+                        for i in intent_expansion_order(decision.intent.value)
                         if i != decision.intent.value
                     ]
                     for esc_intent in escalation_intents:
@@ -673,7 +673,7 @@ class FallbackExecutor:
                                 esc_intent,
                                 variant=getattr(decision, "variant", None) or "default",
                             )
-                            for m in (esc_chain or []):
+                            for m in esc_chain or []:
                                 ml = m.lower()
                                 if ml not in seen and ml in live_set:
                                     raw.append(m)
@@ -689,10 +689,7 @@ class FallbackExecutor:
             raw = [
                 m
                 for m in raw
-                if (
-                    self.registry.resolve_live_id(m, include_disabled=True) or m
-                )
-                not in disabled
+                if (self.registry.resolve_live_id(m, include_disabled=True) or m) not in disabled
             ]
         # Pre-filter: skip models confirmed to not support tools when tools are present
         if had_tools and hasattr(self.registry, "ladder"):
@@ -739,22 +736,14 @@ class FallbackExecutor:
         if variant == "default":
             req = str(decision.requested_model or "").lower()
             tier = str(getattr(decision, "auto_tier", "") or "").lower()
-            if (
-                "cheap" in req
-                or tier in ("efficient", "free")
-                or "efficient" in req
-            ):
+            if "cheap" in req or tier in ("efficient", "free") or "efficient" in req:
                 variant = "cheap"
             elif "fast" in req or tier == "fast":
                 variant = "fast"
-        pinned = getattr(decision, "pinned_head", None) or getattr(
-            decision, "sticky_model", None
-        )
+        pinned = getattr(decision, "pinned_head", None) or getattr(decision, "sticky_model", None)
         # Drop pin if it was admin-disabled
         if pinned and disabled:
-            pin_live = (
-                self.registry.resolve_live_id(pinned, include_disabled=True) or pinned
-            )
+            pin_live = self.registry.resolve_live_id(pinned, include_disabled=True) or pinned
             if pin_live in disabled:
                 pinned = None
         # Auto intent-strict: demote pin outside the available intent pool
@@ -775,9 +764,8 @@ class FallbackExecutor:
                     variant=variant,
                     max_n=None,
                 )
-                unhealthy = (
-                    hasattr(self.registry, "health")
-                    and self.registry.health.is_unhealthy(pinned)
+                unhealthy = hasattr(self.registry, "health") and self.registry.health.is_unhealthy(
+                    pinned
                 )
                 if unhealthy:
                     logger.info("pin_demoted model=%s reason=unhealthy", pinned)
@@ -814,9 +802,7 @@ class FallbackExecutor:
         # Auto floor is deliberately low (0.35) so escalation-tail models are
         # not pruned before they get a chance to serve.
         if available and len(available) > 1:
-            min_ratio = float(
-                getattr(self.settings, "min_quality_ratio", 0.6) or 0.6
-            )
+            min_ratio = float(getattr(self.settings, "min_quality_ratio", 0.6) or 0.6)
             # Auto softens floor so intent can still be served under pool pressure
             if is_auto:
                 min_ratio = min(min_ratio, 0.35)
@@ -997,11 +983,10 @@ class FallbackExecutor:
                     if max_limit and not attempt_body.get("max_tokens"):
                         attempt_body["max_tokens"] = max_limit
                     elif max_limit and attempt_body.get("max_tokens"):
-                        attempt_body["max_tokens"] = min(
-                            attempt_body["max_tokens"], max_limit
-                        )
+                        attempt_body["max_tokens"] = min(attempt_body["max_tokens"], max_limit)
             # Log large payloads for debugging agentic loop context overflow
             import sys
+
             body_size = sys.getsizeof(str(attempt_body))
             if body_size > 100_000:  # >100KB
                 logger.info(
@@ -1034,9 +1019,7 @@ class FallbackExecutor:
                         status=504,
                         success=False,
                         error_message="attempt_deadline_exceeded",
-                        span_type="fallback_advance"
-                        if idx < len(chain) - 1
-                        else "upstream",
+                        span_type="fallback_advance" if idx < len(chain) - 1 else "upstream",
                     )
                 )
                 if idx < len(chain) - 1:
@@ -1046,9 +1029,7 @@ class FallbackExecutor:
                         base=self.settings.retry_backoff_base_seconds,
                         cap=min(2.0, self.settings.retry_backoff_cap_seconds),
                     )
-                    logger.info(
-                        "json attempt deadline on %s; falling back", model
-                    )
+                    logger.info("json attempt deadline on %s; falling back", model)
                     continue
                 return UpstreamResult(
                     status_code=504,
@@ -1151,9 +1132,7 @@ class FallbackExecutor:
                     ct = int(usage.get("completion_tokens") or 0)
                     cached = int(
                         usage.get("cached_tokens")
-                        or (usage.get("prompt_tokens_details") or {}).get(
-                            "cached_tokens", 0
-                        )
+                        or (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
                         or 0
                     )
                     tokens = pt + ct if (pt or ct) else None
@@ -1162,12 +1141,8 @@ class FallbackExecutor:
                     model=model,
                     t0=t_attempt,
                     status=status,
-                    success=success and not (
-                        (had_tools and tool_ok is False) or empty_reply
-                    ),
-                    error_message=None
-                    if success
-                    else f"upstream_{status}",
+                    success=success and not ((had_tools and tool_ok is False) or empty_reply),
+                    error_message=None if success else f"upstream_{status}",
                     metadata={
                         "prompt_tokens": pt,
                         "completion_tokens": ct,
@@ -1197,11 +1172,7 @@ class FallbackExecutor:
                 # Don't mark unsupported on empty once — wait for learning demotion
                 pass
             body_l = str(resp_body).lower()
-            if (
-                (unavailable or status == 400)
-                and "tool" in body_l
-                and "support" in body_l
-            ):
+            if (unavailable or status == 400) and "tool" in body_l and "support" in body_l:
                 self.registry.ladder.set_capability(model, supports_tools=False)
 
             if success:
@@ -1224,9 +1195,7 @@ class FallbackExecutor:
                         ct = int(usage.get("completion_tokens") or 0)
                         cached = int(
                             usage.get("cached_tokens")
-                            or (usage.get("prompt_tokens_details") or {}).get(
-                                "cached_tokens", 0
-                            )
+                            or (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
                             or 0
                         )
                         self.stats.record_tokens(model, key_id, pt, ct)
@@ -1270,9 +1239,7 @@ class FallbackExecutor:
                 if status == 504:
                     pass  # no backoff — advance immediately
                 elif status == 429:
-                    ra = parse_retry_after(
-                        headers.get("Retry-After") or headers.get("retry-after")
-                    )
+                    ra = parse_retry_after(headers.get("Retry-After") or headers.get("retry-after"))
                     await sleep_backoff(
                         idx,
                         base=self.settings.retry_backoff_base_seconds,
@@ -1297,9 +1264,7 @@ class FallbackExecutor:
 
             # 429 after key retries — optionally advance
             if status == 429 and advance_on_pool and idx < len(chain) - 1:
-                ra = parse_retry_after(
-                    headers.get("Retry-After") or headers.get("retry-after")
-                )
+                ra = parse_retry_after(headers.get("Retry-After") or headers.get("retry-after"))
                 await sleep_backoff(
                     idx,
                     base=self.settings.retry_backoff_base_seconds,
@@ -1330,8 +1295,7 @@ class FallbackExecutor:
                         retry_chain = self._heal_empty_chain(
                             decision,
                             max_n=self._max_n_for_intent(decision.intent.value),
-                            disabled=getattr(self.registry, "disabled_models", None)
-                            or set(),
+                            disabled=getattr(self.registry, "disabled_models", None) or set(),
                             had_tools=had_tools,
                         )
                     except Exception:
@@ -1343,9 +1307,7 @@ class FallbackExecutor:
                             max_n=self._max_n_for_intent(decision.intent.value),
                         )
                 tried = {m.lower() for m in chain}
-                fresh = [
-                    m for m in (retry_chain or []) if m.lower() not in tried
-                ]
+                fresh = [m for m in (retry_chain or []) if m.lower() not in tried]
                 if fresh:
                     logger.warning(
                         "last-resort: retrying %s intent-aware models (intent=%s)",
@@ -1393,15 +1355,21 @@ class FallbackExecutor:
                         except TimeoutError:
                             self._circuit_fail(pid2)
                             self.registry.record_outcome(
-                                model2, None, success=False,
-                                status_code=504, intent=decision.intent.value,
+                                model2,
+                                None,
+                                success=False,
+                                status_code=504,
+                                intent=decision.intent.value,
                             )
                             continue
                         except (RuntimeError, httpx.HTTPError, OSError):
                             self._circuit_fail(pid2)
                             self.registry.record_outcome(
-                                model2, None, success=False,
-                                status_code=503, intent=decision.intent.value,
+                                model2,
+                                None,
+                                success=False,
+                                status_code=503,
+                                intent=decision.intent.value,
                             )
                             continue
 
@@ -1413,17 +1381,24 @@ class FallbackExecutor:
                             )
                             if empty2 or (had_tools and tool_ok2 is False):
                                 self.registry.record_outcome(
-                                    model2, k2.key_id if k2 else None,
-                                    success=False, status_code=s2,
+                                    model2,
+                                    k2.key_id if k2 else None,
+                                    success=False,
+                                    status_code=s2,
                                     intent=decision.intent.value,
-                                    empty_reply=empty2, had_tools=had_tools,
+                                    empty_reply=empty2,
+                                    had_tools=had_tools,
                                     tool_ok=tool_ok2,
                                 )
                                 last = UpstreamResult(
-                                    status_code=s2, body=rb2, headers=hd2,
-                                    key=k2, model=model2,
+                                    status_code=s2,
+                                    body=rb2,
+                                    headers=hd2,
+                                    key=k2,
+                                    model=model2,
                                     fallback_index=len(chain) + idx2,
-                                    decision=decision, upstream_ms=lat2,
+                                    decision=decision,
+                                    upstream_ms=lat2,
                                     provider_id=pid2,
                                 )
                                 continue
@@ -1441,41 +1416,52 @@ class FallbackExecutor:
                                         or 0
                                     )
                             self.registry.record_outcome(
-                                model2, k2.key_id if k2 else None,
-                                success=True, latency=lat2 / 1000,
-                                status_code=s2, intent=decision.intent.value,
-                                empty_reply=empty2, had_tools=had_tools,
+                                model2,
+                                k2.key_id if k2 else None,
+                                success=True,
+                                latency=lat2 / 1000,
+                                status_code=s2,
+                                intent=decision.intent.value,
+                                empty_reply=empty2,
+                                had_tools=had_tools,
                                 tool_ok=tool_ok2,
                             )
-                            self.stats.record(
-                                decision.intent.value, model2, advanced=True
-                            )
-                            self.stats.record_tokens(
-                                model2, k2.key_id if k2 else None, pt2, ct2
-                            )
+                            self.stats.record(decision.intent.value, model2, advanced=True)
+                            self.stats.record_tokens(model2, k2.key_id if k2 else None, pt2, ct2)
                             if isinstance(rb2, dict) and "model" in rb2:
                                 rb2 = {**rb2, "model": model2}
                             return UpstreamResult(
-                                status_code=s2, body=rb2, headers=hd2,
-                                key=k2, model=model2,
+                                status_code=s2,
+                                body=rb2,
+                                headers=hd2,
+                                key=k2,
+                                model=model2,
                                 fallback_index=len(chain) + idx2,
-                                decision=decision, prompt_tokens=pt2,
-                                completion_tokens=ct2, cached_tokens=cached2,
-                                upstream_ms=lat2, provider_id=pid2,
+                                decision=decision,
+                                prompt_tokens=pt2,
+                                completion_tokens=ct2,
+                                cached_tokens=cached2,
+                                upstream_ms=lat2,
+                                provider_id=pid2,
                             )
                         # Failed — record and try next fresh model
                         self._circuit_fail(pid2)
                         self.registry.record_outcome(
-                            model2, k2.key_id if k2 else None,
-                            success=False, status_code=s2,
+                            model2,
+                            k2.key_id if k2 else None,
+                            success=False,
+                            status_code=s2,
                             intent=decision.intent.value,
                         )
                         last = UpstreamResult(
                             status_code=s2,
                             body=_wue(rb2, status=s2),
-                            headers=hd2, key=k2, model=model2,
+                            headers=hd2,
+                            key=k2,
+                            model=model2,
                             fallback_index=len(chain) + idx2,
-                            decision=decision, upstream_ms=lat2,
+                            decision=decision,
+                            upstream_ms=lat2,
                             provider_id=pid2,
                         )
 
@@ -1487,15 +1473,9 @@ class FallbackExecutor:
                 remaining = deadline - time.monotonic()
                 if remaining >= 3.0:
                     try:
-                        any_live = self._any_available_live_models(
-                            had_tools=had_tools
-                        )
-                        already = {m.lower() for m in chain} | {
-                            m.lower() for m in fresh
-                        }
-                        untried_any = [
-                            m for m in any_live if m.lower() not in already
-                        ]
+                        any_live = self._any_available_live_models(had_tools=had_tools)
+                        already = {m.lower() for m in chain} | {m.lower() for m in fresh}
+                        untried_any = [m for m in any_live if m.lower() not in already]
                         if untried_any:
                             logger.warning(
                                 "graceful fallback: trying %s any-provider "
@@ -1592,7 +1572,6 @@ class FallbackExecutor:
         import httpx
 
         last_status = 503
-        last_headers: dict[str, str] = {}
         last_key = None
         last_model = chain[0]
         last_pid: str | None = None
@@ -1607,9 +1586,7 @@ class FallbackExecutor:
             status: int = 502,
             retry_after: str | None = None,
         ) -> bytes:
-            return frame_sse_error(
-                message, code=code, status=status, retry_after=retry_after
-            )
+            return frame_sse_error(message, code=code, status=status, retry_after=retry_after)
 
         for idx, model in enumerate(chain):
             remaining = deadline - time.monotonic()
@@ -1674,9 +1651,7 @@ class FallbackExecutor:
                         status=504,
                         success=False,
                         error_message="attempt_deadline_exceeded",
-                        span_type="fallback_advance"
-                        if idx < len(chain) - 1
-                        else "upstream",
+                        span_type="fallback_advance" if idx < len(chain) - 1 else "upstream",
                     )
                 )
                 if idx < len(chain) - 1:
@@ -1700,9 +1675,7 @@ class FallbackExecutor:
                         status=503,
                         success=False,
                         error_message=str(exc),
-                        span_type="fallback_advance"
-                        if idx < len(chain) - 1
-                        else "upstream",
+                        span_type="fallback_advance" if idx < len(chain) - 1 else "upstream",
                     )
                 )
                 if idx < len(chain) - 1:
@@ -1732,7 +1705,7 @@ class FallbackExecutor:
                     provider_id=pid,
                 )
 
-            last_status, last_headers, last_key, last_model, last_pid = (
+            last_status, _last_headers, last_key, last_model, last_pid = (
                 status,
                 headers,
                 key,
@@ -1780,17 +1753,13 @@ class FallbackExecutor:
                         provider_id=pid,
                     )
 
-                ttft = float(
-                    getattr(self.settings, "stream_ttft_timeout_seconds", 12.0) or 12.0
-                )
+                ttft = float(getattr(self.settings, "stream_ttft_timeout_seconds", 12.0) or 12.0)
                 # Adaptive TTFT: fast models fail over faster (NMK-405)
                 h = self.registry.health._by_model.get(model)
                 if h is not None and h.ewma_latency > 0:
                     base_ttft = h.ewma_latency * 2.0 + 3.0
                     ttft = min(ttft, max(3.0, base_ttft))
-                idle = float(
-                    getattr(self.settings, "stream_idle_timeout_seconds", 180.0) or 180.0
-                )
+                idle = float(getattr(self.settings, "stream_idle_timeout_seconds", 180.0) or 180.0)
                 t_stream0 = time.monotonic()
                 try:
                     first_chunk = await asyncio.wait_for(anext(byte_iter), timeout=ttft)
@@ -1805,9 +1774,7 @@ class FallbackExecutor:
                             status=502,
                             success=False,
                             error_message="empty_stream",
-                            span_type="fallback_advance"
-                            if idx < len(chain) - 1
-                            else "upstream",
+                            span_type="fallback_advance" if idx < len(chain) - 1 else "upstream",
                         )
                     )
                     if hasattr(byte_iter, "aclose"):
@@ -1822,16 +1789,12 @@ class FallbackExecutor:
                         intent=decision.intent.value,
                     )
                     if idx < len(chain) - 1:
-                        logger.warning(
-                            "Empty stream body on %s; falling back", model
-                        )
+                        logger.warning("Empty stream body on %s; falling back", model)
                         continue
                     # Last model: empty stream → terminal error, not 200.
                     # Must continue so we do not fall into the success path.
                     last_status, last_model, last_pid = 502, model, pid
-                    logger.warning(
-                        "Empty stream body on last model %s; returning 502", model
-                    )
+                    logger.warning("Empty stream body on last model %s; returning 502", model)
                     continue
                 except TimeoutError:
                     saw_ttft_stall = True
@@ -1873,9 +1836,7 @@ class FallbackExecutor:
                     continue
                 except Exception as exc:
                     last_status = 502
-                    logger.warning(
-                        "Stream open failed on %s: %s; falling back", model, exc
-                    )
+                    logger.warning("Stream open failed on %s: %s; falling back", model, exc)
                     self._circuit_fail(pid)
                     self._emit_span(
                         self._make_upstream_span(
@@ -1987,7 +1948,9 @@ class FallbackExecutor:
                                 usage["completion_tokens"] = ct_i
                                 self.stats.record_tokens(mid, kid, pt_i, ct_i)
 
-                    async def _emit_stream_error(err_msg: str, *, code: str) -> AsyncIterator[bytes]:
+                    async def _emit_stream_error(
+                        err_msg: str, *, code: str
+                    ) -> AsyncIterator[bytes]:
                         finish = {
                             "id": "potato-stream-error",
                             "object": "chat.completion.chunk",
@@ -2004,16 +1967,8 @@ class FallbackExecutor:
                             code=code,
                             type_="server_error",
                         )
-                        yield (
-                            b"data: "
-                            + _json.dumps(finish).encode("utf-8")
-                            + b"\n\n"
-                        )
-                        yield (
-                            b"data: "
-                            + _json.dumps(err_evt).encode("utf-8")
-                            + b"\n\n"
-                        )
+                        yield (b"data: " + _json.dumps(finish).encode("utf-8") + b"\n\n")
+                        yield (b"data: " + _json.dumps(err_evt).encode("utf-8") + b"\n\n")
                         yield b"data: [DONE]\n\n"
 
                     def _mark_failed() -> None:
@@ -2027,10 +1982,8 @@ class FallbackExecutor:
                             producer_task.cancel()
 
                     async def _await_producer() -> None:
-                        try:
+                        with suppress(asyncio.CancelledError, Exception):
                             await producer_task
-                        except (asyncio.CancelledError, Exception):
-                            pass
 
                     # Start producer task
                     producer_task = asyncio.create_task(_producer())
@@ -2040,9 +1993,7 @@ class FallbackExecutor:
                             yield first
                         while True:
                             try:
-                                chunk = await asyncio.wait_for(
-                                    _bp_queue.get(), timeout=idle_s
-                                )
+                                chunk = await asyncio.wait_for(_bp_queue.get(), timeout=idle_s)
                             except TimeoutError:
                                 logger.warning(
                                     "Stream idle timeout on %s after %.0fs — emitting error SSE",
@@ -2074,9 +2025,7 @@ class FallbackExecutor:
                                 break
                             yield chunk
                         # Producer done — check for errors
-                        if _upstream_error and not isinstance(
-                            _upstream_error, StopAsyncIteration
-                        ):
+                        if _upstream_error and not isinstance(_upstream_error, StopAsyncIteration):
                             raise _upstream_error
                         # Full stream done — update speed with total time + tokens
                         elapsed = max(0.01, time.monotonic() - t0)
@@ -2156,9 +2105,7 @@ class FallbackExecutor:
                     err_body = err_raw.decode("utf-8", errors="replace")
             else:
                 ra = headers.get("Retry-After") or headers.get("retry-after")
-                err_body = wrap_upstream_error(
-                    f"Upstream error HTTP {status}", status=status
-                )
+                err_body = wrap_upstream_error(f"Upstream error HTTP {status}", status=status)
                 if ra:
                     err_body = openai_error(
                         f"Upstream error HTTP {status}",
@@ -2175,11 +2122,7 @@ class FallbackExecutor:
             # Always normalize non-empty upstream error bodies to OpenAI envelope
             if err_body is not None:
                 wrapped = wrap_upstream_error(err_body, status=status)
-                err_raw = (
-                    b"data: "
-                    + _json.dumps(wrapped).encode("utf-8")
-                    + b"\n\ndata: [DONE]\n\n"
-                )
+                err_raw = b"data: " + _json.dumps(wrapped).encode("utf-8") + b"\n\ndata: [DONE]\n\n"
             else:
                 err_raw = frame_sse_error(
                     f"Upstream error HTTP {status}",
@@ -2203,9 +2146,7 @@ class FallbackExecutor:
                 if status == 504:
                     pass  # no backoff — advance immediately
                 elif status == 429:
-                    ra = parse_retry_after(
-                        headers.get("Retry-After") or headers.get("retry-after")
-                    )
+                    ra = parse_retry_after(headers.get("Retry-After") or headers.get("retry-after"))
                     await sleep_backoff(
                         idx,
                         base=self.settings.retry_backoff_base_seconds,
@@ -2256,8 +2197,7 @@ class FallbackExecutor:
                     retry_chain = self._heal_empty_chain(
                         decision,
                         max_n=self._max_n_for_intent(decision.intent.value),
-                        disabled=getattr(self.registry, "disabled_models", None)
-                        or set(),
+                        disabled=getattr(self.registry, "disabled_models", None) or set(),
                         had_tools=had_tools,
                     )
                 except Exception:
@@ -2269,9 +2209,7 @@ class FallbackExecutor:
                         max_n=self._max_n_for_intent(decision.intent.value),
                     )
             tried = {m.lower() for m in chain}
-            fresh = [
-                m for m in (retry_chain or []) if m.lower() not in tried
-            ]
+            fresh = [m for m in (retry_chain or []) if m.lower() not in tried]
             if fresh:
                 import asyncio as _aio_s
 
@@ -2292,12 +2230,13 @@ class FallbackExecutor:
                         self._circuit_fail(pid2)
                         continue
                     attempt_body2 = {**body, "model": upstream_mid2}
-                    t2 = time.perf_counter()
+                    time.perf_counter()
                     try:
                         budget2 = max(1.0, min(rem2, 45.0))
                         s2, byte_iter2, hd2, k2 = await _aio_s.wait_for(
                             client2.stream(
-                                "POST", path,
+                                "POST",
+                                path,
                                 json_body=attempt_body2,
                                 forward_headers=forward_headers,
                                 preferred_key_id=preferred_key_id,
@@ -2308,15 +2247,16 @@ class FallbackExecutor:
                     except (TimeoutError, RuntimeError, httpx.HTTPError, OSError):
                         self._circuit_fail(pid2)
                         self.registry.record_outcome(
-                            model2, None, success=False,
-                            status_code=503, intent=decision.intent.value,
+                            model2,
+                            None,
+                            success=False,
+                            status_code=503,
+                            intent=decision.intent.value,
                         )
                         continue
 
                     if 200 <= s2 < 300:
-                        ct2 = (
-                            hd2.get("content-type") or hd2.get("Content-Type") or ""
-                        ).lower()
+                        ct2 = (hd2.get("content-type") or hd2.get("Content-Type") or "").lower()
                         if "application/json" in ct2 and "text/event-stream" not in ct2:
                             raw_parts: list[bytes] = []
                             try:
@@ -2334,13 +2274,9 @@ class FallbackExecutor:
                                 parsed = _json.loads(raw.decode("utf-8", errors="replace"))
                             except Exception:
                                 parsed = raw.decode("utf-8", errors="replace")
-                            sse_payload = json_body_to_sse(
-                                parsed, routed_model=model2
-                            )
+                            sse_payload = json_body_to_sse(parsed, routed_model=model2)
                             self._circuit_succeed(pid2)
-                            self.stats.record(
-                                decision.intent.value, model2, advanced=True
-                            )
+                            self.stats.record(decision.intent.value, model2, advanced=True)
 
                             async def json_as_sse2(
                                 p: bytes = sse_payload,
@@ -2350,39 +2286,33 @@ class FallbackExecutor:
                             return StreamResult(
                                 status_code=200,
                                 byte_iter=json_as_sse2(),
-                                headers={
-                                    **hd2, "content-type": "text/event-stream"
-                                },
-                                key=k2, model=model2,
+                                headers={**hd2, "content-type": "text/event-stream"},
+                                key=k2,
+                                model=model2,
                                 fallback_index=len(chain) + idx2,
-                                decision=decision, provider_id=pid2,
+                                decision=decision,
+                                provider_id=pid2,
                             )
 
                         ttft2 = float(
-                            getattr(
-                                self.settings, "stream_ttft_timeout_seconds", 12.0
-                            )
-                            or 12.0
+                            getattr(self.settings, "stream_ttft_timeout_seconds", 12.0) or 12.0
                         )
                         idle2 = float(
-                            getattr(
-                                self.settings, "stream_idle_timeout_seconds", 180.0
-                            )
-                            or 180.0
+                            getattr(self.settings, "stream_idle_timeout_seconds", 180.0) or 180.0
                         )
                         t_stream2 = time.monotonic()
                         try:
-                            first_chunk2 = await _aio_s.wait_for(
-                                anext(byte_iter2), timeout=ttft2
-                            )
+                            first_chunk2 = await _aio_s.wait_for(anext(byte_iter2), timeout=ttft2)
                         except (StopAsyncIteration, TimeoutError, Exception):
                             self._circuit_fail(pid2)
                             if hasattr(byte_iter2, "aclose"):
                                 with suppress(Exception):
                                     await byte_iter2.aclose()
                             self.registry.record_outcome(
-                                model2, k2.key_id if k2 else None,
-                                success=False, status_code=504,
+                                model2,
+                                k2.key_id if k2 else None,
+                                success=False,
+                                status_code=504,
                                 intent=decision.intent.value,
                             )
                             continue
@@ -2391,14 +2321,15 @@ class FallbackExecutor:
                         self._circuit_succeed(pid2)
                         ttft_lat2 = max(0.01, time.monotonic() - t_stream2)
                         self.registry.record_outcome(
-                            model2, k2.key_id if k2 else None,
-                            success=True, latency=ttft_lat2,
-                            status_code=s2, intent=decision.intent.value,
+                            model2,
+                            k2.key_id if k2 else None,
+                            success=True,
+                            latency=ttft_lat2,
+                            status_code=s2,
+                            intent=decision.intent.value,
                             had_tools=had_tools,
                         )
-                        self.stats.record(
-                            decision.intent.value, model2, advanced=True
-                        )
+                        self.stats.record(decision.intent.value, model2, advanced=True)
                         bound_model2 = model2
                         bound_key_id2 = k2.key_id if k2 else None
                         bound_idle2 = idle2
@@ -2409,9 +2340,7 @@ class FallbackExecutor:
                             "completion_tokens": 0,
                             "cached_tokens": 0,
                         }
-                        result_holder2: dict[str, StreamResult | None] = {
-                            "r": None
-                        }
+                        result_holder2: dict[str, StreamResult | None] = {"r": None}
 
                         async def robust_iter2(
                             first: bytes,
@@ -2425,9 +2354,7 @@ class FallbackExecutor:
                         ) -> AsyncIterator[bytes]:
                             total_tokens = 0
                             _BP = 32
-                            _bpq: _aio_s.Queue[bytes | None] = _aio_s.Queue(
-                                maxsize=_BP
-                            )
+                            _bpq: _aio_s.Queue[bytes | None] = _aio_s.Queue(maxsize=_BP)
                             _up_done = False
                             _up_err: Exception | None = None
 
@@ -2449,22 +2376,14 @@ class FallbackExecutor:
                                 if b'"usage"' in c or b"completion_tokens" in c:
                                     import re
 
-                                    p = re.search(
-                                        rb'"prompt_tokens"\s*:\s*(\d+)', c
-                                    )
-                                    ct = re.search(
-                                        rb'"completion_tokens"\s*:\s*(\d+)', c
-                                    )
+                                    p = re.search(rb'"prompt_tokens"\s*:\s*(\d+)', c)
+                                    ct = re.search(rb'"completion_tokens"\s*:\s*(\d+)', c)
                                     if p and ct:
-                                        pt_i, ct_i = int(p.group(1)), int(
-                                            ct.group(1)
-                                        )
+                                        pt_i, ct_i = int(p.group(1)), int(ct.group(1))
                                         total_tokens = pt_i + ct_i
                                         usage["prompt_tokens"] = pt_i
                                         usage["completion_tokens"] = ct_i
-                                        self.stats.record_tokens(
-                                            mid, kid, pt_i, ct_i
-                                        )
+                                        self.stats.record_tokens(mid, kid, pt_i, ct_i)
 
                             prod_task = _aio_s.create_task(_prod())
                             try:
@@ -2473,9 +2392,7 @@ class FallbackExecutor:
                                     yield first
                                 while True:
                                     try:
-                                        chunk = await _aio_s.wait_for(
-                                            _bpq.get(), timeout=idle_s
-                                        )
+                                        chunk = await _aio_s.wait_for(_bpq.get(), timeout=idle_s)
                                     except TimeoutError:
                                         prod_task.cancel()
                                         with suppress(Exception):
@@ -2483,11 +2400,11 @@ class FallbackExecutor:
                                         if hasattr(rest, "aclose"):
                                             with suppress(Exception):
                                                 await rest.aclose()
-                                        elapsed = max(
-                                            0.01, time.monotonic() - t0
-                                        )
+                                        elapsed = max(0.01, time.monotonic() - t0)
                                         self.registry.record_outcome(
-                                            mid, kid, success=False,
+                                            mid,
+                                            kid,
+                                            success=False,
                                             latency=elapsed,
                                             tokens=total_tokens or None,
                                             status_code=504,
@@ -2527,15 +2444,16 @@ class FallbackExecutor:
                                     if chunk is None:
                                         break
                                     yield chunk
-                                if _up_err and not isinstance(
-                                    _up_err, StopAsyncIteration
-                                ):
+                                if _up_err and not isinstance(_up_err, StopAsyncIteration):
                                     raise _up_err
                                 elapsed = max(0.01, time.monotonic() - t0)
                                 if total_tokens > 0:
                                     self.registry.record_outcome(
-                                        mid, kid, success=True,
-                                        latency=elapsed, tokens=total_tokens,
+                                        mid,
+                                        kid,
+                                        success=True,
+                                        latency=elapsed,
+                                        tokens=total_tokens,
                                         status_code=200,
                                     )
                                 return
@@ -2570,14 +2488,10 @@ class FallbackExecutor:
                                         type_="server_error",
                                     )
                                     yield (
-                                        b"data: "
-                                        + _json.dumps(finish).encode("utf-8")
-                                        + b"\n\n"
+                                        b"data: " + _json.dumps(finish).encode("utf-8") + b"\n\n"
                                     )
                                     yield (
-                                        b"data: "
-                                        + _json.dumps(err_evt).encode("utf-8")
-                                        + b"\n\n"
+                                        b"data: " + _json.dumps(err_evt).encode("utf-8") + b"\n\n"
                                     )
                                     yield b"data: [DONE]\n\n"
                                 except Exception:
@@ -2616,8 +2530,10 @@ class FallbackExecutor:
                     except Exception:
                         pass
                     self.registry.record_outcome(
-                        model2, k2.key_id if k2 else None,
-                        success=False, status_code=s2,
+                        model2,
+                        k2.key_id if k2 else None,
+                        success=False,
+                        status_code=s2,
                         intent=decision.intent.value,
                     )
                     last_status, last_model, last_pid = s2, model2, pid2

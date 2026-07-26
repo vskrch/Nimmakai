@@ -116,19 +116,14 @@ class PotatoDB:
         logger.info("sqlite ready at %s", self.path)
 
     def _migrate_provider_filter_columns(self) -> None:
-        cols = {
-            str(r[1])
-            for r in self._conn.execute("PRAGMA table_info(providers)").fetchall()
-        }
+        cols = {str(r[1]) for r in self._conn.execute("PRAGMA table_info(providers)").fetchall()}
         if "model_whitelist_json" not in cols:
             self._conn.execute(
-                "ALTER TABLE providers ADD COLUMN model_whitelist_json "
-                "TEXT NOT NULL DEFAULT '[]'"
+                "ALTER TABLE providers ADD COLUMN model_whitelist_json TEXT NOT NULL DEFAULT '[]'"
             )
         if "model_blacklist_json" not in cols:
             self._conn.execute(
-                "ALTER TABLE providers ADD COLUMN model_blacklist_json "
-                "TEXT NOT NULL DEFAULT '[]'"
+                "ALTER TABLE providers ADD COLUMN model_blacklist_json TEXT NOT NULL DEFAULT '[]'"
             )
 
     def close(self) -> None:
@@ -139,9 +134,7 @@ class PotatoDB:
 
     def get_meta(self, key: str, default: str | None = None) -> str | None:
         with self._lock:
-            row = self._conn.execute(
-                "SELECT value FROM meta WHERE key = ?", (key,)
-            ).fetchone()
+            row = self._conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return str(row["value"]) if row else default
 
     def set_meta(self, key: str, value: str) -> None:
@@ -156,9 +149,7 @@ class PotatoDB:
 
     def list_providers(self) -> list[dict[str, Any]]:
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM providers ORDER BY id"
-            ).fetchall()
+            rows = self._conn.execute("SELECT * FROM providers ORDER BY id").fetchall()
         return [self._provider_row(r) for r in rows]
 
     def get_provider(self, provider_id: str) -> dict[str, Any] | None:
@@ -219,9 +210,7 @@ class PotatoDB:
 
     def delete_provider(self, provider_id: str) -> bool:
         with self._lock:
-            cur = self._conn.execute(
-                "DELETE FROM providers WHERE id = ?", (provider_id.lower(),)
-            )
+            cur = self._conn.execute("DELETE FROM providers WHERE id = ?", (provider_id.lower(),))
             return cur.rowcount > 0
 
     def replace_all_providers(self, providers: list[dict[str, Any]]) -> None:
@@ -301,9 +290,7 @@ class PotatoDB:
 
     def list_preferences(self) -> list[dict[str, Any]]:
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM preferences ORDER BY intent"
-            ).fetchall()
+            rows = self._conn.execute("SELECT * FROM preferences ORDER BY intent").fetchall()
         out = []
         for row in rows:
             try:
@@ -344,9 +331,7 @@ class PotatoDB:
 
     def delete_preference(self, intent: str) -> bool:
         with self._lock:
-            cur = self._conn.execute(
-                "DELETE FROM preferences WHERE intent = ?", (intent,)
-            )
+            cur = self._conn.execute("DELETE FROM preferences WHERE intent = ?", (intent,))
             return cur.rowcount > 0
 
     def clear_preferences(self) -> None:
@@ -372,9 +357,7 @@ class PotatoDB:
         data["_updated_at"] = float(row["updated_at"] or 0)
         return data
 
-    def set_ranking_cache(
-        self, payload: dict[str, Any], *, cache_key: str = "default"
-    ) -> None:
+    def set_ranking_cache(self, payload: dict[str, Any], *, cache_key: str = "default") -> None:
         with self._lock:
             self._conn.execute(
                 """
@@ -390,9 +373,7 @@ class PotatoDB:
     def clear_ranking_cache(self, cache_key: str | None = None) -> None:
         with self._lock:
             if cache_key:
-                self._conn.execute(
-                    "DELETE FROM ranking_cache WHERE cache_key = ?", (cache_key,)
-                )
+                self._conn.execute("DELETE FROM ranking_cache WHERE cache_key = ?", (cache_key,))
             else:
                 self._conn.execute("DELETE FROM ranking_cache")
 
@@ -496,9 +477,7 @@ class PotatoDB:
     # ── RL Policy Storage (NMK-RL-101) ──────────────────────────────────
     def load_rl_policy(self) -> dict[str, dict[str, Any]]:
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT model_id, payload_json FROM rl_policy"
-            ).fetchall()
+            rows = self._conn.execute("SELECT model_id, payload_json FROM rl_policy").fetchall()
         out: dict[str, dict[str, Any]] = {}
         for r in rows:
             try:
@@ -576,7 +555,14 @@ class PotatoDB:
                     note=excluded.note,
                     updated_at=excluded.updated_at
                 """,
-                (model_id, allowed_intents_json, excluded_intents_json, allow_auto_router, note, updated_at),
+                (
+                    model_id,
+                    allowed_intents_json,
+                    excluded_intents_json,
+                    allow_auto_router,
+                    note,
+                    updated_at,
+                ),
             )
 
     def delete_model_pool_config(self, model_id: str) -> None:

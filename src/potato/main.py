@@ -158,9 +158,7 @@ def _init_analytics(app: FastAPI, settings: Settings) -> None:
         writer = TraceWriter(
             db,
             batch_size=int(getattr(settings, "analytics_batch_size", 50) or 50),
-            flush_interval=float(
-                getattr(settings, "analytics_flush_interval", 1.0) or 1.0
-            ),
+            flush_interval=float(getattr(settings, "analytics_flush_interval", 1.0) or 1.0),
             event_bus=bus,
             on_flush=on_flush,
         )
@@ -202,9 +200,7 @@ def _configure_request_logs(app: FastAPI, settings: Settings) -> None:
         max_entries=max(100, int(settings.request_log_size)),
         log_dir=default_log_dir(settings.sqlite_path),
         enabled=bool(getattr(settings, "request_file_logging", True)),
-        max_file_bytes=int(
-            getattr(settings, "request_log_max_bytes", 50 * 1024 * 1024)
-        ),
+        max_file_bytes=int(getattr(settings, "request_log_max_bytes", 50 * 1024 * 1024)),
         retention_days=int(getattr(settings, "request_log_retention_days", 90)),
         db=db,
         on_add=_on_add,
@@ -325,9 +321,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 settings.models_config_path,
             )
 
-        guard = AccountGuard(
-            settings, pool, capacity_hint=hub.gate_capacity() or None
-        )
+        guard = AccountGuard(settings, pool, capacity_hint=hub.gate_capacity() or None)
         hub._on_capacity_change = lambda: guard.resize_gate(hub.gate_capacity())
 
         # Load user preferences & custom model ladders (SQLite)
@@ -345,11 +339,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         model_ladders.load()
 
         from potato.catalog.model_pools import ModelPoolStore
+
         model_pools = ModelPoolStore(_db)
         model_pools.load()
 
         # Initialize LinUCB RL Engine (NMK-RL-101)
         from potato.routing.rl_engine import LinUCBPolicyEngine, ModelLinUCBState
+
         rl_engine = LinUCBPolicyEngine()
         try:
             saved_rl = _db.load_rl_policy()
@@ -379,18 +375,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 rl_engine=rl_engine,
                 model_pools=model_pools,
             )
-            fallback = FallbackExecutor(
-                upstream, registry, settings, stats=routing_stats, hub=hub
-            )
+            fallback = FallbackExecutor(upstream, registry, settings, stats=routing_stats, hub=hub)
 
             # NMK-G805: bind IntelFetcher + load YAML scoring weights
             from potato.catalog.intel_fetcher import IntelFetcher
             from potato.routing.optimizer import load_intent_weights
 
             intel_fetcher = IntelFetcher(
-                cache_path=Path(
-                    getattr(settings, "intel_cache_path", ".potato/intel_cache.json")
-                ),
+                cache_path=Path(getattr(settings, "intel_cache_path", ".potato/intel_cache.json")),
                 ttl_hours=float(getattr(settings, "intel_fetch_ttl_hours", 6.0)),
                 aa_api_key=(
                     getattr(settings, "artificial_analysis_api_key", "")
@@ -421,9 +413,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         best = registry.recompute_rankings(persist=True)
                     else:
                         best = {
-                            "coding_agentic": registry.dynamic_chains.get(
-                                "coding_agentic", []
-                            )[:8],
+                            "coding_agentic": registry.dynamic_chains.get("coding_agentic", [])[:8],
                             "from_cache": True,
                         }
                     if not ok:
@@ -456,9 +446,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 learning_save_interval = 60.0
                 while True:
                     # Wake at the earlier of catalog refresh vs self-heal interval
-                    sleep_for = min(
-                        float(settings.catalog_refresh_seconds), float(heal_every)
-                    )
+                    sleep_for = min(float(settings.catalog_refresh_seconds), float(heal_every))
                     await asyncio.sleep(max(15.0, sleep_for))
                     cycle += 1
                     now = time.monotonic()
@@ -490,12 +478,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         except Exception:
                             logger.exception("self-heal loop failed")
                     # Full catalog refresh on its own cadence
-                    if cycle % max(
-                        1, int(settings.catalog_refresh_seconds / max(15.0, sleep_for))
-                    ) == 0:
-                        run_probes = (
-                            settings.catalog_run_probes and cycle % every == 0
-                        )
+                    if (
+                        cycle % max(1, int(settings.catalog_refresh_seconds / max(15.0, sleep_for)))
+                        == 0
+                    ):
+                        run_probes = settings.catalog_run_probes and cycle % every == 0
                         try:
                             # Background: update live model availability only —
                             # do NOT recompute sticky best-model rankings.
@@ -579,9 +566,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     from potato.compat import openai_error
 
     @app.exception_handler(HTTPException)
-    async def openai_http_exception_handler(
-        request: Request, exc: HTTPException
-    ) -> JSONResponse:
+    async def openai_http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
         """Unwrap FastAPI ``detail`` so clients see a top-level OpenAI ``error`` object."""
         detail = exc.detail
         if isinstance(detail, dict) and isinstance(detail.get("error"), dict):
@@ -592,34 +577,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 code=str(detail.get("code") or "http_error"),
                 type_=str(
                     detail.get("type")
-                    or (
-                        "invalid_request_error"
-                        if exc.status_code < 500
-                        else "server_error"
-                    )
+                    or ("invalid_request_error" if exc.status_code < 500 else "server_error")
                 ),
             )
         else:
             body = openai_error(
                 str(detail)[:2000],
                 code="http_error",
-                type_=(
-                    "invalid_request_error"
-                    if exc.status_code < 500
-                    else "server_error"
-                ),
+                type_=("invalid_request_error" if exc.status_code < 500 else "server_error"),
             )
         headers = dict(exc.headers or {})
         if exc.status_code in (401, 403):
             headers.setdefault("WWW-Authenticate", "Bearer")
-        return JSONResponse(
-            status_code=exc.status_code, content=body, headers=headers
-        )
+        return JSONResponse(status_code=exc.status_code, content=body, headers=headers)
 
     @app.exception_handler(Exception)
-    async def openai_unhandled_exception_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
+    async def openai_unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
         logger.exception("unhandled error path=%s", request.url.path)
         return JSONResponse(
             status_code=500,
@@ -630,11 +603,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ),
         )
 
-    cors_origins = [
-        o.strip()
-        for o in settings.cors_allow_origins.split(",")
-        if o.strip()
-    ]
+    cors_origins = [o.strip() for o in settings.cors_allow_origins.split(",") if o.strip()]
     # Credentials require explicit origins (never "*")
     cors_credentials = bool(cors_origins) and cors_origins != ["*"]
     app.add_middleware(
@@ -744,8 +713,7 @@ def run() -> None:
     if not settings.nim_api_keys and not settings.allow_insecure_auth:
         # Allow start if other providers may be configured in YAML/overlay
         logger.warning(
-            "NIM_API_KEYS empty — ensure at least one provider has keys "
-            "(NIM or /admin/providers)."
+            "NIM_API_KEYS empty — ensure at least one provider has keys (NIM or /admin/providers)."
         )
     if not settings.proxy_api_keys and not settings.allow_insecure_auth:
         raise SystemExit(

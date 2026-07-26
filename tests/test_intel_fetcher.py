@@ -59,11 +59,7 @@ def test_intel_bundle_merge_sources():
 
 def test_merge_bundles_priority():
     """First source with a value for a field wins (highest priority first)."""
-    s1 = {
-        "model-a": IntelBundle(
-            model_slug="model-a", aa_intelligence_idx=90.0, sources=["aa"]
-        )
-    }
+    s1 = {"model-a": IntelBundle(model_slug="model-a", aa_intelligence_idx=90.0, sources=["aa"])}
     s2 = {
         "model-a": IntelBundle(
             model_slug="model-a", aa_intelligence_idx=50.0, aa_tps=100.0, sources=["hf"]
@@ -130,6 +126,7 @@ def test_intel_fetcher_mem_cache_ttl(tmp_path):
     fetcher._mem_cache_at = __import__("time").time()
     # fetch_all should return mem cache without hitting network
     import asyncio
+
     result = asyncio.run(fetcher.fetch_all())
     assert "x" in result
     assert result["x"].aa_intelligence_idx == 50.0

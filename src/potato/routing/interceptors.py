@@ -62,9 +62,7 @@ async def run_interceptor_chain(
     current = body
     for interceptor in interceptors:
         try:
-            current = await interceptor.intercept(
-                current, intent=intent, registry=registry
-            )
+            current = await interceptor.intercept(current, intent=intent, registry=registry)
         except Exception as exc:
             logger.warning(
                 "interceptor %s failed: %s — falling back to core router",
@@ -128,8 +126,7 @@ class CustomCatalogInterceptor:
             resolved = registry.resolve_live_id(target)
             if resolved is None:
                 logger.info(
-                    "custom_catalog: mapped model %s for intent %s "
-                    "not live — skipping",
+                    "custom_catalog: mapped model %s for intent %s not live — skipping",
                     target,
                     intent_key,
                 )
@@ -247,9 +244,7 @@ class PromptUnderstandingInterceptor:
             return body
 
         try:
-            selected = await self._call_understanding_llm(
-                understanding_model, prompt_text, pool
-            )
+            selected = await self._call_understanding_llm(understanding_model, prompt_text, pool)
         except Exception as exc:
             logger.info("prompt-understanding failed: %s — falling back to auto", exc)
             return body
@@ -284,9 +279,7 @@ class PromptUnderstandingInterceptor:
                 # Widen with related intents
                 pool = list(chain)
                 active = (
-                    registry.active_live_ids()
-                    if hasattr(registry, "active_live_ids")
-                    else set()
+                    registry.active_live_ids() if hasattr(registry, "active_live_ids") else set()
                 )
                 for m in sorted(active):
                     if m not in pool:
@@ -330,7 +323,7 @@ class PromptUnderstandingInterceptor:
         user_msg = (
             f"Available models (pick one):\n{json.dumps(pool)}\n\n"
             f"User prompt:\n{prompt_text}\n\n"
-            f"Select the best model. Respond with JSON: {{\"model\": \"<id>\"}}"
+            f'Select the best model. Respond with JSON: {{"model": "<id>"}}'
         )
         llm_body = {
             "model": model,

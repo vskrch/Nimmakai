@@ -94,9 +94,7 @@ async def enrich_publishers(
     ranked = sorted(
         docs,
         key=lambda d: (
-            0
-            if any(k in d.slug.lower() or k in d.description.lower() for k in priority_kw)
-            else 1,
+            0 if any(k in d.slug.lower() or k in d.description.lower() for k in priority_kw) else 1,
             d.slug,
         ),
     )
@@ -112,9 +110,7 @@ async def enrich_publishers(
             try:
                 resp = await client.get(url)
                 if resp.status_code < 400:
-                    pub_m = re.search(
-                        r'^publisher:\s*"([^"]+)"', resp.text, re.MULTILINE
-                    )
+                    pub_m = re.search(r'^publisher:\s*"([^"]+)"', resp.text, re.MULTILINE)
                     if pub_m:
                         publisher = pub_m.group(1)
             except Exception:

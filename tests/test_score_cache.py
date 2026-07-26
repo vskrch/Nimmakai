@@ -83,14 +83,20 @@ def test_vision_exclusion():
 def test_atomic_install():
     """ModelScoreCache.install swaps atomically; version increments."""
     c1 = recompute(
-        live_ids=set(), intel_bundles={},
-        health=ModelHealthStore(), learning=LearningStore(), yaml_cfg={},
+        live_ids=set(),
+        intel_bundles={},
+        health=ModelHealthStore(),
+        learning=LearningStore(),
+        yaml_cfg={},
     )
     ModelScoreCache.install(c1)
     assert ModelScoreCache.current() is c1
     c2 = recompute(
-        live_ids=set(), intel_bundles={},
-        health=ModelHealthStore(), learning=LearningStore(), yaml_cfg={},
+        live_ids=set(),
+        intel_bundles={},
+        health=ModelHealthStore(),
+        learning=LearningStore(),
+        yaml_cfg={},
     )
     ModelScoreCache.install(c2)
     assert ModelScoreCache.current() is c2

@@ -27,8 +27,7 @@ class GlobalConcurrencyGate:
                     return
             if time.monotonic() >= deadline:
                 raise RuntimeError(
-                    "Global concurrency limit reached. Retry later "
-                    "(potato_pool_exhausted)."
+                    "Global concurrency limit reached. Retry later (potato_pool_exhausted)."
                 )
             await asyncio.sleep(0.05)
 

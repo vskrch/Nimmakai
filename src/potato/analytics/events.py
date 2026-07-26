@@ -50,9 +50,7 @@ class EventBus:
             async with self._lock:
                 self._subscribers.pop(q, None)
 
-    def publish(
-        self, event_type: str, data: dict[str, Any] | None = None
-    ) -> None:
+    def publish(self, event_type: str, data: dict[str, Any] | None = None) -> None:
         """Fire-and-forget publish to matching subscribers."""
         payload_data = dict(data or {})
         payload = json.dumps({"type": event_type, **payload_data}, default=str)
@@ -61,11 +59,7 @@ class EventBus:
         for q, (see_all, filter_uid) in list(self._subscribers.items()):
             if not see_all:
                 # Request logs / traces without user_id are admin-only
-                if (
-                    filter_uid is None
-                    or not event_uid
-                    or str(event_uid) != str(filter_uid)
-                ):
+                if filter_uid is None or not event_uid or str(event_uid) != str(filter_uid):
                     continue
             try:
                 q.put_nowait(payload)

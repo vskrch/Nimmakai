@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from potato.catalog.db import PotatoDB, get_db
+from potato.catalog.db import get_db
 from potato.catalog.preferences import UserPreferences
 from potato.catalog.providers import ProviderConfig, ProviderStore
 

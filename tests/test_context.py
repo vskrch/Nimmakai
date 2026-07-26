@@ -16,10 +16,7 @@ def test_extract_top_level() -> None:
 
 
 def test_extract_nested_meta() -> None:
-    assert (
-        extract_context_length({"id": "x", "meta": {"context_length": 262144}})
-        == 262144
-    )
+    assert extract_context_length({"id": "x", "meta": {"context_length": 262144}}) == 262144
 
 
 def test_extract_unknown_omits() -> None:

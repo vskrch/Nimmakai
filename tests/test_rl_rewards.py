@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 from potato.routing.rl_rewards import calculate_composite_reward
 
 

@@ -358,9 +358,7 @@ async def _prepare_routed(
         )
     )
 
-    ctx = await guard.before_request(
-        headers=request.headers, proxy_token=proxy_token, body=body
-    )
+    ctx = await guard.before_request(headers=request.headers, proxy_token=proxy_token, body=body)
     # Auto-router session model pin (OpenRouter sticky model selection)
     preferred_model = getattr(ctx, "preferred_model", None)
 
@@ -381,11 +379,7 @@ async def _prepare_routed(
         # For multi-turn sessions, use cumulative context from previous turns
         try:
             msgs = body.get("messages") or body.get("input") or body.get("prompt") or ""
-            char_n = (
-                sum(len(str(m)) for m in msgs)
-                if isinstance(msgs, list)
-                else len(str(msgs))
-            )
+            char_n = sum(len(str(m)) for m in msgs) if isinstance(msgs, list) else len(str(msgs))
             max_tok = int(body.get("max_tokens") or body.get("max_completion_tokens") or 0)
             base_estimate = int(char_n / 3.5) + max_tok + 512
             # If we have session context, use the actual token count from previous turns
@@ -539,16 +533,12 @@ async def get_model(model_id: str, request: Request) -> JSONResponse:
             )
     if hub is not None:
         client, _pid, upstream_mid = hub.client_for_model(model_id)
-        status, body, headers, _key = await client.request_json(
-            "GET", f"/models/{upstream_mid}"
-        )
+        status, body, headers, _key = await client.request_json("GET", f"/models/{upstream_mid}")
         if registry is not None and isinstance(body, dict) and status < 400:
             body = registry.enrich_model_entry({**body, "id": model_id})
         return JSONResponse(content=body, status_code=status, headers=headers)
     upstream = _upstream(request)
-    status, body, headers, _key = await upstream.request_json(
-        "GET", f"/models/{model_id}"
-    )
+    status, body, headers, _key = await upstream.request_json("GET", f"/models/{model_id}")
     if registry is not None and isinstance(body, dict) and status < 400:
         body = registry.enrich_model_entry(body)
     return JSONResponse(content=body, status_code=status, headers=headers)
@@ -827,16 +817,8 @@ async def _chat_like(
                                 code="upstream_stream_error",
                                 type_="server_error",
                             )
-                            yield (
-                                b"data: "
-                                + _json.dumps(finish).encode("utf-8")
-                                + b"\n\n"
-                            )
-                            yield (
-                                b"data: "
-                                + _json.dumps(err_evt).encode("utf-8")
-                                + b"\n\n"
-                            )
+                            yield (b"data: " + _json.dumps(finish).encode("utf-8") + b"\n\n")
+                            yield (b"data: " + _json.dumps(err_evt).encode("utf-8") + b"\n\n")
                             yield b"data: [DONE]\n\n"
                     finally:
                         # Check if robust_iter detected a mid-stream failure
@@ -854,8 +836,12 @@ async def _chat_like(
                         if ctx.session_id and ok and not err:
                             guard.sticky.update_session_context(
                                 ctx.session_id,
-                                prompt_tokens=int(usage.get("prompt_tokens") or result.prompt_tokens or 0),
-                                completion_tokens=int(usage.get("completion_tokens") or result.completion_tokens or 0),
+                                prompt_tokens=int(
+                                    usage.get("prompt_tokens") or result.prompt_tokens or 0
+                                ),
+                                completion_tokens=int(
+                                    usage.get("completion_tokens") or result.completion_tokens or 0
+                                ),
                                 model_id=result.model,
                             )
                         status_final = result.status_code if not err else 499
@@ -943,16 +929,10 @@ async def _chat_like(
                     completion_tokens=result_j.completion_tokens,
                     model_id=result_j.model,
                 )
-            body_out = normalize_completion_json(
-                result_j.body, routed_model=result_j.model or None
-            )
+            body_out = normalize_completion_json(result_j.body, routed_model=result_j.model or None)
             if result_j.status_code >= 400:
                 body_out = wrap_upstream_error(body_out, status=result_j.status_code)
-            err_msg = (
-                None
-                if result_j.status_code < 400
-                else f"upstream_{result_j.status_code}"
-            )
+            err_msg = None if result_j.status_code < 400 else f"upstream_{result_j.status_code}"
             _finish_log(
                 entry,
                 status=result_j.status_code,
@@ -963,8 +943,7 @@ async def _chat_like(
                 route_mode=decision.mode,
                 fallback_index=result_j.fallback_index,
                 stream=False,
-                model_requested=str(decision.requested_model or body.get("model") or "")
-                or None,
+                model_requested=str(decision.requested_model or body.get("model") or "") or None,
                 error=err_msg,
             )
             _finalize_trace(
@@ -1027,16 +1006,8 @@ async def _chat_like(
                             code="upstream_stream_error",
                             type_="server_error",
                         )
-                        yield (
-                            b"data: "
-                            + _json.dumps(finish).encode("utf-8")
-                            + b"\n\n"
-                        )
-                        yield (
-                            b"data: "
-                            + _json.dumps(err_evt).encode("utf-8")
-                            + b"\n\n"
-                        )
+                        yield (b"data: " + _json.dumps(finish).encode("utf-8") + b"\n\n")
+                        yield (b"data: " + _json.dumps(err_evt).encode("utf-8") + b"\n\n")
                         yield b"data: [DONE]\n\n"
                 finally:
                     await guard.after_request(ctx, key_id=key_id, success=ok and not err)
@@ -1266,9 +1237,7 @@ async def embeddings(request: Request) -> JSONResponse:
                     json_body=body,
                     preferred_key_id=preferred,
                 )
-                await guard.after_request(
-                    ctx, key_id=key.key_id, success=200 <= status < 300
-                )
+                await guard.after_request(ctx, key_id=key.key_id, success=200 <= status < 300)
                 _finalize_trace(
                     request,
                     trace,
@@ -1278,9 +1247,7 @@ async def embeddings(request: Request) -> JSONResponse:
                     model_routed=str(body.get("model") or "") or None,
                     timing=timing,
                 )
-                return JSONResponse(
-                    content=resp_body, status_code=status, headers=headers
-                )
+                return JSONResponse(content=resp_body, status_code=status, headers=headers)
 
             result = await fallback.execute_json(
                 "/embeddings",

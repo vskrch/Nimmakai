@@ -66,14 +66,22 @@ class Settings(BaseSettings):
     # Per-intent fallback counts and attempt budgets (data-driven, not coding-specific)
     intent_max_fallbacks: dict = Field(
         default_factory=lambda: {
-            "coding_agentic": 10, "reasoning": 10, "long_horizon": 8,
-            "chat_fast": 6, "vision": 6, "embeddings": 4,
+            "coding_agentic": 10,
+            "reasoning": 10,
+            "long_horizon": 8,
+            "chat_fast": 6,
+            "vision": 6,
+            "embeddings": 4,
         }
     )
     intent_attempt_budget_seconds: dict = Field(
         default_factory=lambda: {
-            "coding_agentic": 30.0, "reasoning": 45.0, "long_horizon": 45.0,
-            "chat_fast": 15.0, "vision": 20.0, "embeddings": 10.0,
+            "coding_agentic": 30.0,
+            "reasoning": 45.0,
+            "long_horizon": 45.0,
+            "chat_fast": 15.0,
+            "vision": 20.0,
+            "embeddings": 10.0,
         }
     )
     deadline_guard_seconds: float = 3.0
@@ -139,9 +147,7 @@ class Settings(BaseSettings):
     retry_backoff_base_seconds: float = 0.2
     retry_backoff_cap_seconds: float = 2.0
     cors_allow_origins: str = "*"
-    upstream_user_agent: str = (
-        f"potato/{__version__} (OpenAI-compatible NIM proxy)"
-    )
+    upstream_user_agent: str = f"potato/{__version__} (OpenAI-compatible NIM proxy)"
 
     # Analytics (persistent traces + dashboard)
     analytics_enabled: bool = True

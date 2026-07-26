@@ -20,4 +20,3 @@ __all__ = [
     "ProviderStore",
     "latest_in_family",
 ]
-

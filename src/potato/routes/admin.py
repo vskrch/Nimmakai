@@ -63,9 +63,7 @@ async def admin_heal(request: Request) -> JSONResponse:
 
     hub = getattr(request.app.state, "hub", None)
     registry = getattr(request.app.state, "registry", None)
-    report = await heal_and_refresh(
-        hub=hub, registry=registry, settings=settings, force=True
-    )
+    report = await heal_and_refresh(hub=hub, registry=registry, settings=settings, force=True)
     return JSONResponse({"ok": True, "heal": report})
 
 
@@ -174,9 +172,7 @@ async def health(request: Request) -> JSONResponse:
             )
         # Sum available keys across active runtimes
         keys_available = sum(
-            rt.pool.available_count()
-            for rt in hub.runtimes.values()
-            if rt.config.enabled
+            rt.pool.available_count() for rt in hub.runtimes.values() if rt.config.enabled
         )
     proxy_configured = bool(settings.proxy_api_keys) or settings.allow_insecure_auth
     status = "ok"
@@ -422,17 +418,13 @@ async def rankings_view(request: Request) -> JSONResponse:
             "best_coding_sticky": sticky,
             "best_coding_live": adaptive,
             "best_coding": adaptive,  # what requests actually try first
-            "score_breakdown": explain_top(
-                sticky, registry, intent="coding_agentic", n=8
-            ),
+            "score_breakdown": explain_top(sticky, registry, intent="coding_agentic", n=8),
             "best_chat": registry.health_reorder(
                 list(registry.dynamic_chains.get("chat_fast", [])[:10]),
                 intent="chat_fast",
             ),
             "best_reasoning": registry.dynamic_chains.get("reasoning", [])[:10],
-            "responsive": {
-                m: round(registry.health.responsive_score(m), 3) for m in adaptive[:8]
-            },
+            "responsive": {m: round(registry.health.responsive_score(m), 3) for m in adaptive[:8]},
             "ladders": registry.ladder.snapshot(),
             "hint": (
                 "Every request ranks intelligence × live speed × health. "
@@ -474,9 +466,7 @@ async def list_providers(request: Request) -> JSONResponse:
     configured = {p["id"] for p in providers if p.get("enabled") and (p.get("key_count") or 0) > 0}
     presets = list_presets()
     for preset in presets:
-        preset["already_configured"] = (
-            preset["id"] in configured and preset["id"] != "custom"
-        )
+        preset["already_configured"] = preset["id"] in configured and preset["id"] != "custom"
     return JSONResponse(
         {
             "providers": providers,
@@ -604,9 +594,7 @@ async def test_provider(request: Request) -> JSONResponse:
                 "model_count": n,
                 "sample_models": sample,
                 "message": (
-                    f"OK — {n} models reachable"
-                    if ok
-                    else f"Upstream returned HTTP {status}"
+                    f"OK — {n} models reachable" if ok else f"Upstream returned HTTP {status}"
                 ),
             },
             status_code=200 if ok else 502,
@@ -657,9 +645,7 @@ async def upsert_provider(request: Request) -> JSONResponse:
                 body["base_url"] = preset.get("base_url")
             body.setdefault("rpm_limit", preset.get("rpm_limit", 40))
             body.setdefault("rpd_limit", preset.get("rpd_limit", 2000))
-            body.setdefault(
-                "max_in_flight_per_key", preset.get("max_in_flight_per_key", 3)
-            )
+            body.setdefault("max_in_flight_per_key", preset.get("max_in_flight_per_key", 3))
             if preset.get("api_keys_env") and not body.get("api_keys_env"):
                 body["api_keys_env"] = preset["api_keys_env"]
 
@@ -746,9 +732,7 @@ async def upsert_provider(request: Request) -> JSONResponse:
         return JSONResponse(
             {
                 "error": {
-                    "message": (
-                        "At least one API key is required (api_keys or api_keys_env)"
-                    ),
+                    "message": ("At least one API key is required (api_keys or api_keys_env)"),
                     "code": "invalid_request",
                 }
             },
@@ -765,11 +749,7 @@ async def upsert_provider(request: Request) -> JSONResponse:
         or (isinstance(keys_in_req, str) and bool(keys_in_req.strip()))
         or bool(str(raw_body.get("preset") or raw_body.get("from_preset") or "").strip())
     )
-    if (
-        has_new_keys
-        and cfg.resolved_keys()
-        and raw_body.get("enabled") is not False
-    ):
+    if has_new_keys and cfg.resolved_keys() and raw_body.get("enabled") is not False:
         cfg.enabled = True
 
     # Register provider + immediately fetch its /models (NMK-101)
@@ -784,10 +764,7 @@ async def upsert_provider(request: Request) -> JSONResponse:
             "provider": masked,
             "catalog_ok": ok,
             "live_model_count": live_added,
-            "message": (
-                f"Provider '{cfg.id}' saved — "
-                f"{live_added} models in the unified pool"
-            ),
+            "message": (f"Provider '{cfg.id}' saved — {live_added} models in the unified pool"),
         }
     )
 
@@ -848,12 +825,14 @@ async def register_models(request: Request) -> JSONResponse:
     registry.ladder.provider_ids.add(provider_id)
     registry.recompute_rankings(persist=True)
 
-    return JSONResponse({
-        "ok": True,
-        "added": added,
-        "live_model_count": len(registry.live_ids),
-        "message": f"Registered {len(added)} model(s) from provider '{provider_id}'",
-    })
+    return JSONResponse(
+        {
+            "ok": True,
+            "added": added,
+            "live_model_count": len(registry.live_ids),
+            "message": f"Registered {len(added)} model(s) from provider '{provider_id}'",
+        }
+    )
 
 
 @router.post("/admin/models/set-enabled")
@@ -929,9 +908,7 @@ async def bulk_models_enabled(request: Request) -> JSONResponse:
     disable = body.get("disable") if isinstance(body.get("disable"), list) else []
     provider_id = str(body.get("provider_id") or "").strip().lower()
     if provider_id:
-        prov_models = sorted(
-            m for m in registry.live_ids if m.split("/", 1)[0] == provider_id
-        )
+        prov_models = sorted(m for m in registry.live_ids if m.split("/", 1)[0] == provider_id)
         if body.get("enable_all") is True:
             enable = list(enable) + prov_models
         if body.get("disable_all") is True:
@@ -1202,13 +1179,13 @@ async def sse_events(request: Request):
         require_admin(request, settings)
     else:
         token = request.query_params.get("token") or extract_bearer(request)
-        validate_proxy_token(
-            token, settings, accounts=getattr(request.app.state, "accounts", None)
-        )
+        validate_proxy_token(token, settings, accounts=getattr(request.app.state, "accounts", None))
         accounts = getattr(request.app.state, "accounts", None)
         is_admin = False
-        if settings.accept_any_proxy_key or token and any(
-            hmac.compare_digest(token, k) for k in (settings.proxy_api_keys or [])
+        if (
+            settings.accept_any_proxy_key
+            or token
+            and any(hmac.compare_digest(token, k) for k in (settings.proxy_api_keys or []))
         ):
             is_admin = True
         elif token and token.startswith("sk-nk-") and accounts is not None:
@@ -1227,6 +1204,7 @@ async def sse_events(request: Request):
 
     async def event_generator():
         import json
+
         yield "event: connected\ndata: {}\n\n"
         cycle = 0
         while True:
@@ -1251,7 +1229,9 @@ async def sse_events(request: Request):
                         health_payload[mid] = {
                             "ok": not registry.health.is_unhealthy(mid),
                             "tps": round(h.ewma_tok_per_s, 1) if h.ewma_tok_per_s > 0 else 0,
-                            "latency_ms": round(h.ewma_latency * 1000, 1) if h.ewma_latency > 0 else 0,
+                            "latency_ms": round(h.ewma_latency * 1000, 1)
+                            if h.ewma_latency > 0
+                            else 0,
                             "error_rate": round(h.error_rate, 2),
                         }
             payload = {
@@ -1317,13 +1297,16 @@ async def request_trace(request_id: str, request: Request) -> JSONResponse:
     settings = getattr(request.app.state, "settings", None) or get_settings()
     require_admin(request, settings)
     from potato.logging_setup import request_logs
+
     entries = request_logs.list(limit=200)
     matching = [e for e in entries if e.get("req") == request_id]
-    return JSONResponse({
-        "request_id": request_id,
-        "entries": matching,
-        "hint": "Returns all log entries for the given request_id",
-    })
+    return JSONResponse(
+        {
+            "request_id": request_id,
+            "entries": matching,
+            "hint": "Returns all log entries for the given request_id",
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1369,15 +1352,17 @@ async def get_intel_status(request: Request) -> JSONResponse:
         for s in ms.sources:
             source_counts[s] = source_counts.get(s, 0) + 1
 
-    return JSONResponse({
-        "version": cache.version,
-        "computed_at": cache.computed_at,
-        "age_seconds": round(time.time() - cache.computed_at, 1),
-        "model_count": len(cache.scores),
-        "live_pool_count": len(cache.live_pool),
-        "source_counts": source_counts,
-        "top_by_intent": top_by_intent,
-    })
+    return JSONResponse(
+        {
+            "version": cache.version,
+            "computed_at": cache.computed_at,
+            "age_seconds": round(time.time() - cache.computed_at, 1),
+            "model_count": len(cache.scores),
+            "live_pool_count": len(cache.live_pool),
+            "source_counts": source_counts,
+            "top_by_intent": top_by_intent,
+        }
+    )
 
 
 @router.post("/admin/intel/refresh")
@@ -1405,17 +1390,19 @@ async def get_model_score(model_id: str, request: Request) -> JSONResponse:
     ms = cache.scores.get(model_id)
     if not ms:
         return JSONResponse({"error": "model_not_in_cache", "model_id": model_id}, status_code=404)
-    return JSONResponse({
-        "model_id": ms.model_id,
-        "quality": ms.quality,
-        "intent_affinity": ms.intent_affinity,
-        "modalities": sorted(ms.modalities),
-        "context_k": ms.context_k,
-        "measured_tps": ms.measured_tps,
-        "provider_id": ms.provider_id,
-        "sources": ms.sources,
-        "computed_at": ms.computed_at,
-    })
+    return JSONResponse(
+        {
+            "model_id": ms.model_id,
+            "quality": ms.quality,
+            "intent_affinity": ms.intent_affinity,
+            "modalities": sorted(ms.modalities),
+            "context_k": ms.context_k,
+            "measured_tps": ms.measured_tps,
+            "provider_id": ms.provider_id,
+            "sources": ms.sources,
+            "computed_at": ms.computed_at,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1439,10 +1426,12 @@ async def get_extensibility(request: Request) -> JSONResponse:
     db = _ext_db(request)
     features = db.get_extensibility_features()
     mappings = db.get_custom_catalog_mappings()
-    return JSONResponse({
-        "features": features,
-        "custom_catalog_mappings": mappings,
-    })
+    return JSONResponse(
+        {
+            "features": features,
+            "custom_catalog_mappings": mappings,
+        }
+    )
 
 
 @router.put("/admin/extensibility")
@@ -1512,12 +1501,15 @@ async def get_rl_stats(request: Request) -> JSONResponse:
         return JSONResponse({"models": [], "feature_dim": 12, "enabled": False})
     stats = rl_engine.get_all_stats()
     from potato.routing.rl_features import FEATURE_NAMES
-    return JSONResponse({
-        "models": stats,
-        "feature_names": FEATURE_NAMES,
-        "feature_dim": 12,
-        "enabled": True,
-    })
+
+    return JSONResponse(
+        {
+            "models": stats,
+            "feature_names": FEATURE_NAMES,
+            "feature_dim": 12,
+            "enabled": True,
+        }
+    )
 
 
 @router.post("/rl/reset")
@@ -1539,6 +1531,7 @@ async def reset_rl_stats(request: Request) -> JSONResponse:
             rl_engine.reset_all()
 
     from potato.catalog.db import get_db
+
     if settings:
         db = get_db(settings.sqlite_path)
         db.clear_rl_policy(model_id)
@@ -1574,7 +1567,9 @@ async def put_model_pool_config(request: Request, model_id: str) -> JSONResponse
 
     model_pools = getattr(request.app.state, "model_pools", None)
     if model_pools is None:
-        return JSONResponse({"error": {"message": "model_pools store uninitialized"}}, status_code=500)
+        return JSONResponse(
+            {"error": {"message": "model_pools store uninitialized"}}, status_code=500
+        )
 
     cfg = model_pools.set_config(
         model_id=model_id,

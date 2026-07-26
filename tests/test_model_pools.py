@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-import pytest
+
 from potato.catalog.db import PotatoDB
 from potato.catalog.model_pools import ModelPoolStore
 

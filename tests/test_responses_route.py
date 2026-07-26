@@ -7,9 +7,6 @@ OpenAI-compatible providers that don't implement the Responses endpoint.
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -19,7 +16,6 @@ from potato.routes.responses import (
     transform_chat_to_responses_json,
     transform_responses_to_chat,
 )
-
 
 # ── Pure transform tests (no app/HTTP) ──────────────────────────────
 
@@ -62,23 +58,27 @@ def test_transform_responses_internally_tagged_tools() -> None:
     body = {
         "model": "gpt-4o",
         "input": "What's the weather?",
-        "tools": [{
-            "type": "function",
-            "name": "get_weather",
-            "description": "Get weather",
-            "parameters": {"type": "object", "properties": {}},
-        }],
+        "tools": [
+            {
+                "type": "function",
+                "name": "get_weather",
+                "description": "Get weather",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ],
         "tool_choice": "auto",
     }
     out = transform_responses_to_chat(body)
-    assert out["tools"] == [{
-        "type": "function",
-        "function": {
-            "name": "get_weather",
-            "description": "Get weather",
-            "parameters": {"type": "object", "properties": {}},
-        },
-    }]
+    assert out["tools"] == [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Get weather",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        }
+    ]
     assert out["tool_choice"] == "auto"
 
 
@@ -118,10 +118,12 @@ def test_transform_chat_to_responses_json_basic() -> None:
     chat_resp = {
         "id": "chatcmpl-1",
         "model": "gpt-4o",
-        "choices": [{
-            "finish_reason": "stop",
-            "message": {"role": "assistant", "content": "Hello!"},
-        }],
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": {"role": "assistant", "content": "Hello!"},
+            }
+        ],
         "usage": {"prompt_tokens": 5, "completion_tokens": 3},
     }
     out = transform_chat_to_responses_json(chat_resp, "gpt-4o")
@@ -142,18 +144,22 @@ def test_transform_chat_to_responses_json_with_tool_calls() -> None:
     chat_resp = {
         "id": "chatcmpl-2",
         "model": "gpt-4o",
-        "choices": [{
-            "finish_reason": "tool_calls",
-            "message": {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [{
-                    "id": "call_1",
-                    "type": "function",
-                    "function": {"name": "get_weather", "arguments": '{"city":"SF"}'},
-                }],
-            },
-        }],
+        "choices": [
+            {
+                "finish_reason": "tool_calls",
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "get_weather", "arguments": '{"city":"SF"}'},
+                        }
+                    ],
+                },
+            }
+        ],
         "usage": {"prompt_tokens": 10, "completion_tokens": 5},
     }
     out = transform_chat_to_responses_json(chat_resp, "gpt-4o")
@@ -216,10 +222,12 @@ def test_v1_responses_non_stream(client, monkeypatch) -> None:
             {
                 "id": "chatcmpl-1",
                 "model": "gpt-4o",
-                "choices": [{
-                    "finish_reason": "stop",
-                    "message": {"role": "assistant", "content": "Hello from Responses!"},
-                }],
+                "choices": [
+                    {
+                        "finish_reason": "stop",
+                        "message": {"role": "assistant", "content": "Hello from Responses!"},
+                    }
+                ],
                 "usage": {"prompt_tokens": 5, "completion_tokens": 4},
             },
             {},
@@ -227,6 +235,7 @@ def test_v1_responses_non_stream(client, monkeypatch) -> None:
         )
 
     from potato.upstream import UpstreamClient
+
     monkeypatch.setattr(UpstreamClient, "request_json", fake_request_json)
 
     res = client.post(
@@ -257,10 +266,17 @@ def test_v1_responses_non_stream(client, monkeypatch) -> None:
 
 def test_v1_responses_x_api_key_auth(client, monkeypatch) -> None:
     """x-api-key header (Anthropic SDK / some OpenAI SDK configs) is accepted."""
+
     async def fake_request_json(*args, **kwargs):
-        return (200, {"id": "c", "model": "m", "choices": [{"message": {"content": "ok"}}], "usage": {}}, {}, None)
+        return (
+            200,
+            {"id": "c", "model": "m", "choices": [{"message": {"content": "ok"}}], "usage": {}},
+            {},
+            None,
+        )
 
     from potato.upstream import UpstreamClient
+
     monkeypatch.setattr(UpstreamClient, "request_json", fake_request_json)
 
     res = client.post(
@@ -273,15 +289,18 @@ def test_v1_responses_x_api_key_auth(client, monkeypatch) -> None:
 
 def test_v1_responses_stream(client, monkeypatch) -> None:
     """Streaming /v1/responses emits Responses SSE events, not Chat deltas."""
+
     async def fake_stream(*args, **kwargs):
         async def gen():
             yield b'data: {"choices":[{"delta":{"content":"Hello"}}]}\n\n'
             yield b'data: {"choices":[{"delta":{"content":" world"}}]}\n\n'
             yield b'data: {"choices":[{"finish_reason":"stop","delta":{}}]}\n\n'
             yield b"data: [DONE]\n\n"
+
         return 200, gen(), {"content-type": "text/event-stream"}, None
 
     from potato.upstream import UpstreamClient
+
     monkeypatch.setattr(UpstreamClient, "stream", fake_stream)
 
     res = client.post(

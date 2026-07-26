@@ -183,6 +183,7 @@ class IntentClassifier:
         # the coding chain covers all capability tiers.
         raw_model = str(body.get("model") or "").lower()
         from potato.routing.auto_router import is_auto_router_id
+
         if (
             is_auto_router_id(raw_model)
             and result.confidence < 0.70
@@ -346,12 +347,8 @@ class IntentClassifier:
         }
 
     def _rules(self, features: dict[str, Any], path: str) -> IntentResult:
-        long_chars = (
-            getattr(self.settings, "long_context_chars", 48000) if self.settings else 48000
-        )
-        short_chars = (
-            getattr(self.settings, "short_chat_chars", 800) if self.settings else 800
-        )
+        long_chars = getattr(self.settings, "long_context_chars", 48000) if self.settings else 48000
+        short_chars = getattr(self.settings, "short_chat_chars", 800) if self.settings else 800
 
         # ponytail: image/audio/video all route to vision-capable (VLM) models.
         # Audio-only models are rare on free tier; VLMs that accept image often
@@ -362,17 +359,11 @@ class IntentClassifier:
 
         # Note: Deterministic tool short-circuit runs early in classify() before _classify_rules.
         # This check is preserved for direct _classify_rules calls and feature inspection.
-        if (
-            features["has_tools"]
-            or features["has_tool_choice"]
-            or features["has_tool_role"]
-        ):
+        if features["has_tools"] or features["has_tool_choice"] or features["has_tool_role"]:
             return self._result(Intent.CODING_AGENTIC, 0.98, "tools_present", features)
 
         if features["agent_fingerprint"]:
-            return self._result(
-                Intent.CODING_AGENTIC, 0.92, "agent_fingerprint", features
-            )
+            return self._result(Intent.CODING_AGENTIC, 0.92, "agent_fingerprint", features)
 
         # Code keywords with sufficient text → coding (NMK-202)
         if features["code_keywords"] and features["char_len"] > short_chars:
@@ -406,9 +397,7 @@ class IntentClassifier:
 
         if "/completions" in path and "chat" not in path:
             if features["fence_count"] or features["char_len"] > short_chars:
-                return self._result(
-                    Intent.CODING_AGENTIC, 0.6, "completions_codeish", features
-                )
+                return self._result(Intent.CODING_AGENTIC, 0.6, "completions_codeish", features)
             return self._result(Intent.CHAT_FAST, 0.7, "completions_default", features)
 
         if (

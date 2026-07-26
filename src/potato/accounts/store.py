@@ -59,9 +59,7 @@ class AccountStore:
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
         with self._db._lock:
-            row = self._db._conn.execute(
-                "SELECT * FROM users WHERE id = ?", (user_id,)
-            ).fetchone()
+            row = self._db._conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         return dict(row) if row else None
 
     def get_user_by_email(self, email: str) -> dict[str, Any] | None:
@@ -250,16 +248,12 @@ class AccountStore:
             return
         th = hash_token(raw)
         with self._db._lock:
-            self._db._conn.execute(
-                "DELETE FROM sessions WHERE token_hash = ?", (th,)
-            )
+            self._db._conn.execute("DELETE FROM sessions WHERE token_hash = ?", (th,))
 
     def delete_sessions_for_user(self, user_id: str) -> int:
         """Revoke all dashboard sessions for a user (e.g. on suspend/reject)."""
         with self._db._lock:
-            cur = self._db._conn.execute(
-                "DELETE FROM sessions WHERE user_id = ?", (user_id,)
-            )
+            cur = self._db._conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
             return int(cur.rowcount or 0)
 
     def issue_api_key(self, user_id: str, *, name: str = "default") -> dict[str, Any]:

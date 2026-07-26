@@ -247,9 +247,7 @@ def test_custom_model_ladder_empty_chain_falls_through() -> None:
     s = _selector()
     ladders = ModelLadderStore(db=None)
     # Empty chain → not used, falls through to normal routing
-    ladders.ladders["potato/coding"] = ModelLadder(
-        model_id="potato/coding", chain=[]
-    )
+    ladders.ladders["potato/coding"] = ModelLadder(model_id="potato/coding", chain=[])
     s.model_ladders = ladders
     d = s.resolve("potato/coding", _intent())
     # Falls through to auto-router (potato/coding is a coding-tier alias)
@@ -485,9 +483,11 @@ def test_known_model_disabled_raises() -> None:
     s = _selector()
     # Add a catalog model that resolves via provider prefix, then disable its live id
     s.registry.live_ids.add("nim/my-catalog-model")
-    s.registry.catalog.models["nim/my-catalog-model"] = type(
-        s.registry.catalog.models.get("qwen/qwen3.5-122b-a10b")
-    )() if s.registry.catalog.models else None
+    s.registry.catalog.models["nim/my-catalog-model"] = (
+        type(s.registry.catalog.models.get("qwen/qwen3.5-122b-a10b"))()
+        if s.registry.catalog.models
+        else None
+    )
     s.registry.disabled_models.add("nim/my-catalog-model")
     s.registry._rebuild_all_chains()
     with pytest.raises(ValueError, match="model_disabled"):

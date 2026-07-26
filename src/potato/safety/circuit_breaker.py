@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import logging
 import time
-from enum import Enum
+from enum import StrEnum
 
 logger = logging.getLogger(__name__)
 
 
-class BreakerState(str, Enum):
+class BreakerState(StrEnum):
     CLOSED = "closed"
     OPEN = "open"
     HALF_OPEN = "half_open"
@@ -85,7 +85,9 @@ class ProviderCircuitBreaker:
             self._open_until[pid] = time.monotonic() + backoff
             logger.warning(
                 "circuit re-opened for provider %s (backoff=%.0fs, failures=%s)",
-                pid, backoff, f,
+                pid,
+                backoff,
+                f,
             )
             return
 
@@ -94,7 +96,8 @@ class ProviderCircuitBreaker:
             self._open_until[pid] = time.monotonic() + self.recovery_timeout
             logger.warning(
                 "circuit opened for provider %s (%s consecutive failures)",
-                pid, f,
+                pid,
+                f,
             )
 
     def succeed(self, provider_id: str) -> None:

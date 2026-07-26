@@ -1,12 +1,10 @@
 """NMK-603: Self-healing integration tests."""
 
-import asyncio
 import time
-import pytest
+
 from potato.catalog.health import ModelHealthStore
-from potato.catalog.ladder import LadderService
 from potato.catalog.learning import LearningStore
-from potato.safety.circuit_breaker import ProviderCircuitBreaker, BreakerState
+from potato.safety.circuit_breaker import BreakerState, ProviderCircuitBreaker
 
 
 def test_circuit_breaker_opens_after_failures():
@@ -65,6 +63,7 @@ def test_learning_persistence():
     """Learning store should survive load/save cycle."""
     import tempfile
     from pathlib import Path
+
     td = tempfile.mkdtemp()
     path = Path(td) / "learning.json"
     ls1 = LearningStore(path=path)
@@ -82,16 +81,21 @@ def test_learning_persistence():
 
 def test_emergency_coding_chain_returns_models():
     """Emergency chain should return live models when ladder is empty."""
-    from potato.catalog.schema import catalog_from_dict
     from potato.catalog.registry import ModelRegistry
+    from potato.catalog.schema import catalog_from_dict
     from potato.resilience import emergency_coding_chain
-    cat = catalog_from_dict({
-        "version": "1", "updated": "2026-01-01",
-        "defaults": {"dynamic_families": True, "auto_mode_model_tokens": []},
-        "families": {"chat_primary": "nim", "coding_primary": "nim", "fallbacks": []},
-        "intents": {"coding_agentic": {"chain": []}},
-        "aliases": {}, "models": {},
-    })
+
+    cat = catalog_from_dict(
+        {
+            "version": "1",
+            "updated": "2026-01-01",
+            "defaults": {"dynamic_families": True, "auto_mode_model_tokens": []},
+            "families": {"chat_primary": "nim", "coding_primary": "nim", "fallbacks": []},
+            "intents": {"coding_agentic": {"chain": []}},
+            "aliases": {},
+            "models": {},
+        }
+    )
     reg = ModelRegistry(cat)
     reg.live_ids = {"nim/model-a", "nim/model-b"}
     chain = emergency_coding_chain(reg, max_n=5)

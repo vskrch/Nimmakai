@@ -116,9 +116,7 @@ class ModelHealthStore:
                     now + self.hard_fail_cooldown_seconds * min(h.consecutive_fails, 3),
                 )
             elif status_code == 429:
-                h.cooldown_until = max(
-                    h.cooldown_until, now + self.rate_limit_cooldown_seconds
-                )
+                h.cooldown_until = max(h.cooldown_until, now + self.rate_limit_cooldown_seconds)
 
         if key_id:
             pair = self._by_pair.setdefault((model_id, key_id), ModelHealth())
@@ -200,7 +198,10 @@ class ModelHealthStore:
                 # Among fully healthy: optional micro-boost for *very* recent success
                 # without overturning quality order (sticky dominates)
                 hot = 0
-                if h.last_success_at > 0 and (now - h.last_success_at) < self.recent_success_window_seconds:
+                if (
+                    h.last_success_at > 0
+                    and (now - h.last_success_at) < self.recent_success_window_seconds
+                ):
                     hot = -1
                 return (0, hot, sticky)
             # Failing / flaky: push back; among failers prefer lower fail streak
@@ -262,9 +263,7 @@ class ModelHealthStore:
             }
         return out
 
-    def provider_health(
-        self, provider_models: set[str], provider_id: str = ""
-    ) -> float:
+    def provider_health(self, provider_models: set[str], provider_id: str = "") -> float:
         """Aggregate health across all models for a provider.
 
         0 = all models down, 1 = all models healthy (or unknown).

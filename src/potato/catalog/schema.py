@@ -8,9 +8,7 @@ from pydantic import BaseModel, Field
 
 
 class CatalogDefaults(BaseModel):
-    auto_mode_model_tokens: list[str] = Field(
-        default_factory=lambda: ["auto", "potato/auto", ""]
-    )
+    auto_mode_model_tokens: list[str] = Field(default_factory=lambda: ["auto", "potato/auto", ""])
     passthrough_if_known: bool = True
     max_fallback_attempts: int = 6
     classify_mode: Literal["rules_only", "rules_then_llm"] = "rules_only"
@@ -39,9 +37,7 @@ class FamilyPreferences(BaseModel):
 
     chat_primary: str = "nemotron"
     coding_primary: str = "qwen"
-    fallbacks: list[str] = Field(
-        default_factory=lambda: ["glm_5_2", "step_3_7", "minimax_m3"]
-    )
+    fallbacks: list[str] = Field(default_factory=lambda: ["glm_5_2", "step_3_7", "minimax_m3"])
 
 
 class ModelsCatalog(BaseModel):

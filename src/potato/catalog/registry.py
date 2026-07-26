@@ -50,8 +50,7 @@ class ModelRegistry:
         self.strict_catalog = strict_catalog
         self.health = health or ModelHealthStore()
         self.learning = LearningStore(
-            path=(snapshot_path or Path(".potato/catalog_snapshot.json")).parent
-            / "learning.json"
+            path=(snapshot_path or Path(".potato/catalog_snapshot.json")).parent / "learning.json"
         )
         self.learning.load()
         self.ladder = LadderService(health=self.health, learning=self.learning)
@@ -166,16 +165,12 @@ class ModelRegistry:
                 f"models catalog not found (tried {settings.models_config_path} "
                 "and packaged potato/data/models.yaml)"
             )
-        snap = Path(
-            getattr(settings, "catalog_snapshot_path", ".potato/catalog_snapshot.json")
-        )
+        snap = Path(getattr(settings, "catalog_snapshot_path", ".potato/catalog_snapshot.json"))
         return cls.from_yaml(
             resolved,
             strict_catalog=settings.strict_catalog,
             snapshot_path=snap,
-            docs_url=getattr(
-                settings, "catalog_docs_url", "https://build.nvidia.com/models.md"
-            ),
+            docs_url=getattr(settings, "catalog_docs_url", "https://build.nvidia.com/models.md"),
             probe_budget_per_hour=int(getattr(settings, "probe_budget_per_hour", 8)),
         )
 
@@ -192,9 +187,7 @@ class ModelRegistry:
                 if isinstance(v, (int, float)) and int(v) > 0
             }
         self.probed_ok = set(data.get("probed_ok") or [])
-        self.dynamic_chains = {
-            k: list(v) for k, v in (data.get("dynamic_chains") or {}).items()
-        }
+        self.dynamic_chains = {k: list(v) for k, v in (data.get("dynamic_chains") or {}).items()}
         logger.info(
             "loaded catalog snapshot (%s live ids, %s dynamic intents)",
             len(self.live_ids),
@@ -225,9 +218,7 @@ class ModelRegistry:
     def auto_tokens(self) -> set[str]:
         from potato.routing.auto_router import all_auto_router_ids, is_auto_router_id
 
-        base = {
-            normalize_model_name(t) for t in self.catalog.defaults.auto_mode_model_tokens
-        }
+        base = {normalize_model_name(t) for t in self.catalog.defaults.auto_mode_model_tokens}
         base |= {
             "potato/auto-coding",
             "potato/best",
@@ -275,9 +266,7 @@ class ModelRegistry:
     def is_known(self, model_id: str) -> bool:
         return self.resolve_live_id(model_id) is not None
 
-    def resolve_live_id(
-        self, model_id: str, *, include_disabled: bool = False
-    ) -> str | None:
+    def resolve_live_id(self, model_id: str, *, include_disabled: bool = False) -> str | None:
         """Map client model id to a namespaced live id when possible.
 
         Disabled models are treated as unknown unless ``include_disabled``.
@@ -325,9 +314,7 @@ class ModelRegistry:
             mid = str(item["id"])
             got = extract_context_length(item)
             if got is not None:
-                self.context_by_model[mid] = merge_context(
-                    self.context_by_model.get(mid), got
-                )
+                self.context_by_model[mid] = merge_context(self.context_by_model.get(mid), got)
 
     def _ingest_context_from_docs(self) -> None:
         # Match docs to live ids by slug / guessed api id
@@ -484,9 +471,7 @@ class ModelRegistry:
         try:
             import json
 
-            self._db.set_meta(
-                "disabled_models", json.dumps(sorted(self.disabled_models))
-            )
+            self._db.set_meta("disabled_models", json.dumps(sorted(self.disabled_models)))
         except Exception:
             logger.exception("persist disabled_models failed")
             if require_ok:
@@ -506,9 +491,7 @@ class ModelRegistry:
                 self.disabled_models = {
                     normalize_model_name(str(x)) for x in data if str(x).strip()
                 }
-                logger.info(
-                    "loaded %s disabled model(s) from sqlite", len(self.disabled_models)
-                )
+                logger.info("loaded %s disabled model(s) from sqlite", len(self.disabled_models))
         except Exception:
             logger.exception("load disabled_models failed")
 
@@ -534,7 +517,11 @@ class ModelRegistry:
         if ladder is None:
             result = list(active)
         else:
-            result = [m for m in active if ladder.is_coding_capable(m)] if intent == "coding_agentic" else list(active)
+            result = (
+                [m for m in active if ladder.is_coding_capable(m)]
+                if intent == "coding_agentic"
+                else list(active)
+            )
 
         self._intent_candidates_cache[intent] = result
         self._intent_candidates_key = current_key
@@ -586,9 +573,7 @@ class ModelRegistry:
         try:
             payload = self.ladder.export_cache()
             payload["live_ids"] = sorted(self.live_ids)
-            payload["dynamic_chains"] = {
-                k: list(v) for k, v in self.dynamic_chains.items()
-            }
+            payload["dynamic_chains"] = {k: list(v) for k, v in self.dynamic_chains.items()}
             self._db.set_ranking_cache(payload, cache_key=self.rankings_cache_key)
             logger.info(
                 "ranking cache persisted (coding=%s)",
@@ -673,9 +658,7 @@ class ModelRegistry:
 
         from potato.catalog.score_cache import ModelScoreCache, recompute
 
-        interval = float(
-            getattr(self._intel_settings, "score_recompute_interval_seconds", 300.0)
-        )
+        interval = float(getattr(self._intel_settings, "score_recompute_interval_seconds", 300.0))
         while True:
             try:
                 bundles = await self._intel_fetcher.fetch_all()
@@ -740,9 +723,7 @@ class ModelRegistry:
             self.dynamic_chains[f"{intent}::cheap"] = self.ladder.ladder_for(
                 intent, variant="cheap"
             )
-            self.dynamic_chains[f"{intent}::fast"] = self.ladder.ladder_for(
-                intent, variant="fast"
-            )
+            self.dynamic_chains[f"{intent}::fast"] = self.ladder.ladder_for(intent, variant="fast")
 
     def _rebuild_all_chains(self, *, force: bool = False) -> None:
         """
@@ -806,9 +787,7 @@ class ModelRegistry:
         """
         from potato.routing.optimizer import optimize_chain
 
-        return optimize_chain(
-            chain, self, intent=intent, variant=variant, max_n=None
-        )
+        return optimize_chain(chain, self, intent=intent, variant=variant, max_n=None)
 
     def record_outcome(
         self,
@@ -998,12 +977,12 @@ class ModelRegistry:
                 new_ids_lower.add(ns.lower())
             self.live_ids |= new_ids_lower
             # Sync ladder provider ids so scoring/split uses the new provider
-            self.ladder.provider_ids = set(
-                m.split("/", 1)[0] for m in self.live_ids
-            )
+            self.ladder.provider_ids = set(m.split("/", 1)[0] for m in self.live_ids)
             logger.info(
                 "provider %s imported %s model(s) into live pool (total=%s)",
-                pid, len(new_ids), len(self.live_ids),
+                pid,
+                len(new_ids),
+                len(self.live_ids),
             )
         except Exception:
             logger.exception("provider %s catalog fetch failed", provider_id)
@@ -1061,22 +1040,16 @@ class ModelRegistry:
                     whitelist = rt.config.model_whitelist
                     blacklist = rt.config.model_blacklist
                     low_uid = upstream_id.lower()
-                    if blacklist and any(
-                        b.lower() in low_uid for b in blacklist
-                    ):
+                    if blacklist and any(b.lower() in low_uid for b in blacklist):
                         continue
-                    if whitelist and not any(
-                        w.lower() in low_uid for w in whitelist
-                    ):
+                    if whitelist and not any(w.lower() in low_uid for w in whitelist):
                         continue
                     ns = namespace_model(pid, upstream_id)
                     merged.add(ns)
                     namespaced_items.append({**item, "id": ns})
                 self._ingest_context_from_api_items(namespaced_items)
                 any_ok = True
-                logger.info(
-                    "provider %s catalog ok — %s model(s)", pid, len(namespaced_items)
-                )
+                logger.info("provider %s catalog ok — %s model(s)", pid, len(namespaced_items))
             except Exception:
                 logger.exception("provider %s catalog refresh failed", pid)
                 failed_pids.add(pid)
@@ -1086,10 +1059,7 @@ class ModelRegistry:
             self._original_ids = {m.lower(): m for m in merged}
             # Retain models from providers that failed this refresh (avoid eviction)
             if failed_pids:
-                retained = {
-                    m for m in self.live_ids
-                    if m.split("/", 1)[0] in failed_pids
-                }
+                retained = {m for m in self.live_ids if m.split("/", 1)[0] in failed_pids}
                 merged_lower = {m.lower() for m in merged}
                 for m in retained:
                     if m.lower() not in merged_lower:
@@ -1118,8 +1088,8 @@ class ModelRegistry:
 
         force_rank = recompute_rankings
         if force_rank is None:
-            force_rank = (not self.rankings_sticky) or (not self.ladder.frozen) or (
-                not self.ladder._ladders
+            force_rank = (
+                (not self.rankings_sticky) or (not self.ladder.frozen) or (not self.ladder._ladders)
             )
         if force_rank or self.disabled_models:
             self.recompute_rankings(persist=True)
@@ -1138,9 +1108,7 @@ class ModelRegistry:
                     break
                 try:
                     client, _pid, upstream_mid = hub.client_for_model(mid)
-                    results = await probe_models(
-                        client, [upstream_mid], self.probe_budget
-                    )
+                    results = await probe_models(client, [upstream_mid], self.probe_budget)
                     st = results.get(upstream_mid)
                     if st in {"ok", "rate_limited"}:
                         self.probed_ok.add(mid)

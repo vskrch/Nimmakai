@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -94,10 +95,8 @@ def save_snapshot(path: Path, data: dict[str, Any]) -> None:
     except Exception:
         logger.exception("failed to save catalog snapshot %s", path)
         if tmp.exists():
-            try:
+            with contextlib.suppress(Exception):
                 tmp.unlink()
-            except Exception:
-                pass
 
 
 def load_snapshot(path: Path) -> dict[str, Any] | None:

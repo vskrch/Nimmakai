@@ -188,9 +188,7 @@ class RequestLogStore:
             self._file_enabled = bool(enabled)
             if self._db is not None:
                 try:
-                    self._db.set_meta(
-                        META_KEY_ENABLED, "true" if self._file_enabled else "false"
-                    )
+                    self._db.set_meta(META_KEY_ENABLED, "true" if self._file_enabled else "false")
                 except Exception:
                     logger.exception("failed to persist request logging flag")
 
@@ -246,8 +244,7 @@ class RequestLogStore:
                 if path_prefix and not item.path.startswith(path_prefix):
                     continue
                 if errors_only and not (
-                    item.error
-                    or (item.status is not None and item.status >= 400)
+                    item.error or (item.status is not None and item.status >= 400)
                 ):
                     continue
                 out.append(item.to_dict())
@@ -338,9 +335,7 @@ class RequestLogStore:
                 if p.name in {"request_logs.txt", "requests.log"}:
                     with suppress(OSError):
                         # Keep if still recent by mtime
-                        mtime = datetime.fromtimestamp(
-                            p.stat().st_mtime, tz=UTC
-                        ).date()
+                        mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=UTC).date()
                         if mtime < cutoff:
                             p.unlink(missing_ok=True)
                             deleted += 1
@@ -373,8 +368,7 @@ def setup_logging(level: str = "info") -> None:
     log_level = getattr(logging, level.upper(), logging.INFO)
     root.setLevel(log_level)
     if not any(
-        isinstance(h, logging.StreamHandler) and getattr(h, "_potato", False)
-        for h in root.handlers
+        isinstance(h, logging.StreamHandler) and getattr(h, "_potato", False) for h in root.handlers
     ):
         handler = logging.StreamHandler(sys.stdout)
         handler.setLevel(log_level)

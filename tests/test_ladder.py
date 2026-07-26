@@ -115,10 +115,17 @@ def test_quality_tiers_benchmark_based() -> None:
     """Verify quality from ModelScoreCache produces expected rankings."""
     live = {"qwen/qwen3.5-397b-a17b", "qwen/qwen3.5-122b-a10b"}
     # Install score cache with AA intelligence data (internet-primary)
-    _install_score_cache(live, {
-        "qwen3.5-397b-a17b": IntelBundle(model_slug="qwen3.5-397b-a17b", aa_intelligence_idx=95.0),
-        "qwen3.5-122b-a10b": IntelBundle(model_slug="qwen3.5-122b-a10b", aa_intelligence_idx=88.0),
-    })
+    _install_score_cache(
+        live,
+        {
+            "qwen3.5-397b-a17b": IntelBundle(
+                model_slug="qwen3.5-397b-a17b", aa_intelligence_idx=95.0
+            ),
+            "qwen3.5-122b-a10b": IntelBundle(
+                model_slug="qwen3.5-122b-a10b", aa_intelligence_idx=88.0
+            ),
+        },
+    )
     try:
         svc = LadderService()
         svc.rebuild(live)
@@ -149,9 +156,7 @@ def test_ucb_bonus_decreases_with_samples() -> None:
 
     # Record several requests for model-a
     for _ in range(10):
-        learning.record(
-            intent="coding_agentic", model_id="model-a", success=True
-        )
+        learning.record(intent="coding_agentic", model_id="model-a", success=True)
     ucb_a_warm = svc._ucb_bonus("model-a", "coding_agentic")
     ucb_b_warm = svc._ucb_bonus("model-b", "coding_agentic")
 
@@ -185,12 +190,23 @@ def test_coding_ladder_mimo_priority(monkeypatch) -> None:
         "kimi/kimi-k2.6",
     }
     # Install score cache: mimo gets highest quality + tools confirmed (coding affinity boost)
-    _install_score_cache(live, {
-        "mimo-v2.5": IntelBundle(model_slug="mimo-v2.5", aa_intelligence_idx=99.0, supports_tools=True),
-        "deepseek-v4-pro": IntelBundle(model_slug="deepseek-v4-pro", aa_intelligence_idx=98.0, supports_tools=True),
-        "qwen3.5-397b": IntelBundle(model_slug="qwen3.5-397b", aa_intelligence_idx=90.0, supports_tools=False),
-        "kimi-k2.6": IntelBundle(model_slug="kimi-k2.6", aa_intelligence_idx=90.0, supports_tools=False),
-    })
+    _install_score_cache(
+        live,
+        {
+            "mimo-v2.5": IntelBundle(
+                model_slug="mimo-v2.5", aa_intelligence_idx=99.0, supports_tools=True
+            ),
+            "deepseek-v4-pro": IntelBundle(
+                model_slug="deepseek-v4-pro", aa_intelligence_idx=98.0, supports_tools=True
+            ),
+            "qwen3.5-397b": IntelBundle(
+                model_slug="qwen3.5-397b", aa_intelligence_idx=90.0, supports_tools=False
+            ),
+            "kimi-k2.6": IntelBundle(
+                model_slug="kimi-k2.6", aa_intelligence_idx=90.0, supports_tools=False
+            ),
+        },
+    )
     try:
         svc = LadderService()
         svc.rebuild(live)

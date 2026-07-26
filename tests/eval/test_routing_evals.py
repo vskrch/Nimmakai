@@ -45,8 +45,7 @@ def test_eval_cursor_agent_routes_coding_to_qwen_head(monkeypatch) -> None:
                 {
                     "role": "system",
                     "content": (
-                        "You are a powerful agentic AI coding assistant. "
-                        "Cursor tools follow."
+                        "You are a powerful agentic AI coding assistant. Cursor tools follow."
                     ),
                 },
                 {"role": "user", "content": "refactor the auth module"},
@@ -121,9 +120,7 @@ def test_eval_openai_alias_gpt4o_maps_to_coding_ladder(monkeypatch) -> None:
     monkeypatch.setattr("random.betavariate", lambda a, b: 0.5)
     reg = _registry()
     sel = ModelSelector(reg, Settings(nim_api_keys=["k"]))
-    intent = IntentResult(
-        intent=Intent.CODING_AGENTIC, confidence=0.9, rule_id="alias"
-    )
+    intent = IntentResult(intent=Intent.CODING_AGENTIC, confidence=0.9, rule_id="alias")
     d = sel.resolve("gpt-4o", intent)
     assert d.mode == "alias"
     top2 = d.chain[:2]
@@ -133,8 +130,6 @@ def test_eval_openai_alias_gpt4o_maps_to_coding_ladder(monkeypatch) -> None:
 def test_eval_explicit_nim_id_passthrough() -> None:
     reg = _registry()
     sel = ModelSelector(reg, Settings(nim_api_keys=["k"], enable_fallback_on_explicit=True))
-    intent = IntentResult(
-        intent=Intent.CHAT_FAST, confidence=1.0, rule_id="passthrough"
-    )
+    intent = IntentResult(intent=Intent.CHAT_FAST, confidence=1.0, rule_id="passthrough")
     d = sel.resolve("nvidia/nemotron-3-super-120b-a12b", intent)
     assert d.chain[0] == "nvidia/nemotron-3-super-120b-a12b"

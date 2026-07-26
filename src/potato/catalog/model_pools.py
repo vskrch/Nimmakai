@@ -89,10 +89,7 @@ class ModelPoolStore:
             return False
 
         # 3. Check explicit excluded intents (black list)
-        if cfg.excluded_intents and intent in cfg.excluded_intents:
-            return False
-
-        return True
+        return not (cfg.excluded_intents and intent in cfg.excluded_intents)
 
     def set_config(
         self,

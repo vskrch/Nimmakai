@@ -17,7 +17,7 @@ from potato.accounts.store import (
     STATUS_SUSPENDED,
     AccountStore,
 )
-from potato.auth import require_admin, require_proxy_auth, resolve_auth
+from potato.auth import require_admin, resolve_auth
 from potato.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -131,7 +131,7 @@ async def signup(request: Request) -> JSONResponse:
 @router.get("/auth/verify")
 async def verify_email(request: Request, token: str = "") -> Response:
     store = _store(request)
-    settings = _settings(request)
+    _settings(request)
     if store is None or not token:
         return JSONResponse(
             {"error": {"message": "Invalid token", "code": "invalid_token"}},
@@ -228,9 +228,7 @@ async def login(request: Request) -> JSONResponse:
         ip=request.client.host if request.client else None,
     )
     keys = store.list_keys_for_user(user["id"])
-    active_prefix = next(
-        (k["key_prefix"] for k in keys if k.get("revoked_at") is None), None
-    )
+    active_prefix = next((k["key_prefix"] for k in keys if k.get("revoked_at") is None), None)
     resp = JSONResponse(
         {
             "ok": True,
@@ -289,7 +287,9 @@ async def me(request: Request) -> JSONResponse:
     return JSONResponse(
         {
             "authenticated": True,
-            "user": store.public_user(user) if store and user else {
+            "user": store.public_user(user)
+            if store and user
+            else {
                 "id": ctx.user_id,
                 "email": ctx.email,
                 "role": ctx.role,
@@ -317,9 +317,7 @@ async def rotate_key(request: Request) -> JSONResponse:
     store = _store(request)
     settings = _settings(request)
     if store is None:
-        return JSONResponse(
-            {"error": {"message": "Accounts not initialized"}}, status_code=503
-        )
+        return JSONResponse({"error": {"message": "Accounts not initialized"}}, status_code=503)
     ctx = resolve_auth(request, settings)
     if not ctx.user_id or ctx.status != STATUS_ACTIVE:
         return JSONResponse(
@@ -358,9 +356,7 @@ async def admin_approve_user(user_id: str, request: Request) -> JSONResponse:
     settings = _settings(request)
     admin = require_admin(request, settings)
     if store is None:
-        return JSONResponse(
-            {"error": {"message": "Accounts not initialized"}}, status_code=503
-        )
+        return JSONResponse({"error": {"message": "Accounts not initialized"}}, status_code=503)
     result = store.approve_and_issue_key(
         user_id,
         approved_by=admin.email or admin.user_id or "admin",
@@ -427,14 +423,10 @@ async def admin_reject_user(user_id: str, request: Request) -> JSONResponse:
     settings = _settings(request)
     require_admin(request, settings)
     if store is None:
-        return JSONResponse(
-            {"error": {"message": "Accounts not initialized"}}, status_code=503
-        )
+        return JSONResponse({"error": {"message": "Accounts not initialized"}}, status_code=503)
     user = store.set_status(user_id, STATUS_REJECTED)
     if not user:
-        return JSONResponse(
-            {"error": {"message": "Not found"}}, status_code=404
-        )
+        return JSONResponse({"error": {"message": "Not found"}}, status_code=404)
     store.delete_sessions_for_user(user_id)
     return JSONResponse({"ok": True, "user": store.public_user(user)})
 
@@ -445,13 +437,9 @@ async def admin_suspend_user(user_id: str, request: Request) -> JSONResponse:
     settings = _settings(request)
     require_admin(request, settings)
     if store is None:
-        return JSONResponse(
-            {"error": {"message": "Accounts not initialized"}}, status_code=503
-        )
+        return JSONResponse({"error": {"message": "Accounts not initialized"}}, status_code=503)
     user = store.set_status(user_id, STATUS_SUSPENDED)
     if not user:
-        return JSONResponse(
-            {"error": {"message": "Not found"}}, status_code=404
-        )
+        return JSONResponse({"error": {"message": "Not found"}}, status_code=404)
     store.delete_sessions_for_user(user_id)
     return JSONResponse({"ok": True, "user": store.public_user(user)})

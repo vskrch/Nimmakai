@@ -136,8 +136,7 @@ def resolve_auth(request: Request, settings: Settings) -> AuthContext:
             detail={
                 "error": {
                     "message": (
-                        "Missing API key or session. Sign in or set "
-                        "Authorization: Bearer <key>."
+                        "Missing API key or session. Sign in or set Authorization: Bearer <key>."
                     ),
                     "type": "invalid_request_error",
                     "code": "missing_api_key",

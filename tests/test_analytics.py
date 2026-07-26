@@ -354,9 +354,7 @@ async def test_analytics_requires_auth():
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         r = await client.get("/analytics/summary")
         assert r.status_code == 401
-        r = await client.get(
-            "/analytics/summary", headers={"Authorization": "Bearer secret"}
-        )
+        r = await client.get("/analytics/summary", headers={"Authorization": "Bearer secret"})
         assert r.status_code == 200
 
 
@@ -468,13 +466,11 @@ def test_timeseries_zero_fills_gaps():
     now = time.time()
     # One request ~30 minutes ago — 1h window @ 5m should fill ~12 buckets
     writer._write_batch([_make_trace("sparse", created_at=now - 1800)])
-    points = store.timeseries(
-        "requests", since=now - 3600, until=now, interval="5m"
-    )
+    points = store.timeseries("requests", since=now - 3600, until=now, interval="5m")
     assert len(points) >= 10
     assert sum(1 for p in points if int(p.get("requests") or 0) > 0) == 1
     assert all("ts" in p for p in points)
     # Buckets are contiguous
     step = 300
-    for a, b in zip(points, points[1:]):
+    for a, b in zip(points, points[1:], strict=False):
         assert int(b["ts"]) - int(a["ts"]) == step

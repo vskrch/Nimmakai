@@ -72,9 +72,7 @@ async def heal_and_refresh(
 
     if need_refresh and registry is not None and hub is not None:
         try:
-            ok = await registry.refresh_from_hub(
-                hub, fetch_docs=False, run_probes=False
-            )
+            ok = await registry.refresh_from_hub(hub, fetch_docs=False, run_probes=False)
             report["refreshed"] = bool(ok)
             report["live_models"] = len(registry.live_ids)
             logger.info(

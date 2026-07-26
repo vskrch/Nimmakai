@@ -168,9 +168,7 @@ class LadderService:
         variants = ["default", "cheap", "fast"]
         for intent in targets:
             for variant in variants:
-                self._ladders[(intent, variant)] = self._build_ladder(
-                    intent, variant=variant
-                )
+                self._ladders[(intent, variant)] = self._build_ladder(intent, variant=variant)
         self.computed_at = _time.time()
         self.frozen = freeze
         logger.info(
@@ -178,11 +176,7 @@ class LadderService:
             freeze,
             len(targets),
             len(live_ids),
-            {
-                k[0]: v.ladder[:3]
-                for k, v in self._ladders.items()
-                if k[1] == "default"
-            },
+            {k[0]: v.ladder[:3] for k, v in self._ladders.items() if k[1] == "default"},
         )
 
     def freeze(self) -> None:
@@ -216,7 +210,9 @@ class LadderService:
                 ).ladder[:12]
             ),
             "best_chat": list(
-                (self._ladders.get(("chat_fast", "default")) or LadderSnapshot("", [], {}, 0)).ladder[:8]
+                (
+                    self._ladders.get(("chat_fast", "default")) or LadderSnapshot("", [], {}, 0)
+                ).ladder[:8]
             ),
         }
 
@@ -310,9 +306,7 @@ class LadderService:
     # Core scoring
     # ------------------------------------------------------------------
 
-    def score_model(
-        self, model_id: str, intent: str, *, variant: str = "default"
-    ) -> ScoredModel:
+    def score_model(self, model_id: str, intent: str, *, variant: str = "default") -> ScoredModel:
         """Multi-criteria composite score for a model on a given intent and variant."""
         bare = scoring_model_id(model_id, self.provider_ids)
         mid = bare.lower()
@@ -385,14 +379,7 @@ class LadderService:
         # ── Composite multiplicative score ───────────────────────
         # NMK-L505: coding_elite_boost removed — absorbed into affinity
         # from score_cache's capability_affinity_deltas.
-        composite = (
-            quality
-            * affinity
-            * capability
-            * health_s
-            * variant_mult
-            * provider_prior
-        )
+        composite = quality * affinity * capability * health_s * variant_mult * provider_prior
 
         # ── 6. UCB1 exploration bonus (additive) ─────────────────
         ucb = self._ucb_bonus(model_id, intent)
@@ -454,9 +441,7 @@ class LadderService:
                 return ms.intent_affinity.get(intent, self._default_affinity)
         return self._default_affinity
 
-    def _capability_score(
-        self, model_id: str, mid_lower: str, intent: str
-    ) -> float:
+    def _capability_score(self, model_id: str, mid_lower: str, intent: str) -> float:
         """Capability gate from ModelScoreCache modalities; probe-based fallback."""
         cache = ModelScoreCache.current()
         ms = cache.scores.get(model_id) if cache else None
@@ -517,16 +502,11 @@ class LadderService:
             rec["max_tokens_limit"] = caps["max_output_tokens"]
         elif any(k in mid for k in ("gpt-4o", "gpt-4.1")):
             rec["max_tokens_limit"] = 16384
-        elif any(k in mid for k in ("claude",)):
-            rec["max_tokens_limit"] = 8192
-        elif any(k in mid for k in ("deepseek",)):
+        elif any(k in mid for k in ("claude",)) or any(k in mid for k in ("deepseek",)):
             rec["max_tokens_limit"] = 8192
         # Structured outputs support
-        if caps.get("supports_structured_outputs") is True:
-            rec["supports_structured_outputs"] = True
-        elif any(
-            k in mid
-            for k in ("gpt-4o", "gpt-4.1", "gpt-4o-mini", "claude", "gemini")
+        if caps.get("supports_structured_outputs") is True or any(
+            k in mid for k in ("gpt-4o", "gpt-4.1", "gpt-4o-mini", "claude", "gemini")
         ):
             rec["supports_structured_outputs"] = True
         return rec
@@ -566,9 +546,7 @@ class LadderService:
         from potato.catalog.presets import speed_prior_for_provider
         from potato.catalog.providers import split_provider_model
 
-        pid, _ = split_provider_model(
-            model_id, self.provider_ids, default_provider="nim"
-        )
+        pid, _ = split_provider_model(model_id, self.provider_ids, default_provider="nim")
         return speed_prior_for_provider(pid)
 
     def _ucb_bonus(self, model_id: str, intent: str) -> float:
@@ -611,9 +589,7 @@ class LadderService:
         blended = weight * sample + (1.0 - weight) * mean
         return (blended - 0.5) * self._thompson_scale
 
-    def _doc_keyword_bonus(
-        self, model_id: str, mid_lower: str, intent: str
-    ) -> float:
+    def _doc_keyword_bonus(self, model_id: str, mid_lower: str, intent: str) -> float:
         """Superseded by Thompson-posterior-based intent affinity (NMK-L503)."""
         return 0.0
 
