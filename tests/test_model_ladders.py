@@ -100,7 +100,7 @@ def test_potato_coding_custom_ladder_routing(tmp_path) -> None:
     from potato.routing.intents import Intent, IntentResult
     from potato.routing.selector import ModelSelector
 
-    cat = catalog_from_dict({"version": "1", "updated": "2026-01-01", "models": []})
+    cat = catalog_from_dict({"version": "1", "updated": "2026-01-01", "models": {}})
     reg = ModelRegistry(catalog=cat, health=ModelHealthStore())
     reg.live_ids = {"groq/llama-3.3-70b", "nim/qwen3.5"}
     s = _store(tmp_path)

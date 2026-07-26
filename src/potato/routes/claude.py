@@ -31,10 +31,19 @@ def _extract_text_content(content: Any) -> str:
         parts = []
         for block in content:
             if isinstance(block, dict):
-                if block.get("type") == "text":
+                btype = block.get("type")
+                if btype == "text":
                     parts.append(block.get("text", ""))
                 elif "text" in block:
                     parts.append(str(block["text"]))
+                elif btype == "tool_use":
+                    name = block.get("name", "tool")
+                    inp = json.dumps(block.get("input", {}))
+                    parts.append(f"[Tool Call: {name}({inp})]")
+                elif btype == "tool_result":
+                    tool_id = block.get("tool_use_id", "")
+                    sub_content = _extract_text_content(block.get("content"))
+                    parts.append(f"[Tool Result {tool_id}: {sub_content}]")
             elif isinstance(block, str):
                 parts.append(block)
         return "\n".join(parts)
@@ -43,9 +52,8 @@ def _extract_text_content(content: Any) -> str:
 
 def is_anthropic_request(body: dict[str, Any], path: str) -> bool:
     """Return True if request matches Anthropic Messages API format or endpoint."""
-    if "messages" in path or "system" in body:
+    if "messages" in path or "system" in body or "anthropic-version" in str(body):
         return True
-    # Check if messages contain Anthropic content array format
     msgs = body.get("messages", [])
     if isinstance(msgs, list) and msgs:
         first = msgs[0]
@@ -73,6 +81,21 @@ def transform_anthropic_to_openai(body: dict[str, Any]) -> dict[str, Any]:
     else:
         openai_body["model"] = raw_model
 
+    # Transform Anthropic tools format to OpenAI tools format
+    if "tools" in body and isinstance(body["tools"], list):
+        openai_tools = []
+        for tool in body["tools"]:
+            if isinstance(tool, dict):
+                openai_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool.get("name"),
+                        "description": tool.get("description", ""),
+                        "parameters": tool.get("input_schema", {"type": "object", "properties": {}}),
+                    }
+                })
+        openai_body["tools"] = openai_tools
+
     # Construct messages array
     openai_msgs: list[dict[str, Any]] = []
 
@@ -90,8 +113,52 @@ def transform_anthropic_to_openai(body: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(msg, dict):
                 continue
             role = msg.get("role", "user")
-            content = _extract_text_content(msg.get("content"))
-            openai_msgs.append({"role": role, "content": content})
+            content_raw = msg.get("content")
+
+            if isinstance(content_raw, str):
+                openai_msgs.append({"role": role, "content": content_raw})
+            elif isinstance(content_raw, list):
+                text_parts = []
+                tool_calls = []
+                tool_results = []
+
+                for block in content_raw:
+                    if not isinstance(block, dict):
+                        continue
+                    btype = block.get("type")
+                    if btype == "text":
+                        text_parts.append(block.get("text", ""))
+                    elif btype == "tool_use":
+                        tool_calls.append({
+                            "id": block.get("id", f"toolu_{uuid.uuid4().hex[:12]}"),
+                            "type": "function",
+                            "function": {
+                                "name": block.get("name"),
+                                "arguments": json.dumps(block.get("input", {})),
+                            },
+                        })
+                    elif btype == "tool_result":
+                        res_text = _extract_text_content(block.get("content"))
+                        tool_results.append({
+                            "role": "tool",
+                            "tool_call_id": block.get("tool_use_id", ""),
+                            "content": res_text,
+                        })
+
+                if role == "assistant":
+                    asst_msg: dict[str, Any] = {"role": "assistant"}
+                    if text_parts:
+                        asst_msg["content"] = "\n".join(text_parts)
+                    if tool_calls:
+                        asst_msg["tool_calls"] = tool_calls
+                    openai_msgs.append(asst_msg)
+                else:  # user role
+                    if text_parts:
+                        openai_msgs.append({"role": "user", "content": "\n".join(text_parts)})
+                    for tr in tool_results:
+                        openai_msgs.append(tr)
+            else:
+                openai_msgs.append({"role": role, "content": str(content_raw or "")})
 
     openai_body["messages"] = openai_msgs
     return openai_body
@@ -105,17 +172,44 @@ def transform_openai_to_anthropic_json(
     choices = openai_resp.get("choices", [])
     text_content = ""
     stop_reason = "end_turn"
+    content_blocks: list[dict[str, Any]] = []
 
     if choices and isinstance(choices, list):
         first = choices[0]
         if isinstance(first, dict):
             msg_obj = first.get("message", {})
             text_content = msg_obj.get("content", "") or ""
+            if text_content:
+                content_blocks.append({"type": "text", "text": text_content})
+
+            tool_calls = msg_obj.get("tool_calls", [])
+            if tool_calls and isinstance(tool_calls, list):
+                for tc in tool_calls:
+                    if isinstance(tc, dict):
+                        fn = tc.get("function", {})
+                        args_raw = fn.get("arguments", "{}")
+                        try:
+                            parsed_args = json.loads(args_raw) if isinstance(args_raw, str) else args_raw
+                        except Exception:
+                            parsed_args = {}
+                        content_blocks.append({
+                            "type": "tool_use",
+                            "id": tc.get("id", f"toolu_{uuid.uuid4().hex[:12]}"),
+                            "name": fn.get("name", "tool"),
+                            "input": parsed_args,
+                        })
+
+                if content_blocks:
+                    stop_reason = "tool_use"
+
             reason = first.get("finish_reason")
             if reason == "length":
                 stop_reason = "max_tokens"
-            elif reason == "stop":
+            elif reason == "stop" and not tool_calls:
                 stop_reason = "end_turn"
+
+    if not content_blocks:
+        content_blocks.append({"type": "text", "text": text_content})
 
     usage = openai_resp.get("usage", {})
     prompt_tokens = usage.get("prompt_tokens", 0)
@@ -128,12 +222,7 @@ def transform_openai_to_anthropic_json(
         "type": "message",
         "role": "assistant",
         "model": model_name,
-        "content": [
-            {
-                "type": "text",
-                "text": text_content,
-            }
-        ],
+        "content": content_blocks,
         "stop_reason": stop_reason,
         "stop_sequence": None,
         "usage": {
@@ -166,16 +255,12 @@ async def transform_openai_to_anthropic_sse_stream(
     }
     yield f"event: message_start\ndata: {json.dumps(msg_start_event)}\n\n".encode()
 
-    # Emit content_block_start
-    block_start_event = {
-        "type": "content_block_start",
-        "index": 0,
-        "content_block": {"type": "text", "text": ""},
-    }
-    yield f"event: content_block_start\ndata: {json.dumps(block_start_event)}\n\n".encode()
-
+    text_block_started = False
+    active_tool_calls: dict[int, dict[str, Any]] = {}
+    next_block_index = 0
     out_tokens = 0
     buffer = ""
+    has_tool_calls = False
 
     async for chunk in openai_stream.body_iterator:
         if isinstance(chunk, bytes):
@@ -201,29 +286,84 @@ async def transform_openai_to_anthropic_sse_stream(
                         delta = choices[0].get("delta", {})
                         content_piece = delta.get("content")
                         if content_piece:
+                            if not text_block_started:
+                                block_start = {
+                                    "type": "content_block_start",
+                                    "index": next_block_index,
+                                    "content_block": {"type": "text", "text": ""},
+                                }
+                                yield f"event: content_block_start\ndata: {json.dumps(block_start)}\n\n".encode()
+                                text_block_started = True
+                                next_block_index += 1
+
                             out_tokens += 1
                             delta_event = {
                                 "type": "content_block_delta",
-                                "index": 0,
+                                "index": 0 if text_block_started else next_block_index - 1,
                                 "delta": {"type": "text_delta", "text": content_piece},
                             }
                             yield f"event: content_block_delta\ndata: {json.dumps(delta_event)}\n\n".encode()
+
+                        # Tool calls streaming support
+                        tc_deltas = delta.get("tool_calls")
+                        if tc_deltas and isinstance(tc_deltas, list):
+                            for tc in tc_deltas:
+                                idx = tc.get("index", 0)
+                                fn = tc.get("function", {})
+                                if idx not in active_tool_calls:
+                                    t_id = tc.get("id") or f"toolu_{uuid.uuid4().hex[:12]}"
+                                    t_name = fn.get("name", "tool")
+                                    block_idx = next_block_index
+                                    next_block_index += 1
+                                    active_tool_calls[idx] = {
+                                        "block_index": block_idx,
+                                        "id": t_id,
+                                        "name": t_name,
+                                    }
+                                    has_tool_calls = True
+                                    tool_start = {
+                                        "type": "content_block_start",
+                                        "index": block_idx,
+                                        "content_block": {
+                                            "type": "tool_use",
+                                            "id": t_id,
+                                            "name": t_name,
+                                            "input": {},
+                                        },
+                                    }
+                                    yield f"event: content_block_start\ndata: {json.dumps(tool_start)}\n\n".encode()
+
+                                args_delta = fn.get("arguments")
+                                if args_delta:
+                                    tool_info = active_tool_calls[idx]
+                                    out_tokens += 1
+                                    json_delta = {
+                                        "type": "content_block_delta",
+                                        "index": tool_info["block_index"],
+                                        "delta": {
+                                            "type": "input_json_delta",
+                                            "partial_json": args_delta,
+                                        },
+                                    }
+                                    yield f"event: content_block_delta\ndata: {json.dumps(json_delta)}\n\n".encode()
                 except Exception:
                     pass
 
-    # Emit content_block_stop
-    block_stop_event = {"type": "content_block_stop", "index": 0}
-    yield f"event: content_block_stop\ndata: {json.dumps(block_stop_event)}\n\n".encode()
+    # Stop all open content blocks
+    if text_block_started:
+        yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': 0})}\n\n".encode()
 
-    # Emit message_delta
+    for tc_info in active_tool_calls.values():
+        yield f"event: content_block_stop\ndata: {json.dumps({'type': 'content_block_stop', 'index': tc_info['block_index']})}\n\n".encode()
+
+    stop_reason = "tool_use" if has_tool_calls else "end_turn"
     msg_delta_event = {
         "type": "message_delta",
-        "delta": {"stop_reason": "end_turn", "stop_sequence": None},
+        "delta": {"stop_reason": stop_reason, "stop_sequence": None},
         "usage": {"output_tokens": max(1, out_tokens)},
     }
     yield f"event: message_delta\ndata: {json.dumps(msg_delta_event)}\n\n".encode()
 
-    # Emit message_stop
     msg_stop_event = {"type": "message_stop"}
     yield f"event: message_stop\ndata: {json.dumps(msg_stop_event)}\n\n".encode()
 
@@ -273,6 +413,20 @@ async def _handle_claude_or_chat(request: Request) -> JSONResponse | StreamingRe
         try:
             resp_bytes = resp.body
             resp_json = json.loads(resp_bytes.decode("utf-8"))
+            if resp.status_code >= 400:
+                err_obj = resp_json.get("error", {}) if isinstance(resp_json, dict) else {}
+                err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(resp_json)
+                err_type = "invalid_request_error" if resp.status_code < 500 else "api_error"
+                return JSONResponse(
+                    content={
+                        "type": "error",
+                        "error": {
+                            "type": err_type,
+                            "message": err_msg or "API Request Failed"
+                        }
+                    },
+                    status_code=resp.status_code
+                )
             anthropic_json = transform_openai_to_anthropic_json(resp_json, requested_model)
             return JSONResponse(content=anthropic_json, status_code=resp.status_code)
         except Exception as exc:

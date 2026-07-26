@@ -250,7 +250,12 @@ if [[ -f .env ]]; then
         ENABLE_CLOUDFLARE_TUNNEL=$(grep -E "^ENABLE_CLOUDFLARE_TUNNEL=" .env | cut -d'=' -f2- || echo "false")
     fi
     if [[ -z "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
-        CLOUDFLARE_TUNNEL_TOKEN=$(grep -E "^CLOUDFLARE_TUNNEL_TOKEN=" .env | cut -d'=' -f2- || true)
+        CLOUDFLARE_TUNNEL_TOKEN=$(grep -E "^[\"\']?CLOUDFLARE_TUNNEL_TOKEN[\"\']?=" .env 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'" | tr -d '\r' | tr -d '\n' | tr -d ' ' | grep -v '^$' | tail -n1 || true)
+    fi
+    # Sanitize token: remove quotes, newlines, and trailing spaces
+    CLOUDFLARE_TUNNEL_TOKEN=$(echo "${CLOUDFLARE_TUNNEL_TOKEN}" | tr -d '"' | tr -d "'" | tr -d '\r' | tr -d '\n' | tr -d ' ')
+    if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
+        ENABLE_CLOUDFLARE_TUNNEL="true"
     fi
     # Preserve every provider env var present in the old .env.
     for var in "${_PROVIDER_ENV_VARS[@]}"; do
@@ -549,6 +554,9 @@ WantedBy=multi-user.target
 EOF
             systemctl daemon-reload >/dev/null 2>&1 || true
             systemctl enable --now cloudflared-potato >/dev/null 2>&1 || true
+        else
+            pkill -f "cloudflared tunnel" || true
+            nohup "${CLOUDFLARED_BIN}" tunnel --protocol http2 run --token "${CLOUDFLARE_TUNNEL_TOKEN}" >/tmp/cloudflared.log 2>&1 &
         fi
     else
         log "Provisioning Cloudflare Quick Tunnel (http2 fallback, auto-reconnect)..."
@@ -575,6 +583,21 @@ EOF
             pkill -f "cloudflared tunnel" || true
             nohup "${CLOUDFLARED_BIN}" tunnel --protocol http2 --metrics 127.0.0.1:45678 --url http://127.0.0.1:8080 >/tmp/cloudflared.log 2>&1 &
         fi
+    fi
+
+    if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
+        if [[ -n "${DOMAIN_NAME}" ]]; then
+            PUBLIC_URL="https://${DOMAIN_NAME}"
+        fi
+        ok "Cloudflare Token Tunnel active service configured."
+        if [[ -f .env ]]; then
+            sed -i.bak '/^PUBLIC_BASE_URL=/d' .env 2>/dev/null || true
+            sed -i.bak '/^SESSION_SECURE_COOKIE=/d' .env 2>/dev/null || true
+            echo "PUBLIC_BASE_URL=${PUBLIC_URL}" >> .env
+            echo "SESSION_SECURE_COOKIE=true" >> .env
+            rm -f .env.bak 2>/dev/null || true
+        fi
+        return
     fi
 
     log "Extracting active Cloudflare HTTPS Tunnel endpoint..."

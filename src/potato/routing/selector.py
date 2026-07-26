@@ -6,6 +6,7 @@ trigger prompt-aware selection with optional session model pin + plugins.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -21,6 +22,8 @@ from potato.routing.auto_router import (
     tier_to_variant,
 )
 from potato.routing.intents import Intent, IntentResult
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from potato.catalog.registry import ModelRegistry
@@ -177,6 +180,15 @@ class ModelSelector:
                         variant=variant,
                         allowed_models=list(opts.allowed_models),
                     )
+                # ponytail: ladder existed but _finalize_chain emptied it
+                # (chain models not live, admin-disabled, or pool-gated out).
+                # Log so this is diagnosable instead of a silent auto fallthrough.
+                logger.warning(
+                    "custom_ladder %s chain emptied by finalize (live/disabled/pool) — "
+                    "falling through to auto for %s",
+                    lad.model_id,
+                    target_id,
+                )
 
         # User preferences first
         if self.preferences is not None and self.preferences.has_preference(intent_key):
