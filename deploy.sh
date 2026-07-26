@@ -51,6 +51,25 @@ if [[ "$OS" == "Darwin" ]]; then
     fi
 fi
 
+# CLI Argument Parsing
+ENABLE_CLOUDFLARE_TUNNEL="${ENABLE_CLOUDFLARE_TUNNEL:-false}"
+CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-}"
+
+for arg in "$@"; do
+    case $arg in
+        --tunnel|-t)
+            ENABLE_CLOUDFLARE_TUNNEL="true"
+            ;;
+        --token=*)
+            CLOUDFLARE_TUNNEL_TOKEN="${arg#*=}"
+            ENABLE_CLOUDFLARE_TUNNEL="true"
+            ;;
+        --domain=*)
+            DOMAIN_NAME="${arg#*=}"
+            ;;
+    esac
+done
+
 DOMAIN_NAME="${DOMAIN_NAME:-}"
 PROXY_KEY="${PROXY_API_KEYS:-}"
 ADMIN_PASS="${ADMIN_PASSWORD:-}"
@@ -188,6 +207,12 @@ if [[ -f .env ]]; then
     if [[ -z "${NIM_KEY}" ]]; then
         NIM_KEY=$(grep -E "^NIM_API_KEYS=" .env | cut -d'=' -f2- || true)
     fi
+    if [[ "${ENABLE_CLOUDFLARE_TUNNEL}" == "false" ]]; then
+        ENABLE_CLOUDFLARE_TUNNEL=$(grep -E "^ENABLE_CLOUDFLARE_TUNNEL=" .env | cut -d'=' -f2- || echo "false")
+    fi
+    if [[ -z "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
+        CLOUDFLARE_TUNNEL_TOKEN=$(grep -E "^CLOUDFLARE_TUNNEL_TOKEN=" .env | cut -d'=' -f2- || true)
+    fi
     # Preserve every provider env var present in the old .env.
     for var in "${_PROVIDER_ENV_VARS[@]}"; do
         val=$(grep -E "^${var}=" .env | cut -d'=' -f2- || true)
@@ -215,6 +240,8 @@ log "Writing production configuration (.env)..."
     echo "ROUTING_ENABLED=true"
     echo "ADMIN_PASSWORD=${ADMIN_PASS}"
     echo "ADMIN_EMAIL=${ADMIN_EMAIL_ADDR}"
+    echo "ENABLE_CLOUDFLARE_TUNNEL=${ENABLE_CLOUDFLARE_TUNNEL}"
+    echo "CLOUDFLARE_TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}"
     echo "NIM_API_KEYS=${NIM_KEY}"
     echo "HOST=0.0.0.0"
     echo "PORT=8080"
@@ -370,6 +397,130 @@ else
     if [[ -z "${DOMAIN_NAME}" ]]; then
         PUBLIC_URL="http://${PUBLIC_IP}:8080"
     fi
+fi
+
+# 9.5 Self-Healing Cloudflare Tunnel Setup (if enabled or --tunnel flag)
+setup_cloudflare_tunnel() {
+    log "Configuring self-healing Cloudflare Tunnel..."
+    ARCH="$(uname -m)"
+    case "${ARCH}" in
+        x86_64|amd64) CF_ARCH="amd64" ;;
+        aarch64|arm64) CF_ARCH="arm64" ;;
+        *) CF_ARCH="amd64" ;;
+    esac
+
+    if ! command -v cloudflared &>/dev/null; then
+        log "Installing cloudflared daemon..."
+        if [[ "$OS" == "Linux" ]]; then
+            if [[ "$PM" == "apt" ]]; then
+                curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}.deb" -o /tmp/cloudflared.deb >/dev/null 2>&1 || true
+                if [[ -f /tmp/cloudflared.deb ]]; then
+                    dpkg -i /tmp/cloudflared.deb >/dev/null 2>&1 || true
+                    rm -f /tmp/cloudflared.deb
+                fi
+            fi
+            if ! command -v cloudflared &>/dev/null; then
+                curl -L "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-${CF_ARCH}" -o /usr/local/bin/cloudflared >/dev/null 2>&1 || true
+                chmod +x /usr/local/bin/cloudflared || true
+            fi
+        elif [[ "$OS" == "Darwin" ]]; then
+            if command -v brew &>/dev/null; then
+                brew install cloudflared >/dev/null 2>&1 || true
+            fi
+        fi
+    fi
+
+    if ! command -v cloudflared &>/dev/null; then
+        warn "cloudflared binary installation failed. Falling back to default URL: ${PUBLIC_URL}"
+        return
+    fi
+
+    if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
+        log "Provisioning persistent Cloudflare Token Tunnel service..."
+        if command -v systemctl &>/dev/null; then
+            cat <<EOF > /etc/systemd/system/cloudflared-potato.service
+[Unit]
+Description=Potato Gateway Cloudflare Tunnel Daemon (Token)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/cloudflared tunnel --protocol http2 run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+            systemctl daemon-reload >/dev/null 2>&1 || true
+            systemctl enable --now cloudflared-potato >/dev/null 2>&1 || true
+        fi
+    else
+        log "Provisioning Cloudflare Quick Tunnel (http2 fallback, auto-reconnect)..."
+        if command -v systemctl &>/dev/null; then
+            cat <<EOF > /etc/systemd/system/cloudflared-potato.service
+[Unit]
+Description=Potato Gateway Cloudflare Quick Tunnel Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/local/bin/cloudflared tunnel --protocol http2 --metrics 127.0.0.1:45678 --url http://127.0.0.1:8080
+Restart=always
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
+EOF
+            systemctl daemon-reload >/dev/null 2>&1 || true
+            systemctl enable --now cloudflared-potato >/dev/null 2>&1 || true
+        else
+            pkill -f "cloudflared tunnel" || true
+            nohup cloudflared tunnel --protocol http2 --metrics 127.0.0.1:45678 --url http://127.0.0.1:8080 >/tmp/cloudflared.log 2>&1 &
+        fi
+    fi
+
+    log "Extracting active Cloudflare HTTPS Tunnel endpoint..."
+    TUNNEL_URL=""
+    for i in $(seq 1 15); do
+        TUNNEL_URL=$(curl -s http://127.0.0.1:45678/quicktunnel 2>/dev/null | jq -r '.hostname // empty' 2>/dev/null || true)
+        if [[ -n "${TUNNEL_URL}" ]]; then
+            TUNNEL_URL="https://${TUNNEL_URL}"
+            break
+        fi
+        if command -v journalctl &>/dev/null; then
+            TUNNEL_URL=$(journalctl -u cloudflared-potato --no-pager -n 40 2>/dev/null | grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' | tail -n1 || true)
+        fi
+        if [[ -z "${TUNNEL_URL}" && -f /tmp/cloudflared.log ]]; then
+            TUNNEL_URL=$(grep -oE 'https://[a-zA-Z0-9-]+\.trycloudflare\.com' /tmp/cloudflared.log | tail -n1 || true)
+        fi
+        if [[ -n "${TUNNEL_URL}" ]]; then
+            break
+        fi
+        sleep 1
+    done
+
+    if [[ -n "${TUNNEL_URL}" ]]; then
+        PUBLIC_URL="${TUNNEL_URL}"
+        ok "Cloudflare HTTPS Tunnel active & self-healed: ${PUBLIC_URL}"
+        if [[ -f .env ]]; then
+            sed -i.bak '/^PUBLIC_BASE_URL=/d' .env 2>/dev/null || true
+            sed -i.bak '/^SESSION_SECURE_COOKIE=/d' .env 2>/dev/null || true
+            echo "PUBLIC_BASE_URL=${PUBLIC_URL}" >> .env
+            echo "SESSION_SECURE_COOKIE=true" >> .env
+            rm -f .env.bak 2>/dev/null || true
+        fi
+    else
+        warn "Cloudflare Tunnel service launched, but dynamic URL extraction timed out."
+    fi
+}
+
+if [[ "${ENABLE_CLOUDFLARE_TUNNEL}" == "true" || -n "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
+    setup_cloudflare_tunnel
 fi
 
 # 10. Completion Summary Display
