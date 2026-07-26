@@ -200,7 +200,7 @@ def test_intent_expansion_order_primary_first() -> None:
 
     coding = intent_expansion_order("coding_agentic")
     assert coding[0] == "coding_agentic"
-    assert "chat_fast" in coding
+    assert "reasoning" in coding
     # Vision stays modality-isolated
     assert intent_expansion_order("vision") == ["vision"]
 
