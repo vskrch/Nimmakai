@@ -297,8 +297,6 @@ INTENT_EXPANSION: dict[str, tuple[str, ...]] = {
     "coding_agentic": (
         "coding_agentic",
         "reasoning",
-        "long_horizon",
-        "chat_fast",
     ),
     "reasoning": (
         "reasoning",

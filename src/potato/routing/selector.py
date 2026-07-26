@@ -153,6 +153,8 @@ class ModelSelector:
         if self.model_ladders is not None and (raw or model_field):
             target_id = raw if raw else str(model_field or "")
             lad = self.model_ladders.get(target_id)
+            if lad is None and model_field:
+                lad = self.model_ladders.get(str(model_field))
             if lad is not None and lad.chain:
                 chain = self._finalize_chain(
                     list(lad.chain),
@@ -162,17 +164,19 @@ class ModelSelector:
                     allowed=opts.allowed_models,
                     preferred_model=preferred_model if tier else None,
                     models_fallback=opts.models_fallback,
+                    is_custom_ladder=True,
                 )
-                return RouteDecision(
-                    chain=chain,
-                    mode="passthrough_with_fallback",
-                    intent=intent,
-                    rule_id=f"custom_ladder:{target_id}",
-                    requested_model=model_field,
-                    auto_tier=tier,
-                    variant=variant,
-                    allowed_models=list(opts.allowed_models),
-                )
+                if chain:
+                    return RouteDecision(
+                        chain=chain,
+                        mode="passthrough_with_fallback",
+                        intent=intent,
+                        rule_id=f"custom_ladder:{lad.model_id}",
+                        requested_model=model_field,
+                        auto_tier=tier,
+                        variant=variant,
+                        allowed_models=list(opts.allowed_models),
+                    )
 
         # User preferences first
         if self.preferences is not None and self.preferences.has_preference(intent_key):
@@ -492,6 +496,7 @@ class ModelSelector:
         allowed: list[str],
         preferred_model: str | None,
         models_fallback: list[str],
+        is_custom_ladder: bool = False,
     ) -> list[str]:
         # OpenRouter models[] as extra fallback candidates
         if models_fallback:
@@ -516,7 +521,11 @@ class ModelSelector:
 
         # Granular Model Pool & Intent Gating Filtering
         if self.model_pools and chain:
-            is_auto = bool(variant in ("auto", "default") or intent_key == "auto")
+            is_auto = (
+                False
+                if is_custom_ladder
+                else bool(variant in ("auto", "default") or intent_key == "auto")
+            )
             chain = [
                 m
                 for m in chain

@@ -89,3 +89,26 @@ def test_set_requires_model_id(tmp_path) -> None:
     s = _store(tmp_path)
     with pytest.raises(ValueError):
         s.set("", ["a"])
+
+
+def test_potato_coding_custom_ladder_routing(tmp_path) -> None:
+    """ModelSelector resolves potato/coding custom ladder without falling through to auto."""
+    from potato.catalog.health import ModelHealthStore
+    from potato.catalog.registry import ModelRegistry
+    from potato.config import Settings
+    from potato.routing.intents import Intent, IntentResult
+    from potato.routing.selector import ModelSelector
+
+    reg = ModelRegistry(health=ModelHealthStore())
+    reg.live_ids = {"groq/llama-3.3-70b", "nim/qwen3.5"}
+    s = _store(tmp_path)
+    s.set("potato/coding", ["groq/llama-3.3-70b", "nim/qwen3.5"])
+
+    sel = ModelSelector(reg, Settings(), model_ladders=s)
+    res = sel.resolve(
+        "potato/coding",
+        IntentResult(intent=Intent.CODING_AGENTIC, confidence=1.0, rule_id="tools_present"),
+    )
+    assert res.mode == "passthrough_with_fallback"
+    assert res.rule_id == "custom_ladder:potato/coding"
+    assert res.chain[0] == "groq/llama-3.3-70b"

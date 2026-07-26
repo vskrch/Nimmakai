@@ -64,10 +64,18 @@ class ModelLadderStore:
         logger.info("loaded %s custom model ladders", len(self.ladders))
 
     def get(self, model_id: str) -> ModelLadder | None:
-        return self.ladders.get(model_id)
+        if not model_id:
+            return None
+        if model_id in self.ladders:
+            return self.ladders[model_id]
+        bare = model_id.rsplit("/", 1)[-1]
+        for candidate in (bare, f"potato/{bare}", f"potato/auto-{bare}"):
+            if candidate in self.ladders:
+                return self.ladders[candidate]
+        return None
 
     def has_ladder(self, model_id: str) -> bool:
-        lad = self.ladders.get(model_id)
+        lad = self.get(model_id)
         return lad is not None and len(lad.chain) > 0
 
     def set(
