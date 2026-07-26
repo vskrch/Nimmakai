@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -375,7 +376,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 rl_engine=rl_engine,
                 model_pools=model_pools,
             )
-            fallback = FallbackExecutor(upstream, registry, settings, stats=routing_stats, hub=hub)
+            fallback = FallbackExecutor(
+                upstream, registry, settings, stats=routing_stats, hub=hub, rl_engine=rl_engine
+            )
 
             # NMK-G805: bind IntelFetcher + load YAML scoring weights
             from potato.catalog.intel_fetcher import IntelFetcher
@@ -502,6 +505,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                             last_learning_save = now_ts
                         except Exception:
                             logger.exception("periodic learning save failed")
+                        # NMK-RL-101: persist LinUCB bandit policy to SQLite so
+                        # the dashboard UI + routing weights survive restarts.
+                        try:
+                            with rl_engine._lock:
+                                for mid, state in rl_engine._states.items():
+                                    _db.upsert_rl_policy(
+                                        mid,
+                                        json.dumps(state.to_dict()),
+                                        time.time(),
+                                    )
+                        except Exception:
+                            logger.debug("RL policy persistence failed", exc_info=True)
 
             refresh_task = asyncio.create_task(_refresh_loop())
 

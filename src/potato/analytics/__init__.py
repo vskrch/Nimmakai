@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from potato.analytics.cost import estimate_cost, list_default_rates, lookup_rates
+from potato.analytics.cost import (
+    estimate_cost,
+    estimate_cost_split,
+    list_default_rates,
+    lookup_rates,
+)
 from potato.analytics.events import EventBus
 from potato.analytics.models import TraceRecord, TraceSpan
 from potato.analytics.models_cost import all_dynamic_rates, lookup_dynamic
@@ -20,6 +25,7 @@ __all__ = [
     "TraceWriter",
     "all_dynamic_rates",
     "estimate_cost",
+    "estimate_cost_split",
     "list_default_rates",
     "lookup_dynamic",
     "lookup_rates",

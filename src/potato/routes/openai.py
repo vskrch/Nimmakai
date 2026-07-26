@@ -146,20 +146,26 @@ def _finalize_trace(
     if provider is not None:
         trace.provider_id = provider
     trace.fallback_index = fallback_index
-    trace.prompt_tokens = int(prompt_tokens or 0)
-    trace.completion_tokens = int(completion_tokens or 0)
+    upstream_prompt_tokens = int(prompt_tokens or 0)
+    upstream_completion_tokens = int(completion_tokens or 0)
+    trace.prompt_tokens = upstream_prompt_tokens
+    trace.completion_tokens = upstream_completion_tokens
     trace.cached_tokens = int(cached_tokens or 0)
     if not trace.prompt_tokens and not trace.completion_tokens and trace.char_length:
-        # Rough estimate when upstream omits usage
+        # Rough estimate when upstream omits usage — used for display only,
+        # NOT for cost (cost must be on real upstream-reported tokens).
         trace.prompt_tokens = max(1, trace.char_length // 4)
     trace.total_tokens = trace.prompt_tokens + trace.completion_tokens
     trace.upstream_ttft_ms = upstream_ttft_ms
     trace.upstream_total_ms = upstream_total_ms
     if model_routed:
+        # ponytail: cost is computed ONLY on real upstream-reported tokens.
+        # When the upstream omits usage, cost is 0 (not a char-based estimate)
+        # so the dashboard never shows inflated gateway-level cost.
         trace.estimated_cost_usd = estimate_cost(
             model_routed,
-            trace.prompt_tokens,
-            trace.completion_tokens,
+            upstream_prompt_tokens,
+            upstream_completion_tokens,
             overrides=overrides,
         )
     if spans:
@@ -375,6 +381,16 @@ async def _prepare_routed(
             auto_opts=auto_opts,
             preferred_model=preferred_model,
         )
+        # Capture LinUCB feature vector for this request — used by rank_chain_with_rl
+        # to re-rank the chain and by record_feedback to update the bandit online.
+        try:
+            from potato.routing.rl_features import extract_feature_vector
+
+            decision.feature_vector = extract_feature_vector(
+                body, headers=request.headers, intent_name=intent.intent.value
+            )
+        except Exception:
+            decision.feature_vector = None
         # Rough token estimate for context-length filtering (T13)
         # For multi-turn sessions, use cumulative context from previous turns
         try:

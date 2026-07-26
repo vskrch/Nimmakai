@@ -104,11 +104,38 @@ def estimate_cost(
     *,
     overrides: dict[str, tuple[float, float]] | None = None,
 ) -> float:
-    """Estimated cost in USD for a single request."""
+    """Estimated cost in USD for a single request.
+
+    Computed on the UPSTREAM routed model id using the UPSTREAM-reported
+    token counts (prompt + completion).  Per-provider/per-model rates are
+    resolved by ``lookup_rates`` (admin overrides → models.dev → hardcoded
+    → 0 for unknown/self-hosted).  See ``estimate_cost_split`` for the
+    input/output breakdown.
+    """
     inp, out = lookup_rates(model_id, overrides)
     pt = max(0, int(prompt_tokens or 0))
     ct = max(0, int(completion_tokens or 0))
     return (pt / 1_000_000.0) * inp + (ct / 1_000_000.0) * out
+
+
+def estimate_cost_split(
+    model_id: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    *,
+    overrides: dict[str, tuple[float, float]] | None = None,
+) -> tuple[float, float, float]:
+    """Return (prompt_cost_usd, completion_cost_usd, total_cost_usd).
+
+    Same basis as ``estimate_cost`` but split into input/output legs so the
+    dashboard can show per-provider input vs output cost independently.
+    """
+    inp, out = lookup_rates(model_id, overrides)
+    pt = max(0, int(prompt_tokens or 0))
+    ct = max(0, int(completion_tokens or 0))
+    prompt_cost = (pt / 1_000_000.0) * inp
+    completion_cost = (ct / 1_000_000.0) * out
+    return (prompt_cost, completion_cost, prompt_cost + completion_cost)
 
 
 def list_default_rates() -> list[dict[str, Any]]:

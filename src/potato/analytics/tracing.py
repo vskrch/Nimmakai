@@ -139,17 +139,16 @@ def finalize_trace(
     trace.upstream_ttft_ms = upstream_ttft_ms
     trace.upstream_total_ms = upstream_total_ms
 
+    # ponytail: cost is computed on the UPSTREAM routed model (not the
+    # potato/* requested alias) using the UPSTREAM-reported token counts.
+    # Per-provider/per-model rates are resolved by lookup_rates inside
+    # estimate_cost (admin overrides → models.dev → hardcoded fallback).
     final_model = trace.model_routed or trace.model_requested or "unknown"
-    final_provider = trace.provider_id or "unknown"
-    est_prompt, est_comp, est_total = estimate_cost(
+    trace.estimated_cost_usd = estimate_cost(
         final_model,
-        final_provider,
         prompt_tokens,
         completion_tokens,
         overrides=overrides,
     )
-    trace.cost_prompt_usd = est_prompt
-    trace.cost_completion_usd = est_comp
-    trace.cost_total_usd = est_total
 
     _enqueue_trace(store, trace, spans)

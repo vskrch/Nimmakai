@@ -11,7 +11,7 @@ class CatalogDefaults(BaseModel):
     auto_mode_model_tokens: list[str] = Field(default_factory=lambda: ["auto", "potato/auto", ""])
     passthrough_if_known: bool = True
     max_fallback_attempts: int = 6
-    classify_mode: Literal["rules_only", "rules_then_llm"] = "rules_only"
+    classify_mode: Literal["rules_only", "rules_then_llm", "tinyrouter"] = "rules_only"
     # Dynamic family routing (no hardcoded best-model ids)
     dynamic_families: bool = True
 

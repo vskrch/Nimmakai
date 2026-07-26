@@ -27,21 +27,27 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["responses"])
 
 
-def _extract_text_from_input_item(item: Any) -> tuple[str, str]:
-    """Return (role, text) from a Responses input item.
+def _extract_text_from_input_item(item: Any) -> tuple[str, str, list[dict[str, Any]]]:
+    """Return (role, text, multimodal_parts) from a Responses input item.
 
     Accepts Responses message items (``{role, content}`` where content is a
     string or a list of typed parts) and Chat-Compat message dicts (which are
     a strict subset of Responses input items — pass-through works).
+
+    Multimodal parts (``input_image_url``, ``input_image``, ``input_audio``,
+    ``input_video``) are returned as OpenAI Chat-content part dicts so the
+    upstream provider receives native multimodal content instead of a
+    text placeholder.
     """
     if not isinstance(item, dict):
-        return "user", str(item or "")
+        return "user", str(item or ""), []
     role = str(item.get("role") or "user")
     content = item.get("content")
     if isinstance(content, str):
-        return role, content
+        return role, content, []
     if isinstance(content, list):
         parts: list[str] = []
+        multi: list[dict[str, Any]] = []
         for block in content:
             if isinstance(block, dict):
                 # Responses input text part: {type: "input_text", text: "..."}
@@ -49,17 +55,30 @@ def _extract_text_from_input_item(item: Any) -> tuple[str, str]:
                 # Chat-compat: {type: "text", text: "..."}
                 t = block.get("type") or ""
                 text = block.get("text")
-                if isinstance(text, str):
+                if isinstance(text, str) and t in ("", "text", "input_text", "output_text"):
                     parts.append(text)
-                elif t == "input_image_url" and isinstance(block.get("image_url"), dict):
-                    # Multimodal — collapse to the URL for text-only upstreams.
+                elif t in ("input_image_url", "input_image") and isinstance(block.get("image_url"), dict):
                     url = block["image_url"].get("url")
                     if isinstance(url, str):
-                        parts.append(f"[image: {url[:80]}]")
+                        multi.append({"type": "image_url", "image_url": {"url": url}})
+                elif t == "input_audio" and isinstance(block.get("input_audio"), dict):
+                    audio = block["input_audio"]
+                    if isinstance(audio.get("data"), str):
+                        multi.append({
+                            "type": "input_audio",
+                            "input_audio": {
+                                "data": audio["data"],
+                                "format": (audio.get("format") or "wav").lower(),
+                            },
+                        })
+                elif t in ("input_video", "video_url") and isinstance(block.get("video_url"), dict):
+                    url = block["video_url"].get("url")
+                    if isinstance(url, str):
+                        multi.append({"type": "video_url", "video_url": {"url": url}})
             elif isinstance(block, str):
                 parts.append(block)
-        return role, "\n".join(parts)
-    return role, str(content or "")
+        return role, "\n".join(parts), multi
+    return role, str(content or ""), []
 
 
 def transform_responses_to_chat(body: dict[str, Any]) -> dict[str, Any]:
@@ -147,8 +166,18 @@ def transform_responses_to_chat(body: dict[str, Any]) -> dict[str, Any]:
                 # Reasoning items don't carry chat text — skip.
                 continue
             # Default: message-shaped item (has role + content).
-            role, text = _extract_text_from_input_item(item)
-            messages.append({"role": role, "content": text})
+            role, text, multi = _extract_text_from_input_item(item)
+            if multi:
+                # Multimodal user turn — emit OpenAI multi-part content
+                # (text + image/audio/video parts) so vision-capable upstreams
+                # receive native multimodal input instead of a text placeholder.
+                content_parts: list[dict[str, Any]] = []
+                if text:
+                    content_parts.append({"type": "text", "text": text})
+                content_parts.extend(multi)
+                messages.append({"role": role, "content": content_parts})
+            else:
+                messages.append({"role": role, "content": text})
 
     out["messages"] = messages
 

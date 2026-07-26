@@ -120,6 +120,8 @@ def transform_anthropic_to_openai(body: dict[str, Any]) -> dict[str, Any]:
             elif isinstance(content_raw, list):
                 text_parts = []
                 image_blocks = []
+                audio_blocks = []
+                video_blocks = []
                 tool_calls = []
                 tool_results = []
 
@@ -144,6 +146,51 @@ def transform_anthropic_to_openai(body: dict[str, Any]) -> dict[str, Any]:
                                 image_blocks.append({
                                     "type": "image_url",
                                     "image_url": {"url": source.get("url", "")},
+                                })
+                    elif btype == "audio":
+                        # Anthropic audio block: {type:"audio", source:{type:"base64"|"url", media_type, data|url}}
+                        source = block.get("source", {})
+                        if isinstance(source, dict):
+                            stype = source.get("type")
+                            mtype = source.get("media_type", "audio/wav")
+                            if stype == "base64":
+                                b64 = source.get("data", "")
+                                # ponytail: OpenAI input_audio uses inline base64 data URL.
+                                # No URL form in the OpenAI spec yet; wrap as data URL.
+                                audio_blocks.append({
+                                    "type": "input_audio",
+                                    "input_audio": {
+                                        "data": b64,
+                                        "format": (mtype.split("/")[-1] or "wav").lower(),
+                                    },
+                                })
+                            elif stype == "url":
+                                # OpenAI has no native audio URL part; embed as data URL
+                                # when upstream supports it, else fall through to text note.
+                                audio_blocks.append({
+                                    "type": "input_audio",
+                                    "input_audio": {
+                                        "data": source.get("url", ""),
+                                        "format": "url",
+                                    },
+                                })
+                    elif btype == "video":
+                        # Anthropic has no official video block yet, but Claude Code / custom
+                        # clients may send one. Treat as OpenAI video_url (experimental).
+                        source = block.get("source", {})
+                        if isinstance(source, dict):
+                            stype = source.get("type")
+                            mtype = source.get("media_type", "video/mp4")
+                            if stype == "base64":
+                                b64 = source.get("data", "")
+                                video_blocks.append({
+                                    "type": "video_url",
+                                    "video_url": {"url": f"data:{mtype};base64,{b64}"},
+                                })
+                            elif stype == "url":
+                                video_blocks.append({
+                                    "type": "video_url",
+                                    "video_url": {"url": source.get("url", "")},
                                 })
                     elif btype == "tool_use":
                         tool_calls.append({
@@ -170,11 +217,13 @@ def transform_anthropic_to_openai(body: dict[str, Any]) -> dict[str, Any]:
                         asst_msg["tool_calls"] = tool_calls
                     openai_msgs.append(asst_msg)
                 else:  # user role
-                    if image_blocks:
+                    if image_blocks or audio_blocks or video_blocks:
                         multi_content: list[dict[str, Any]] = []
                         if text_parts:
                             multi_content.append({"type": "text", "text": "\n".join(text_parts)})
                         multi_content.extend(image_blocks)
+                        multi_content.extend(audio_blocks)
+                        multi_content.extend(video_blocks)
                         openai_msgs.append({"role": "user", "content": multi_content})
                     elif text_parts:
                         openai_msgs.append({"role": "user", "content": "\n".join(text_parts)})

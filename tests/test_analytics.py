@@ -158,6 +158,51 @@ def test_estimate_cost_known_and_free():
     ) == pytest.approx(1.0)
 
 
+def test_estimate_cost_uses_routed_model_not_requested_alias():
+    """Cost must be computed on the UPSTREAM routed model, not the potato/*
+    requested alias (which has no price).  Same tokens, different model →
+    different cost.  Per-provider/per-model resolution is the contract."""
+    # A virtual potato alias with no real price → 0 (unknown self-hosted)
+    auto_cost = estimate_cost("potato/potato-best-model", 1_000_000, 1_000_000)
+    assert auto_cost == 0.0
+    # gpt-4o has a real price
+    gpt4o_cost = estimate_cost("gpt-4o", 1_000_000, 1_000_000)
+    assert gpt4o_cost > 0.0
+    # groq/* is free-tier regardless of model
+    groq_cost = estimate_cost("groq/llama-3.3-70b", 1_000_000, 1_000_000)
+    assert groq_cost == 0.0
+
+
+def test_estimate_cost_split_returns_input_output_legs():
+    """estimate_cost_split returns (prompt, completion, total) so the
+    dashboard can show per-provider input vs output cost independently."""
+    from potato.analytics.cost import estimate_cost_split
+
+    p, c, t = estimate_cost_split("gpt-4o", 1_000_000, 0)
+    assert p == pytest.approx(2.50, abs=0.1)
+    assert c == 0.0
+    assert t == p
+
+    p, c, t = estimate_cost_split("gpt-4o", 0, 1_000_000)
+    assert p == 0.0
+    assert c == pytest.approx(10.00, abs=0.1)
+    assert t == c
+
+    p, c, t = estimate_cost_split("gpt-4o", 1_000_000, 1_000_000)
+    assert p == pytest.approx(2.50, abs=0.1)
+    assert c == pytest.approx(10.00, abs=0.1)
+    assert t == pytest.approx(12.50, abs=0.2)
+
+
+def test_cost_zero_when_upstream_omits_usage():
+    """When the upstream omits usage, cost must be 0 (not a char-based
+    gateway estimate).  The gateway may estimate prompt_tokens for display
+    but must NOT price that estimate — only real upstream tokens count."""
+    # 0 upstream tokens → 0 cost regardless of model price
+    assert estimate_cost("gpt-4o", 0, 0) == 0.0
+    assert estimate_cost("claude-opus-4", 0, 0) == 0.0
+
+
 # ── writer + store ──────────────────────────────────────────────────
 
 

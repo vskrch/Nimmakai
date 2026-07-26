@@ -99,7 +99,7 @@ function buildContext(query: string, results: SearchResult[]): string {
   const parts = results.map((r, i) =>
     `[${i + 1}] ${r.title}\n${r.snippet}\nSource: ${r.url}`,
   )
-  return `Web search results for "${query}":\n\n${parts.join('\n\n')}\n\nSynthesize a grounded answer using these sources. Cite as [1], [2], etc. If the sources don't answer the question, say so.`
+  return `Web search results for "${query}":\n\n${parts.join('\n\n')}\n\nYou have been given web search results above. Use ONLY these results to answer the user's question. Cite sources as [1], [2], etc. Do NOT attempt to call any tools or functions (e.g. search_web) — the search has already been performed for you. If the results do not answer the question, say so plainly.`
 }
 
 // Heuristic: does this message look like it needs fresh info from the web?

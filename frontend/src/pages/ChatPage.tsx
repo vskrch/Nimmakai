@@ -58,6 +58,9 @@ interface ChatSettings {
   presencePenalty: number
   stop: string
   stream: boolean
+  // model picker scope: false (default) = only potato/* router virtuals;
+  // true = also list every upstream model in the pool.
+  showAllModels: boolean
 }
 
 const DEFAULT_SETTINGS: ChatSettings = {
@@ -71,6 +74,7 @@ const DEFAULT_SETTINGS: ChatSettings = {
   presencePenalty: 0.0,
   stop: '',
   stream: true,
+  showAllModels: false,
 }
 
 interface ModelInfo {
@@ -190,7 +194,7 @@ function buildSearchContext(query: string, results: SearchResult[]): string {
   const parts = results.map((r, i) =>
     `[${i + 1}] ${r.title}\n${r.snippet}\nSource: ${r.url}`,
   )
-  return `Web search results for "${query}":\n\n${parts.join('\n\n')}\n\nSynthesize a grounded answer using these sources. Cite as [1], [2], etc. If the sources don't answer the question, say so.`
+  return `Web search results for "${query}":\n\n${parts.join('\n\n')}\n\nYou have been given web search results above. Use ONLY these results to answer the user's question. Cite sources as [1], [2], etc. Do NOT attempt to call any tools or functions (e.g. search_web) — the search has already been performed for you. If the results do not answer the question, say so plainly.`
 }
 
 // ---------- API ----------
@@ -394,6 +398,11 @@ async function* streamChat(
     stream: settings.stream,
     temperature: settings.temperature,
     max_tokens: settings.maxTokens,
+    // The chat UI never sends tools, so tell the upstream explicitly not to
+    // emit tool calls. Without this, tool-capable models (Qwen, GLM, etc.)
+    // hallucinate raw tool-call tokens like <|tool_calls_section_begin|>
+    // into the content stream, which the UI renders as garbage text.
+    tool_choice: 'none',
   }
   if (settings.topP !== 1.0) body.top_p = settings.topP
   if (settings.frequencyPenalty !== 0) body.frequency_penalty = settings.frequencyPenalty
@@ -415,7 +424,7 @@ async function* streamChat(
   if (!settings.stream) {
     const data = await res.json()
     const content = data.choices?.[0]?.message?.content || ''
-    if (content) yield content
+    if (content) yield stripToolTokens(content)
     return
   }
   if (!res.body) throw new Error('No response body')
@@ -436,10 +445,23 @@ async function* streamChat(
       try {
         const parsed = JSON.parse(data)
         const delta = parsed.choices?.[0]?.delta?.content
-        if (delta) yield delta
+        if (delta) yield stripToolTokens(delta)
       } catch { /* ignore */ }
     }
   }
+}
+
+// Safety net: some upstreams ignore tool_choice:'none' and emit raw
+// tool-call token patterns (Qwen's ChatML <│tool_calls_section_begin│>,
+// GLM's function-call markers, generic <│tool▁calls▁begin│>, etc.) into
+// the content stream. Strip them so the chat UI never renders garbage.
+// ponytail: regex-based scrub; the gateway also normalizes but this guards
+// against models that emit tool tokens inside delta.content directly.
+const TOOL_TOKEN_RE = /<\|tool_calls_section_begin\|>|<\|tool_calls_section_end\|>|<\|tool_call_begin\|>|<\|tool_call_end\|>|<\|tool▁calls▁begin\|>|<\|tool▁calls▁end\|>|<\|tool▁call▁begin\|>|<\|tool▁call▁end\|>|<\|im_start\|>|<\|im_end\|>/g
+function stripToolTokens(text: string): string {
+  if (!text) return text
+  if (!text.includes('<│') && !text.includes('<|')) return text
+  return text.replace(TOOL_TOKEN_RE, '')
 }
 
 // ---------- icons ----------
@@ -748,21 +770,24 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
     ? (selectedModel.context_length || selectedModel.max_model_len || DEFAULT_CONTEXT)
     : DEFAULT_CONTEXT
 
-  // group models: virtuals first, then by provider
+  // group models: virtuals first, then by provider. When showAllModels is
+  // off (default), only list potato/* router virtuals so the picker stays
+  // clean — flip the toggle in Settings to expose every upstream model.
   const grouped = useMemo(() => {
     const virtuals: ModelInfo[] = []
     const providers: Record<string, ModelInfo[]> = {}
     for (const m of models) {
       const owner = m.owned_by || (m.id.includes('/') ? m.id.split('/')[0] : 'unknown')
-      if (m.id === 'potato/auto' || m.id.startsWith('potato/auto') || m.id === 'auto'
-        || m.id.startsWith('openrouter/') || m.id.startsWith('kilo')) {
+      const isVirtual = m.id === 'potato/auto' || m.id.startsWith('potato/auto') || m.id === 'auto'
+        || m.id.startsWith('openrouter/') || m.id.startsWith('kilo')
+      if (isVirtual) {
         virtuals.push(m)
-      } else {
+      } else if (settings.showAllModels) {
         (providers[owner] ||= []).push(m)
       }
     }
     return { virtuals, providers: Object.entries(providers).sort((a, b) => a[0].localeCompare(b[0])) }
-  }, [models])
+  }, [models, settings.showAllModels])
 
   const layout = embedded
     ? 'absolute inset-0 z-30 bg-zinc-950'
@@ -1636,7 +1661,11 @@ function SettingsModal({
               className="w-full bg-zinc-950/80 border border-white/[0.1] text-zinc-100 px-3.5 py-2.5 rounded-xl text-[13px] focus:outline-none focus:border-violet-500 font-mono cursor-pointer"
             >
               {models.length === 0 && <option value={settings.model}>{settings.model} (no models loaded)</option>}
-              {models.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
+              {models.filter(m => {
+                const isVirtual = m.id === 'potato/auto' || m.id.startsWith('potato/auto') || m.id === 'auto'
+                  || m.id.startsWith('openrouter/') || m.id.startsWith('kilo')
+                return isVirtual || settings.showAllModels
+              }).map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
             </select>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] text-zinc-500">
@@ -1652,6 +1681,30 @@ function SettingsModal({
                 </span>
               )}
             </div>
+          </div>
+
+          {/* Show all models toggle */}
+          <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-950/60 border border-white/[0.08]">
+            <div>
+              <p className="text-[13px] font-medium text-zinc-200">Show all models in picker</p>
+              <p className="text-[11px] text-zinc-500">
+                {settings.showAllModels
+                  ? 'Every upstream model is listed.'
+                  : 'Only potato/* router models are shown.'}
+              </p>
+            </div>
+            <button
+              onClick={() => onChange({ ...settings, showAllModels: !settings.showAllModels })}
+              className={clsx(
+                'relative w-10 h-6 rounded-full transition-colors',
+                settings.showAllModels ? 'bg-violet-500' : 'bg-zinc-700',
+              )}
+            >
+              <span className={clsx(
+                'absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform',
+                settings.showAllModels ? 'translate-x-[18px]' : 'translate-x-0.5',
+              )} />
+            </button>
           </div>
 
           <div>

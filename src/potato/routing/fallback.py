@@ -288,12 +288,14 @@ class FallbackExecutor:
         stats: RoutingStats | None = None,
         hub: Any | None = None,
         span_callback: SpanCallback | None = None,
+        rl_engine: Any | None = None,
     ) -> None:
         self.upstream = upstream
         self.registry = registry
         self.settings = settings
         self.stats = stats or RoutingStats()
         self.hub = hub
+        self.rl_engine = rl_engine
         self._span_cb = span_callback or None
         # Prefer contextvar collector so concurrent requests don't share state
         from potato.analytics.context import collect_span
@@ -315,6 +317,89 @@ class FallbackExecutor:
             self._span_cb(span)
         except Exception:
             logger.debug("span callback failed", exc_info=True)
+
+    def _record_rl_feedback(
+        self,
+        decision: RouteDecision,
+        model: str,
+        *,
+        success: bool,
+        status_code: int = 200,
+        latency: float | None = None,
+        tool_ok: bool | None = None,
+        empty_reply: bool = False,
+    ) -> None:
+        """Feed the LinUCB bandit one (model, x, reward) sample from execution.
+
+        ponytail: no-op when rl_engine is absent (tests / routing off).
+        Reward is computed from the same multi-signal feedback the health
+        store already uses — TTFB, status, tool validity — via
+        ``calculate_composite_reward``.  Bounded to one update per request
+        per model so streaming + JSON paths don't double-count.
+        """
+        rl = self.rl_engine
+        x = getattr(decision, "feature_vector", None)
+        if rl is None or not x or len(x) != 12:
+            return
+        try:
+            from potato.routing.rl_rewards import calculate_composite_reward
+
+            ttfb = latency if latency is not None and latency > 0 else None
+            reward = calculate_composite_reward(
+                success=success,
+                status_code=status_code,
+                ttfb_seconds=ttfb,
+                tool_ok=tool_ok,
+                empty_reply=empty_reply,
+            )
+            rl.record_feedback(model, x, reward)
+        except Exception:
+            logger.debug("RL feedback update failed", exc_info=True)
+
+    def _record_outcome(
+        self,
+        decision: RouteDecision,
+        model: str,
+        key_id: str | None = None,
+        *,
+        success: bool,
+        latency: float | None = None,
+        status_code: int | None = None,
+        unavailable: bool = False,
+        tokens: int | None = None,
+        intent: str | None = None,
+        empty_reply: bool = False,
+        had_tools: bool = False,
+        tool_ok: bool | None = None,
+    ) -> None:
+        """Record health outcome + RL bandit feedback in one shot.
+
+        Wraps registry.record_outcome so every execution path feeds the
+        LinUCB engine the same (model, x, reward) signal it already feeds
+        the health store.  Args mirror registry.record_outcome exactly.
+        """
+        self.registry.record_outcome(
+            model,
+            key_id,
+            success=success,
+            latency=latency,
+            status_code=status_code,
+            unavailable=unavailable,
+            tokens=tokens,
+            intent=intent,
+            empty_reply=empty_reply,
+            had_tools=had_tools,
+            tool_ok=tool_ok,
+        )
+        self._record_rl_feedback(
+            decision,
+            model,
+            success=success,
+            status_code=status_code or 200,
+            latency=latency,
+            tool_ok=tool_ok,
+            empty_reply=empty_reply,
+        )
 
     def _provider_id_for(self, model: str) -> str | None:
         if self.hub is None:
@@ -468,7 +553,8 @@ class FallbackExecutor:
                 )
             except (TimeoutError, RuntimeError, httpx.HTTPError, OSError):
                 self._circuit_fail(pid)
-                self.registry.record_outcome(
+                self._record_outcome(
+                    decision,
                     model,
                     None,
                     success=False,
@@ -491,7 +577,8 @@ class FallbackExecutor:
                         or (usage.get("prompt_tokens_details") or {}).get("cached_tokens", 0)
                         or 0
                     )
-                self.registry.record_outcome(
+                self._record_outcome(
+                    decision,
                     model,
                     key.key_id if key else None,
                     success=True,
@@ -519,7 +606,8 @@ class FallbackExecutor:
                     provider_id=pid,
                 )
             self._circuit_fail(pid)
-            self.registry.record_outcome(
+            self._record_outcome(
+                decision,
                 model,
                 key.key_id if key else None,
                 success=False,
@@ -786,6 +874,35 @@ class FallbackExecutor:
                     variant=variant,
                     max_n=None,
                 )
+        # LinUCB contextual re-rank: boost models that learned high reward for
+        # this request's feature vector.  Applied after quality×speed×health
+        # optimization so the bandit only re-orders within the already-vetted
+        # chain.  Pinned head stays first (F-08).  ponytail: no-op until the
+        # bandit has ≥1 sample per model — cold start preserves base order.
+        rl_x = getattr(decision, "feature_vector", None)
+        if self.rl_engine is not None and rl_x and len(rl_x) == 12 and available and len(available) > 1:
+            try:
+                if pinned and pinned in available:
+                    tail = [m for m in available if m != pinned]
+                    scored: list[tuple[float, str]] = []
+                    for idx, mid in enumerate(tail):
+                        rl_score, _, _ = self.rl_engine.score(mid, rl_x)
+                        boost = max(0.5, min(2.0, 1.0 + rl_score))
+                        position_weight = 1.0 / (1.0 + 0.05 * idx)
+                        scored.append((boost * position_weight, mid))
+                    scored.sort(key=lambda t: t[0], reverse=True)
+                    available = [pinned] + [m for _, m in scored]
+                else:
+                    scored = []
+                    for idx, mid in enumerate(available):
+                        rl_score, _, _ = self.rl_engine.score(mid, rl_x)
+                        boost = max(0.5, min(2.0, 1.0 + rl_score))
+                        position_weight = 1.0 / (1.0 + 0.05 * idx)
+                        scored.append((boost * position_weight, mid))
+                    scored.sort(key=lambda t: t[0], reverse=True)
+                    available = [m for _, m in scored]
+            except Exception:
+                logger.debug("RL chain re-rank failed", exc_info=True)
         # Fail-fast: skip cooling models for TTFT (keep 1 cold last-resort)
         # Preserve pinned head if healthy. Auto keeps more cold models as safety net.
         if available and hasattr(self.registry, "health"):
@@ -1153,7 +1270,8 @@ class FallbackExecutor:
                     span_type="upstream",
                 )
             )
-            self.registry.record_outcome(
+            self._record_outcome(
+                decision,
                 model,
                 key_id,
                 success=success,
@@ -1354,7 +1472,8 @@ class FallbackExecutor:
                             )
                         except TimeoutError:
                             self._circuit_fail(pid2)
-                            self.registry.record_outcome(
+                            self._record_outcome(
+                                decision,
                                 model2,
                                 None,
                                 success=False,
@@ -1364,7 +1483,8 @@ class FallbackExecutor:
                             continue
                         except (RuntimeError, httpx.HTTPError, OSError):
                             self._circuit_fail(pid2)
-                            self.registry.record_outcome(
+                            self._record_outcome(
+                                decision,
                                 model2,
                                 None,
                                 success=False,
@@ -1380,7 +1500,8 @@ class FallbackExecutor:
                                 rb2, had_tools=had_tools, path=path
                             )
                             if empty2 or (had_tools and tool_ok2 is False):
-                                self.registry.record_outcome(
+                                self._record_outcome(
+                                    decision,
                                     model2,
                                     k2.key_id if k2 else None,
                                     success=False,
@@ -1415,7 +1536,8 @@ class FallbackExecutor:
                                         )
                                         or 0
                                     )
-                            self.registry.record_outcome(
+                            self._record_outcome(
+                                decision,
                                 model2,
                                 k2.key_id if k2 else None,
                                 success=True,
@@ -1446,7 +1568,8 @@ class FallbackExecutor:
                             )
                         # Failed — record and try next fresh model
                         self._circuit_fail(pid2)
-                        self.registry.record_outcome(
+                        self._record_outcome(
+                            decision,
                             model2,
                             k2.key_id if k2 else None,
                             success=False,
@@ -1781,7 +1904,8 @@ class FallbackExecutor:
                         with suppress(Exception):
                             await byte_iter.aclose()
                     self.stats.fallback_advances += 1
-                    self.registry.record_outcome(
+                    self._record_outcome(
+                        decision,
                         model,
                         key.key_id if key else None,
                         success=False,
@@ -1820,7 +1944,8 @@ class FallbackExecutor:
                         with suppress(Exception):
                             await byte_iter.aclose()
                     self.stats.fallback_advances += 1
-                    self.registry.record_outcome(
+                    self._record_outcome(
+                        decision,
                         model,
                         key.key_id if key else None,
                         success=False,
@@ -1852,7 +1977,8 @@ class FallbackExecutor:
                         with suppress(Exception):
                             await byte_iter.aclose()
                     self.stats.fallback_advances += 1
-                    self.registry.record_outcome(
+                    self._record_outcome(
+                        decision,
                         model,
                         key.key_id if key else None,
                         success=False,
@@ -1879,7 +2005,8 @@ class FallbackExecutor:
                 )
                 self.stats.record(decision.intent.value, model, advanced=idx > 0)
                 # Adaptive: first-token latency feeds speed score immediately
-                self.registry.record_outcome(
+                self._record_outcome(
+                    decision,
                     model,
                     key.key_id if key else None,
                     success=True,
@@ -2006,7 +2133,8 @@ class FallbackExecutor:
                                     with suppress(Exception):
                                         await rest.aclose()
                                 elapsed = max(0.01, time.monotonic() - t0)
-                                self.registry.record_outcome(
+                                self._record_outcome(
+                                    decision,
                                     mid,
                                     kid,
                                     success=False,
@@ -2030,7 +2158,8 @@ class FallbackExecutor:
                         # Full stream done — update speed with total time + tokens
                         elapsed = max(0.01, time.monotonic() - t0)
                         if total_tokens > 0:
-                            self.registry.record_outcome(
+                            self._record_outcome(
+                                decision,
                                 mid,
                                 kid,
                                 success=True,
@@ -2133,7 +2262,8 @@ class FallbackExecutor:
             retryable = status in {401, 403, 404, 405, 408, 429, 500, 502, 503, 504} or (
                 status == 400 and _is_retryable_model_error(status, err_body)
             )
-            self.registry.record_outcome(
+            self._record_outcome(
+                decision,
                 model,
                 key.key_id if key else None,
                 success=False,
@@ -2246,7 +2376,8 @@ class FallbackExecutor:
                         )
                     except (TimeoutError, RuntimeError, httpx.HTTPError, OSError):
                         self._circuit_fail(pid2)
-                        self.registry.record_outcome(
+                        self._record_outcome(
+                            decision,
                             model2,
                             None,
                             success=False,
@@ -2308,7 +2439,8 @@ class FallbackExecutor:
                             if hasattr(byte_iter2, "aclose"):
                                 with suppress(Exception):
                                     await byte_iter2.aclose()
-                            self.registry.record_outcome(
+                            self._record_outcome(
+                                decision,
                                 model2,
                                 k2.key_id if k2 else None,
                                 success=False,
@@ -2320,7 +2452,8 @@ class FallbackExecutor:
                         # Stream opened successfully — return it
                         self._circuit_succeed(pid2)
                         ttft_lat2 = max(0.01, time.monotonic() - t_stream2)
-                        self.registry.record_outcome(
+                        self._record_outcome(
+                            decision,
                             model2,
                             k2.key_id if k2 else None,
                             success=True,
@@ -2401,7 +2534,8 @@ class FallbackExecutor:
                                             with suppress(Exception):
                                                 await rest.aclose()
                                         elapsed = max(0.01, time.monotonic() - t0)
-                                        self.registry.record_outcome(
+                                        self._record_outcome(
+                                            decision,
                                             mid,
                                             kid,
                                             success=False,
@@ -2448,7 +2582,8 @@ class FallbackExecutor:
                                     raise _up_err
                                 elapsed = max(0.01, time.monotonic() - t0)
                                 if total_tokens > 0:
-                                    self.registry.record_outcome(
+                                    self._record_outcome(
+                                        decision,
                                         mid,
                                         kid,
                                         success=True,
@@ -2529,7 +2664,8 @@ class FallbackExecutor:
                                 break
                     except Exception:
                         pass
-                    self.registry.record_outcome(
+                    self._record_outcome(
+                        decision,
                         model2,
                         k2.key_id if k2 else None,
                         success=False,

@@ -56,6 +56,9 @@ class RouteDecision:
     allowed_models: list[str] = field(default_factory=list)
     # Estimated prompt tokens for context-length filtering (T13)
     estimated_tokens: int | None = None
+    # 12-D LinUCB feature vector captured at classify time, used to score the
+    # chain (rank_chain_with_rl) and to record feedback (record_feedback).
+    feature_vector: list[float] | None = None
 
 
 class ModelSelector:

@@ -64,6 +64,88 @@ def test_transform_openai_to_anthropic_json():
     assert anthropic_resp["usage"]["output_tokens"] == 8
 
 
+def test_transform_anthropic_audio_block_to_openai():
+    """Anthropic audio block (base64) → OpenAI input_audio part."""
+    payload = {
+        "model": "claude-3-5-sonnet",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "transcribe this"},
+                    {
+                        "type": "audio",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "audio/wav",
+                            "data": "UklGRiQAAABXQVZFZm10",
+                        },
+                    },
+                ],
+            }
+        ],
+    }
+    out = transform_anthropic_to_openai(payload)
+    user_msg = out["messages"][0]
+    assert user_msg["role"] == "user"
+    parts = user_msg["content"]
+    assert isinstance(parts, list)
+    audio_part = next(p for p in parts if p.get("type") == "input_audio")
+    assert audio_part["input_audio"]["format"] == "wav"
+    assert audio_part["input_audio"]["data"] == "UklGRiQAAABXQVZFZm10"
+
+
+def test_transform_anthropic_video_block_to_openai():
+    """Anthropic video block (url) → OpenAI video_url part."""
+    payload = {
+        "model": "claude-3-5-sonnet",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "describe this clip"},
+                    {
+                        "type": "video",
+                        "source": {"type": "url", "url": "https://x/clip.mp4"},
+                    },
+                ],
+            }
+        ],
+    }
+    out = transform_anthropic_to_openai(payload)
+    parts = out["messages"][0]["content"]
+    video_part = next(p for p in parts if p.get("type") == "video_url")
+    assert video_part["video_url"]["url"] == "https://x/clip.mp4"
+
+
+def test_transform_anthropic_image_plus_audio_plus_video():
+    """All three modalities in one user turn pass through together."""
+    payload = {
+        "model": "claude-3-5-sonnet",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "multi input"},
+                    {"type": "image", "source": {"type": "url", "url": "https://x/a.png"}},
+                    {
+                        "type": "audio",
+                        "source": {"type": "base64", "media_type": "audio/wav", "data": "AAA"},
+                    },
+                    {"type": "video", "source": {"type": "url", "url": "https://x/v.mp4"}},
+                ],
+            }
+        ],
+    }
+    out = transform_anthropic_to_openai(payload)
+    parts = out["messages"][0]["content"]
+    types = [p.get("type") for p in parts]
+    assert "text" in types
+    assert "image_url" in types
+    assert "input_audio" in types
+    assert "video_url" in types
+
+
 @pytest.fixture
 def client(tmp_path):
     from potato.config import Settings

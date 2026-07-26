@@ -54,6 +54,75 @@ def test_transform_responses_message_items_to_messages() -> None:
     ]
 
 
+def test_transform_responses_image_url_passthrough() -> None:
+    """input_image_url must become a native OpenAI image_url part, not a text placeholder."""
+    body = {
+        "model": "gpt-4o",
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "what is this?"},
+                    {
+                        "type": "input_image_url",
+                        "image_url": {"url": "https://x/img.png"},
+                    },
+                ],
+            }
+        ],
+    }
+    out = transform_responses_to_chat(body)
+    msg = out["messages"][0]
+    assert msg["role"] == "user"
+    parts = msg["content"]
+    assert isinstance(parts, list)
+    assert {"type": "text", "text": "what is this?"} in parts
+    assert {"type": "image_url", "image_url": {"url": "https://x/img.png"}} in parts
+
+
+def test_transform_responses_audio_passthrough() -> None:
+    """input_audio must become a native OpenAI input_audio part."""
+    body = {
+        "model": "gpt-4o-audio-preview",
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "transcribe"},
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": "UklGRiQ=", "format": "wav"},
+                    },
+                ],
+            }
+        ],
+    }
+    out = transform_responses_to_chat(body)
+    parts = out["messages"][0]["content"]
+    audio_part = next(p for p in parts if p.get("type") == "input_audio")
+    assert audio_part["input_audio"]["data"] == "UklGRiQ="
+    assert audio_part["input_audio"]["format"] == "wav"
+
+
+def test_transform_responses_video_passthrough() -> None:
+    """input_video must become a native OpenAI video_url part."""
+    body = {
+        "model": "gpt-4o",
+        "input": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "describe"},
+                    {"type": "input_video", "video_url": {"url": "https://x/clip.mp4"}},
+                ],
+            }
+        ],
+    }
+    out = transform_responses_to_chat(body)
+    parts = out["messages"][0]["content"]
+    assert {"type": "video_url", "video_url": {"url": "https://x/clip.mp4"}} in parts
+
+
 def test_transform_responses_internally_tagged_tools() -> None:
     body = {
         "model": "gpt-4o",
