@@ -11,6 +11,7 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, Any
 
 from potato.routing.intents import Intent, IntentResult
+from potato.routing.tinyrouter import TinyRouterEngine
 
 if TYPE_CHECKING:
     from potato.config import Settings
@@ -108,6 +109,7 @@ class IntentClassifier:
             max_size=getattr(settings, "llm_classify_cache_size", 256) if settings else 256,
             ttl=float(getattr(settings, "llm_classify_cache_ttl", 600) if settings else 600),
         )
+        self.tiny_router = TinyRouterEngine()
         self.stats: dict[str, int] = {}
 
     def classify(
@@ -173,28 +175,32 @@ class IntentClassifier:
             self.stats[result.intent.value] = self.stats.get(result.intent.value, 0) + 1
             return result
 
+        if self.settings and getattr(self.settings, "classify_mode", "") == "tinyrouter":
+            result = self.tiny_router.classify_intent(body=body, headers=headers, path=path_l)
+            self.stats[result.intent.value] = self.stats.get(result.intent.value, 0) + 1
+            return result
+
         features = self._extract_features(body, path_l)
         result = self._rules(features, path_l)
 
-        # Auto-routing + weak classification → force coding (T13 override).
-        # When the model is an auto ID and confidence is low, the request
-        # likely carries code signals the rule engine missed (Cursor payloads,
-        # agent loops with implicit tools). Coding as fallback is safe because
-        # the coding chain covers all capability tiers.
+        # Auto-routing + weak classification → try tinyrouter neural classification or force coding
         raw_model = str(body.get("model") or "").lower()
         from potato.routing.auto_router import is_auto_router_id
 
         if (
-            is_auto_router_id(raw_model)
-            and result.confidence < 0.70
+            result.confidence < 0.70
             and result.intent not in (Intent.EMBEDDINGS, Intent.VISION)
         ):
-            result = self._result(
-                Intent.CODING_AGENTIC,
-                0.65,
-                "auto_weak_classify",
-                features,
-            )
+            tr_result = self.tiny_router.classify_intent(body=body, headers=headers, path=path_l)
+            if tr_result.confidence > result.confidence:
+                result = tr_result
+            elif is_auto_router_id(raw_model):
+                result = self._result(
+                    Intent.CODING_AGENTIC,
+                    0.65,
+                    "auto_weak_classify",
+                    features,
+                )
 
         self.stats[result.intent.value] = self.stats.get(result.intent.value, 0) + 1
         return result
