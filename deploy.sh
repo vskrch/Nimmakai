@@ -119,6 +119,14 @@ install_deps() {
     case $PM in
         apt)
             export DEBIAN_FRONTEND=noninteractive
+            # Wait for background apt locks to clear on fresh cloud droplets
+            for i in $(seq 1 10); do
+                if ! fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock &>/dev/null; then
+                    break
+                fi
+                log "Waiting for background system apt update to complete..."
+                sleep 3
+            done
             apt-get update -qq
             apt-get install -y -qq ca-certificates curl git jq openssl >/dev/null
             ;;
