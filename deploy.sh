@@ -17,6 +17,9 @@ YELLOW='\033[1;33m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
+# Failsafe 1: Ensure system binary directories are in PATH
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/opt/homebrew/bin:${PATH:-}"
+
 log() { echo -e "${CYAN}${BOLD}[Potato Deploy]${NC} $1"; }
 ok()  { echo -e "${GREEN}${BOLD}[SUCCESS]${NC} $1"; }
 warn(){ echo -e "${YELLOW}${BOLD}[WARNING]${NC} $1"; }
@@ -114,17 +117,52 @@ detect_pm() {
 PM=$(detect_pm)
 log "Detected Package Manager: ${PM}"
 
+# Failsafe 2: DNS Resolution check
+ensure_dns_resolution() {
+    if ! curl -s --connect-timeout 3 https://raw.githubusercontent.com &>/dev/null; then
+        if [[ "$OS" == "Linux" && -w "/etc/resolv.conf" ]]; then
+            log "Configuring fallback DNS resolver (1.1.1.1)..."
+            echo "nameserver 1.1.1.1" >> /etc/resolv.conf || true
+            echo "nameserver 8.8.8.8" >> /etc/resolv.conf || true
+        fi
+    fi
+}
+ensure_dns_resolution
+
+# Failsafe 3: Swapfile OOM Prevention for small RAM instances (< 1.5GB)
+ensure_sufficient_memory() {
+    if [[ "$OS" == "Linux" && $EUID -eq 0 ]]; then
+        MEM_TOTAL_MB=$(free -m 2>/dev/null | awk '/^Mem:/{print $2}' || echo "2048")
+        SWAP_TOTAL_MB=$(free -m 2>/dev/null | awk '/^Swap:/{print $2}' || echo "0")
+        if [[ ${MEM_TOTAL_MB} -lt 1500 && ${SWAP_TOTAL_MB} -eq 0 ]]; then
+            log "Low RAM instance detected (${MEM_TOTAL_MB}MB RAM, 0MB Swap). Enabling 1GB swapfile to prevent OOM kills..."
+            fallocate -l 1G /potato_swapfile 2>/dev/null || dd if=/dev/zero of=/potato_swapfile bs=1M count=1024 >/dev/null 2>&1 || true
+            if [[ -f /potato_swapfile ]]; then
+                chmod 600 /potato_swapfile
+                mkswap /potato_swapfile >/dev/null 2>&1 || true
+                swapon /potato_swapfile >/dev/null 2>&1 || true
+                ok "Temporary 1GB swapfile activated."
+            fi
+        fi
+    fi
+}
+ensure_sufficient_memory
+
 install_deps() {
     log "Installing dependencies (curl, git, openssl, jq, ca-certificates)..."
     case $PM in
         apt)
             export DEBIAN_FRONTEND=noninteractive
-            # Wait for background apt locks to clear on fresh cloud droplets
-            for i in $(seq 1 10); do
-                if ! fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock &>/dev/null; then
+            # Failsafe 4: Dpkg recovery & Lock waiting
+            if dpkg --audit 2>/dev/null | grep -q "unpacked\|half-configured"; then
+                log "Auto-repairing interrupted dpkg configuration..."
+                dpkg --configure -a >/dev/null 2>&1 || true
+            fi
+            for i in $(seq 1 12); do
+                if ! fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/lib/dpkg/lock &>/dev/null; then
                     break
                 fi
-                log "Waiting for background system apt update to complete..."
+                log "Waiting for background system package manager (apt/dpkg lock) to release..."
                 sleep 3
             done
             apt-get update -qq
