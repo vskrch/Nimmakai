@@ -25,7 +25,7 @@ from potato.catalog.preferences import UserPreferences
 from potato.catalog.providers import ProviderStore
 from potato.config import Settings, get_settings
 from potato.logging_setup import new_request_id, request_logs, setup_logging
-from potato.routes import accounts, admin, analytics, claude, openai, responses
+from potato.routes import accounts, admin, analytics, claude, openai, public_chat, responses
 from potato.routing import FallbackExecutor, IntentClassifier, ModelSelector, RoutingStats
 from potato.safety import AccountGuard
 from potato.upstream import UpstreamClient
@@ -43,17 +43,68 @@ def _mount_vite_assets(app: FastAPI, dist_path: Path) -> bool:
 
 
 def _init_accounts(app: FastAPI, settings: Settings) -> None:
-    """Attach AccountStore for signup / sessions / API keys."""
+    """Attach AccountStore for signup / sessions / API keys.
+
+    When ``settings.admin_password`` is configured, seed an active admin
+    account on first boot so deploy.sh installs can sign in immediately.
+    """
     app.state.accounts = None
     try:
         from potato.accounts.store import AccountStore
         from potato.catalog.db import get_db
 
         db = get_db(settings.sqlite_path)
-        app.state.accounts = AccountStore(db)
+        store = AccountStore(db)
+        app.state.accounts = store
         logger.info("accounts store ready")
+
+        # P0-1: first-time admin onboarding seed
+        if settings.admin_password:
+            _seed_admin(store, settings)
     except Exception:
         logger.exception("accounts store init failed")
+
+
+def _seed_admin(store: Any, settings: Settings) -> None:
+    """Idempotently seed an active admin account from env config.
+
+    - User missing → create as admin, verify, activate, issue API key.
+    - User exists, not admin → promote to admin.
+    - User exists, not active → activate.
+    - User exists, active, admin → no-op.
+    """
+    from potato.accounts.store import STATUS_ACTIVE, STATUS_UNVERIFIED
+
+    email = settings.admin_email.strip().lower() or "admin@localhost"
+    existing = store.get_user_by_email(email)
+    if existing is None:
+        try:
+            user = store.create_user(
+                email,
+                settings.admin_password,
+                role="admin",
+                status=STATUS_UNVERIFIED,
+            )
+            # Verify → pending → active (matches the signup→verify→approve flow)
+            store.mark_verified(user["id"])
+            store.set_status(user["id"], STATUS_ACTIVE, approved_by="seed")
+            key = store.issue_api_key(user["id"], name="seed-admin")
+            logger.info(
+                "seeded admin account email=%s key_prefix=%s — sign in at /dashboard",
+                email,
+                key.get("key_prefix"),
+            )
+        except Exception:
+            logger.exception("failed to seed admin account email=%s", email)
+        return
+    # Existing user — promote / activate if needed
+    if existing.get("role") != "admin":
+        store.set_role(existing["id"], "admin")
+        logger.info("promoted existing user email=%s to admin", email)
+    if existing.get("status") != STATUS_ACTIVE:
+        store.mark_verified(existing["id"])
+        store.set_status(existing["id"], STATUS_ACTIVE, approved_by="seed")
+        logger.info("activated existing admin email=%s", email)
 
 
 def _init_analytics(app: FastAPI, settings: Settings) -> None:
@@ -628,6 +679,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(analytics.router)
     app.include_router(claude.router)
     app.include_router(responses.router)
+    app.include_router(public_chat.router)
 
     def _dashboard_html() -> HTMLResponse:
         """Serve the compiled React TypeScript dashboard bundle."""
@@ -645,6 +697,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard() -> HTMLResponse:
         """Serve the web dashboard."""
+        return _dashboard_html()
+
+    @app.get("/chat", response_class=HTMLResponse)
+    async def chat_ui() -> HTMLResponse:
+        """Serve the standalone Claude-style chat app (same SPA, client-routed)."""
         return _dashboard_html()
 
     @app.get("/")

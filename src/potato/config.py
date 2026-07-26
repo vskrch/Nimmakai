@@ -159,6 +159,17 @@ class Settings(BaseSettings):
     session_cookie_name: str = "nk_session"
     session_secure_cookie: bool = False  # True behind HTTPS in production
 
+    # First-time admin onboarding (P0-1): when admin_password is set, startup
+    # seeds an active admin account with admin_email so deploy.sh installs can
+    # sign into /dashboard immediately without manual DB intervention.
+    admin_email: str = "admin@localhost"
+    admin_password: str | None = None
+
+    # Public chat (no account required) — /chat UI uses gateway provider keys
+    public_chat_enabled: bool = True
+    public_chat_rpm: int = 20  # per-IP requests per minute
+    public_chat_max_turns: int = 30  # per conversation turn cap (soft)
+
     # SMTP (used when EMAIL_BACKEND=smtp AND routes pass settings to get_email_sender)
     smtp_host: str | None = None
     smtp_port: int = 587

@@ -303,6 +303,20 @@ def require_admin(request: Request, settings: Settings) -> AuthContext:
 
 
 def require_active_user(request: Request, settings: Settings) -> AuthContext:
+    # Public chat bypass: when /chat/api/* sets request.state.public_chat=True,
+    # skip account auth — the gateway serves itself with its own provider keys.
+    if getattr(request.state, "public_chat", False) and getattr(
+        settings, "public_chat_enabled", True
+    ):
+        ctx = AuthContext(
+            token=None,
+            role="anonymous",
+            status="active",
+            is_admin=False,
+            via="public_chat",
+        )
+        request.state.auth = ctx
+        return ctx
     ctx = resolve_auth(request, settings)
     request.state.auth = ctx
     if ctx.is_admin:

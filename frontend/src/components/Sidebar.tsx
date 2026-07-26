@@ -8,6 +8,7 @@ import {
   BrainCircuit,
   Coins,
   Terminal,
+  MessageSquare,
   User,
   Users,
   Server,
@@ -45,6 +46,7 @@ const ANALYTICS_NAV: NavItem[] = [
 ]
 
 const DEV_NAV: NavItem[] = [
+  { id: 'chat', label: 'Chat', icon: MessageSquare },
   { id: 'playground', label: 'Playground', icon: Terminal },
   { id: 'account', label: 'API Keys & Account', icon: Key },
 ]

@@ -277,6 +277,8 @@ class IntentClassifier:
         roles = []
         texts: list[str] = []
         has_image = False
+        has_audio = False
+        has_video = False
         for m in messages:
             if not isinstance(m, dict):
                 continue
@@ -291,10 +293,18 @@ class IntentClassifier:
                         ptype = str(part.get("type") or "")
                         if ptype in {"image_url", "input_image"} or "image" in ptype:
                             has_image = True
+                        if ptype in {"input_audio", "audio"} or "audio" in ptype:
+                            has_audio = True
+                        if ptype in {"input_video", "video_url", "video"} or "video" in ptype:
+                            has_video = True
                         if "text" in part and isinstance(part["text"], str):
                             texts.append(part["text"])
                         if "image_url" in part:
                             has_image = True
+                        if "audio" in part:
+                            has_audio = True
+                        if "video" in part:
+                            has_video = True
 
         joined = "\n".join(texts)
         # Bound scan to head+tail — fingerprints live in system prompt head;
@@ -322,6 +332,8 @@ class IntentClassifier:
             "has_tool_choice": has_tool_choice,
             "has_tool_role": has_tool_role,
             "has_image": has_image,
+            "has_audio": has_audio,
+            "has_video": has_video,
             "fence_count": fence_count,
             "agent_fingerprint": agent_hit,
             "char_len": char_len,
@@ -341,8 +353,12 @@ class IntentClassifier:
             getattr(self.settings, "short_chat_chars", 800) if self.settings else 800
         )
 
-        if features["has_image"]:
-            return self._result(Intent.VISION, 0.95, "vision_parts", features)
+        # ponytail: image/audio/video all route to vision-capable (VLM) models.
+        # Audio-only models are rare on free tier; VLMs that accept image often
+        # accept audio/video too. Upgrade: dedicated audio/video intents when a
+        # provider advertises them.
+        if features.get("has_image") or features.get("has_audio") or features.get("has_video"):
+            return self._result(Intent.VISION, 0.95, "multimodal_parts", features)
 
         # Note: Deterministic tool short-circuit runs early in classify() before _classify_rules.
         # This check is preserved for direct _classify_rules calls and feature inspection.

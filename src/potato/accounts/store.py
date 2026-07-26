@@ -115,6 +115,15 @@ class AccountStore:
             )
         return self.get_user(user_id)
 
+    def set_role(self, user_id: str, role: str) -> dict[str, Any] | None:
+        """Promote/demote a user. Used by admin onboarding seed."""
+        with self._db._lock:
+            self._db._conn.execute(
+                "UPDATE users SET role = ? WHERE id = ?",
+                (role, user_id),
+            )
+        return self.get_user(user_id)
+
     def list_users(
         self, *, status: str | None = None, limit: int = 100, offset: int = 0
     ) -> list[dict[str, Any]]:

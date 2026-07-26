@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useState, useCallback, useEffect } from 'react'
 import Sidebar from './components/Sidebar'
 import AuthModal, { type AuthSession } from './components/AuthModal'
 import { Toast, Button } from './components/ui'
@@ -21,8 +21,10 @@ import RLPage from './pages/RLPage'
 import PlaygroundPage from './pages/PlaygroundPage'
 import UsersPage from './pages/UsersPage'
 import AccountPage from './pages/AccountPage'
+import ChatPage from './pages/ChatPage'
 
 const PAGE_META: Record<string, { title: string; subtitle: string }> = {
+  chat: { title: 'Chat', subtitle: 'Claude-style chat with auto-router models' },
   dashboard: { title: 'System Overview', subtitle: 'Real-time gateway metrics & execution status' },
   analytics: { title: 'Analytics Center', subtitle: 'Throughput, latency, and operational telemetry' },
   requests: { title: 'Request Explorer', subtitle: 'Detailed request traces & execution payloads' },
@@ -48,6 +50,11 @@ export default function App() {
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const sse = useSSE()
+
+  // ponytail: /chat path → full-screen chat (no sidebar). Dashboard nav sets page='chat'.
+  useEffect(() => {
+    if (window.location.pathname === '/chat') setPage('chat')
+  }, [])
 
   function showToast(msg: string, type: 'ok' | 'err' = 'ok') {
     setToast({ msg, type })
@@ -82,6 +89,17 @@ export default function App() {
         <div className="w-10 h-10 border-2 border-violet-500/30 border-t-violet-500 rounded-full animate-spin" />
         <span className="text-sm font-medium tracking-wide">Initializing Potato Gateway…</span>
       </div>
+    )
+  }
+
+  // Full-screen chat mode — no sidebar, no header. Claude-style standalone app.
+  if (page === 'chat') {
+    return (
+      <>
+        <ChatPage />
+        {showAuth && !authed && <AuthModal onSession={applySession} />}
+        {toast && <Toast message={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+      </>
     )
   }
 

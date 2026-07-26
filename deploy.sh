@@ -54,6 +54,7 @@ fi
 DOMAIN_NAME="${DOMAIN_NAME:-}"
 PROXY_KEY="${PROXY_API_KEYS:-}"
 ADMIN_PASS="${ADMIN_PASSWORD:-}"
+ADMIN_EMAIL_ADDR="${ADMIN_EMAIL:-admin@localhost}"
 NIM_KEY="${NIM_API_KEYS:-}"
 # All provider env keys that deploy.sh must preserve across redeploys.
 _PROVIDER_ENV_VARS=(
@@ -180,6 +181,10 @@ if [[ -f .env ]]; then
     if [[ -z "${ADMIN_PASS}" ]]; then
         ADMIN_PASS=$(grep -E "^ADMIN_PASSWORD=" .env | cut -d'=' -f2- || true)
     fi
+    if [[ "${ADMIN_EMAIL_ADDR}" == "admin@localhost" ]]; then
+        ADMIN_EMAIL_ADDR=$(grep -E "^ADMIN_EMAIL=" .env | cut -d'=' -f2- || true)
+        ADMIN_EMAIL_ADDR="${ADMIN_EMAIL_ADDR:-admin@localhost}"
+    fi
     if [[ -z "${NIM_KEY}" ]]; then
         NIM_KEY=$(grep -E "^NIM_API_KEYS=" .env | cut -d'=' -f2- || true)
     fi
@@ -209,6 +214,7 @@ log "Writing production configuration (.env)..."
     echo "ANALYTICS_ENABLED=true"
     echo "ROUTING_ENABLED=true"
     echo "ADMIN_PASSWORD=${ADMIN_PASS}"
+    echo "ADMIN_EMAIL=${ADMIN_EMAIL_ADDR}"
     echo "NIM_API_KEYS=${NIM_KEY}"
     echo "HOST=0.0.0.0"
     echo "PORT=8080"
@@ -230,22 +236,44 @@ log "Building and starting Potato Gateway container..."
 docker compose -f docker-compose.do.yml up -d --build
 
 # 7. Health Check Verification Loop
-log "Waiting for Potato container healthcheck (/ready)..."
+log "Waiting for Potato container healthcheck (/ready or /health)..."
 READY=0
-for i in $(seq 1 60); do
+HEALTHY=0
+for i in $(seq 1 15); do
     if curl -fsS http://127.0.0.1:8080/ready &>/dev/null; then
         READY=1
+        HEALTHY=1
         break
     fi
     sleep 2
 done
 
-if [[ ${READY} -ne 1 ]]; then
-    warn "Potato did not respond on /ready within 120s. Checking logs:"
+if [[ ${READY} -eq 0 ]]; then
+    # /ready failed (likely no upstream API keys set yet). Test basic /health endpoint.
+    for i in $(seq 1 15); do
+        if curl -fsS http://127.0.0.1:8080/health &>/dev/null; then
+            HEALTHY=1
+            break
+        fi
+        sleep 2
+    done
+fi
+
+if [[ ${HEALTHY} -ne 1 ]]; then
+    warn "Potato container did not respond on /ready or /health within 60s. Checking logs:"
     docker compose -f docker-compose.do.yml logs --tail=50
+    warn "Your generated credentials are saved in .env:"
+    warn "  ADMIN_PASSWORD=${ADMIN_PASS}"
+    warn "  PROXY_API_KEYS=${PROXY_KEY}"
     err "Deployment health check failed."
 fi
-ok "Potato Gateway container is running and HEALTHY!"
+
+if [[ ${READY} -eq 1 ]]; then
+    ok "Potato Gateway container is running and HEALTHY!"
+else
+    warn "Potato Gateway container is RUNNING in DEGRADED mode (no upstream API keys configured)."
+    warn "Log into the Web Dashboard at /dashboard using your Admin Password to add provider keys!"
+fi
 
 # 8. Firewall Configuration (Linux Only)
 if [[ "$OS" == "Linux" ]]; then
@@ -345,16 +373,30 @@ else
 fi
 
 # 10. Completion Summary Display
-echo -e "\n${GREEN}${BOLD}"
-echo "=============================================================================="
-echo "                 🎉 POTATO DEPLOYMENT COMPLETE!                             "
-echo "=============================================================================="
-echo -e "${NC}"
+if [[ ${READY} -eq 1 ]]; then
+    echo -e "\n${GREEN}${BOLD}"
+    echo "=============================================================================="
+    echo "                 🎉 POTATO DEPLOYMENT COMPLETE (HEALTHY)!                     "
+    echo "=============================================================================="
+    echo -e "${NC}"
+else
+    echo -e "\n${YELLOW}${BOLD}"
+    echo "=============================================================================="
+    echo "         ⚠️  POTATO RUNNING IN DEGRADED MODE (NO PROVIDER KEYS SET)          "
+    echo "=============================================================================="
+    echo -e "${NC}"
+    echo -e "👉 ${YELLOW}Next Step:${NC} Log into ${BOLD}${PUBLIC_URL}/dashboard${NC} using your Admin Password below"
+    echo -e "   and add provider keys under ${BOLD}Providers${NC} to start routing requests!"
+    echo "------------------------------------------------------------------------------"
+fi
 echo -e "🔗 ${BOLD}Dashboard URL:${NC}       ${PUBLIC_URL}/dashboard"
-echo -e "🔑 ${BOLD}Admin Password:${NC}      ${ADMIN_PASS}"
+echo -e "🔑 ${BOLD}Dashboard Login${NC} (${BOLD}Sign In${NC} tab):"
+echo -e "   ${BOLD}Email:${NC}      ${ADMIN_EMAIL_ADDR}"
+echo -e "   ${BOLD}Password:${NC}   ${ADMIN_PASS}"
+echo -e "🔑 ${BOLD}API Key Direct${NC} (${BOLD}API Key Direct${NC} tab):"
+echo -e "   ${BOLD}API Key:${NC}    ${PROXY_KEY}"
 echo -e "⚡ ${BOLD}OpenAI API Base:${NC}     ${PUBLIC_URL}/v1"
 echo -e "💬 ${BOLD}Anthropic API Base:${NC}  ${PUBLIC_URL}/v1"
-echo -e "🔑 ${BOLD}Proxy API Key:${NC}       ${PROXY_KEY}"
 echo -e "🎯 ${BOLD}Default Model:${NC}       potato/auto"
 echo "------------------------------------------------------------------------------"
 echo -e "${BOLD}Integration Snippets:${NC}"

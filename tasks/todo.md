@@ -1,8 +1,8 @@
-# Task Plan: Agent Tool Integrations (Cursor, OpenCode, Cline, Claude Code) & Production Ready README
+# Tasks: Seamless First-Time Admin Onboarding (P0-1)
 
-- [x] 1. Expand `_AUTO_ALIAS` in `auto_router.py` for agent model names (`cursor/auto`, `claude-3-5-sonnet`, `opencode-go`, `cline/auto`, etc.)
-- [x] 2. Enrich `/v1/models` responses with context window & capability metadata in `registry.py`
-- [x] 3. Update `claude.py` to support `x-api-key` header for Claude Code CLI and Anthropic SDK compatibility
-- [x] 4. Update `openai.py` for `stream_options` and Cursor checksum headers
-- [x] 5. Revamp `README.md` with integration guides for Cursor, Claude Code CLI, Cline, OpenCode, and DigitalOcean
-- [x] 6. Run `pytest tests/` and `./build-frontend.sh` to verify zero errors (337 passed, 0 failed)
+- [ ] Add `admin_email` and `admin_password` to `Settings` in `src/potato/config.py` <!-- id: 0 -->
+- [ ] Implement automatic admin seeding in `_init_accounts` inside `src/potato/main.py` <!-- id: 1 -->
+- [ ] Update `deploy.sh` to write `ADMIN_EMAIL` to `.env` and display clean login instructions in summary <!-- id: 2 -->
+- [ ] Update `.env.example` with `ADMIN_EMAIL` and `ADMIN_PASSWORD` documentation <!-- id: 3 -->
+- [ ] Add unit test verifying auto-seeding of admin account from settings <!-- id: 4 -->
+- [ ] Run test suite (`pytest` and `bash -n deploy.sh`) <!-- id: 5 -->

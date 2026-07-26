@@ -173,11 +173,11 @@ Potato exposes three primary protocol surfaces:
 
 ---
 
-## 📦 Production Deployment Guide (DigitalOcean)
+## 📦 Production & Local Deployment Guide
 
-### ⚡ 1-Line Automatic Deployment
+### ⚡ 1-Line Automatic Deployment (Debian / Ubuntu / DigitalOcean)
 
-Run this single command on any fresh Ubuntu / DigitalOcean Droplet to install Docker, setup secrets, launch containers, configure UFW firewall rules, and verify health automatically:
+Run this single command on any fresh Debian PC, Ubuntu server, or DigitalOcean Droplet to install Docker, setup secrets, launch containers, configure UFW firewall rules, and verify health automatically:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh | sudo bash
@@ -187,6 +187,98 @@ Or pass your domain for automatic SSL HTTPS configuration via Caddy:
 
 ```bash
 DOMAIN_NAME="api.yourdomain.com" curl -fsSL https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh | sudo bash
+```
+
+---
+
+### 🐧 Local Debian / Linux Setup & First-Time Admin Key
+
+When deploying locally on Debian or Ubuntu:
+
+1. **Automatic Credential Generation**:
+   On the first run, `deploy.sh` automatically generates `ADMIN_PASSWORD` (used to log into `/dashboard`) and `PROXY_API_KEYS` (used by clients/SDKs), saving them securely into `.env` with `chmod 600`.
+2. **First-Time Boot & Degraded Mode**:
+   If no provider API keys are present in `.env` before running the script, Potato boots into **Degraded Mode**. The deployment script will display a yellow completion banner with your generated **`ADMIN_PASSWORD`** and **`PROXY_API_KEYS`**.
+3. **Adding Provider Keys via Dashboard**:
+   - Open `http://localhost:8080/dashboard` (or `http://127.0.0.1:8080/dashboard`).
+   - Log in using your generated **`ADMIN_PASSWORD`**.
+   - Navigate to **Providers** and add your upstream provider API keys (Groq, NVIDIA NIM, OpenRouter, DeepSeek, Cerebras, etc.).
+4. **Retrieving Your Admin Password Anytime**:
+   If you ever need to view your generated admin password on the host machine:
+   ```bash
+   sudo grep ADMIN_PASSWORD /opt/potato/.env
+   # Or inside local repo:
+   grep ADMIN_PASSWORD .env
+   ```
+
+---
+
+### 🌐 Zero-Config Internet Tunneling (No IP / Port Forwarding Required)
+
+To expose your local Debian deployment to the public internet securely without a static IP address or router port forwarding:
+
+#### Method 1: Cloudflare Tunnel (`cloudflared`) — RECOMMENDED (Free & Automatic HTTPS)
+
+Cloudflare Tunnel creates an outbound-only encrypted connection to Cloudflare's edge network, giving you a free, public HTTPS URL.
+
+##### 1. Install `cloudflared` on Debian / Ubuntu:
+```bash
+# Add Cloudflare GPG key and APT repository
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /etc/apt/keyrings/cloudflare-main.gpg >/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflared.list
+
+# Update & install
+sudo apt-get update && sudo apt-get install -y cloudflared
+```
+
+##### 2. Launch Instant Public HTTPS Tunnel:
+```bash
+cloudflared tunnel --url http://localhost:8080
+```
+*Outputs a public URL like:* `https://your-random-subdomain.trycloudflare.com`
+
+##### 3. (Optional) Run as a Background Systemd Daemon (Custom Domain):
+```bash
+# Authenticate cloudflared
+cloudflared tunnel login
+
+# Create a persistent tunnel
+cloudflared tunnel create potato-gateway
+
+# Route your domain (e.g. gateway.yourdomain.com)
+cloudflared tunnel route dns potato-gateway gateway.yourdomain.com
+
+# Install as systemd service on Debian
+sudo cloudflared service install
+```
+
+#### Method 2: Tailscale Funnel
+
+If you use Tailscale on your Debian machine, expose local port 8080 directly over public HTTPS:
+
+```bash
+sudo tailscale funnel 8080
+```
+*Access your gateway at:* `https://<node-name>.<tailnet-name>.ts.net`
+
+#### Method 3: `ngrok`
+
+```bash
+# Install ngrok
+curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
+echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
+sudo apt update && sudo apt install ngrok
+
+# Expose local port 8080
+ngrok http 8080
+```
+
+#### Method 4: `localtunnel`
+
+```bash
+# Requires Node.js
+npx localtunnel --port 8080
 ```
 
 ---
