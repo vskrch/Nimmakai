@@ -185,16 +185,22 @@ Potato exposes three primary protocol surfaces:
 
 ### ⚡ 1-Line Automatic Deployment (Self-Healing Cloudflare Tunnel & Zero-Config HTTPS)
 
-Run this single command on any fresh Debian PC, Ubuntu server, local Linux machine, or DigitalOcean Droplet to auto-provision Docker/Python, auto-create credentials, configure firewalls, and launch a **self-healing Cloudflare HTTPS tunnel** out of the box:
+Run any of the following commands on any fresh Debian PC, Ubuntu server, local Linux machine, or DigitalOcean Droplet to auto-provision Docker/Python, auto-create credentials, configure firewalls, and launch Potato Gateway out of the box:
+
+#### Option 1: Free Cloudflare HTTPS Quick Tunnel (No Domain Required)
 
 ```bash
+# Method A: Direct pipe to bash
 curl -sSL https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh | bash -s -- --tunnel
+
+# Method B: Download & run locally
+curl -sSL -o deploy.sh https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh && bash deploy.sh --tunnel
 ```
 
-Or pass your custom domain for automatic Caddy SSL certificate configuration:
+#### Option 2: Persistent Named Tunnel (Custom Domain with Cloudflare Token)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh | bash -s -- --domain=api.yourdomain.com
+curl -sSL https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh | bash -s -- --token=YOUR_CLOUDFLARE_TOKEN --domain=potato.yourdomain.com
 ```
 
 ---
