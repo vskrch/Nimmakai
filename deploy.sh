@@ -588,6 +588,9 @@ EOF
     if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
         if [[ -n "${DOMAIN_NAME}" ]]; then
             PUBLIC_URL="https://${DOMAIN_NAME}"
+        else
+            warn "Cloudflare Token Tunnel configured, but no --domain=... was passed to deploy.sh."
+            warn "To format summary URLs with your domain, run: sudo bash deploy.sh --token=... --domain=potato.yourdomain.com"
         fi
         ok "Cloudflare Token Tunnel active service configured."
         if [[ -f .env ]]; then
