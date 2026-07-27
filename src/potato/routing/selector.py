@@ -525,6 +525,15 @@ class ModelSelector:
         models_fallback: list[str],
         is_custom_ladder: bool = False,
     ) -> list[str]:
+        # Custom ladders: only keep models that are actually live in the
+        # registry. If none survive, the caller (resolve) falls back to
+        # potato/auto instead of the generic intent pool.
+        if is_custom_ladder and self.registry.live_ids:
+            chain = [
+                m for m in chain
+                if (self.registry.resolve_live_id(m) or m) in self.registry.live_ids
+                or m in self.registry.live_ids
+            ]
         # OpenRouter models[] as extra fallback candidates
         if models_fallback:
             for m in models_fallback:
