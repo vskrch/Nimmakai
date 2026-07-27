@@ -68,7 +68,7 @@ function renderInline(text: string, keyBase: string): React.ReactNode[] {
   return nodes
 }
 
-export function Markdown({ content }: { content: string }) {
+export function Markdown({ content, streaming = false }: { content: string; streaming?: boolean }) {
   const blocks = content.split(/```/)
   const out: React.ReactNode[] = []
   blocks.forEach((block, bi) => {
@@ -144,10 +144,72 @@ export function Markdown({ content }: { content: string }) {
         )
         continue
       }
+      // blockquote
+      if (/^>\s+/.test(trimmed)) {
+        flushPara()
+        const items: string[] = []
+        while (i < lines.length && /^>\s?/.test(lines[i])) {
+          items.push(lines[i].replace(/^>\s?/, ''))
+          i++
+        }
+        out.push(
+          <blockquote key={`bq-${bi}-${i}`} className="my-3 pl-4 border-l-2 border-violet-500/40 text-zinc-300 italic">
+            {items.map((it, j) => <p key={j} className="leading-relaxed">{renderInline(it, `bq-${bi}-${j}`)}</p>)}
+          </blockquote>
+        )
+        continue
+      }
+      // horizontal rule
+      if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+        flushPara()
+        out.push(<hr key={`hr-${bi}-${i}`} className="my-4 border-white/[0.08]" />)
+        i++; continue
+      }
+      // table (GFM: | col | col | with --- separator row)
+      if (/^\|.*\|$/.test(trimmed) && i + 1 < lines.length && /^\|[\s:|-]+\|$/.test(lines[i + 1].trim())) {
+        flushPara()
+        const headers = trimmed.slice(1, -1).split('|').map(h => h.trim())
+        i += 2 // skip header + separator
+        const rows: string[][] = []
+        while (i < lines.length && /^\|.*\|$/.test(lines[i].trim())) {
+          rows.push(lines[i].trim().slice(1, -1).split('|').map(c => c.trim()))
+          i++
+        }
+        out.push(
+          <div key={`tbl-${bi}-${i}`} className="my-3 overflow-x-auto custom-scrollbar">
+            <table className="w-full text-[13px] border-collapse">
+              <thead>
+                <tr className="border-b border-white/[0.1]">
+                  {headers.map((h, j) => (
+                    <th key={j} className="text-left px-3 py-2 font-semibold text-white">{renderInline(h, `th-${bi}-${j}`)}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row, ri) => (
+                  <tr key={ri} className="border-b border-white/[0.04]">
+                    {row.map((c, ci) => (
+                      <td key={ci} className="px-3 py-2 text-zinc-300">{renderInline(c, `td-${bi}-${ri}-${ci}`)}</td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
+        continue
+      }
       para.push(trimmed)
       i++
     }
     flushPara()
   })
-  return <div className="text-[14px] text-zinc-100">{out}</div>
+  return (
+    <div className="text-[14px] text-zinc-100">
+      {out}
+      {streaming && (
+        <span className="inline-block w-2 h-4 bg-violet-400 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
+      )}
+    </div>
+  )
 }

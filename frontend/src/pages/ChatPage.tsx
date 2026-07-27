@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowUp, Check, ChevronDown, Copy, Edit3, History, Info, Loader2, Menu,
-  Plus, Search, Send, Settings, Shield, ShieldOff, Square, Trash2, User,
+  Plus, RefreshCw, Search, Send, Settings, Shield, ShieldOff, Square, Trash2, User,
   Wrench, X, Zap,
 } from 'lucide-react'
 import { clsx } from 'clsx'
@@ -573,6 +573,7 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
   const abortRef = useRef<AbortController | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+  const stickToBottomRef = useRef(true)
 
   // initial load
   useEffect(() => {
@@ -591,9 +592,22 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
     if (settings.keepHistory) saveConversations(conversations)
   }, [conversations, settings.keepHistory])
 
-  // auto-scroll
+  // smart auto-scroll: only stick to bottom when user is already there.
+  // When the user scrolls up to read history, don't yank them back down on
+  // every new token — re-stick when they return to the bottom.
   useEffect(() => {
-    if (scrollRef.current) {
+    const el = scrollRef.current
+    if (!el) return
+    const onScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+      stickToBottomRef.current = atBottom
+    }
+    el.addEventListener('scroll', onScroll, { passive: true })
+    return () => el.removeEventListener('scroll', onScroll)
+  }, [])
+
+  useEffect(() => {
+    if (scrollRef.current && stickToBottomRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   })
@@ -805,6 +819,28 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
     abortRef.current?.abort()
   }, [])
 
+  // Regenerate: drop the last assistant message and re-send the preceding
+  // user message. Respects the current model + settings.
+  const regenerate = useCallback(async () => {
+    if (!active || streaming) return
+    const msgs = active.messages
+    // find last assistant message index
+    let lastAsst = -1
+    for (let k = msgs.length - 1; k >= 0; k--) {
+      if (msgs[k].role === 'assistant') { lastAsst = k; break }
+    }
+    if (lastAsst < 1) return
+    const trimmed = msgs.slice(0, lastAsst) // drop assistant + anything after
+    setConversations(prev => prev.map(c => c.id === active.id ? { ...c, messages: trimmed } : c))
+    // re-run send with the last user message content
+    const lastUser = [...trimmed].reverse().find(m => m.role === 'user')
+    if (lastUser) {
+      setInput(lastUser.content)
+      // let state settle, then send
+      setTimeout(() => send(), 0)
+    }
+  }, [active, streaming, send])
+
   // ---------- model picker ----------
   const selectedModel = useMemo(() => models.find(m => m.id === settings.model), [models, settings.model])
   const modelContext = selectedModel
@@ -1010,6 +1046,15 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
                       {m.model && m.role === 'assistant' && (
                         <span className="text-[10px] text-zinc-500 font-mono">{m.model}</span>
                       )}
+                      {m.content && m.role === 'assistant' && !streaming && i === active.messages.length - 1 && (
+                        <button
+                          onClick={regenerate}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md text-zinc-500 hover:text-violet-300 hover:bg-white/[0.05]"
+                          title="Regenerate response"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                        </button>
+                      )}
                       {m.content && (
                         <button
                           onClick={() => navigator.clipboard.writeText(m.content)}
@@ -1052,7 +1097,7 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
                       </div>
                     )}
                     {m.content
-                      ? <Markdown content={m.content} />
+                      ? <Markdown content={m.content} streaming={streaming && i === active.messages.length - 1} />
                       : streaming && i === active.messages.length - 1
                         ? (
                           <div className="flex items-center gap-2 text-violet-400 text-[13px]">
