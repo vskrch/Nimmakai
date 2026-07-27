@@ -1,13 +1,28 @@
 {
   "intent_totals": {
     "chat_fast": 3,
-    "coding_agentic": 4,
+    "coding_agentic": 6,
+    "embeddings": 0,
     "long_horizon": 0,
     "reasoning": 0,
     "vision": 0
   },
   "intents": {
     "chat_fast": {
+      "minimaxai/minimax-m3": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
       "model-a": {
         "empty_replies": 0,
         "ewma_quality": 0.237,
@@ -64,6 +79,34 @@
         "total_requests": 0,
         "unavailable": 0
       },
+      "stepfun/step-3.7-flash": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
+      "zai/glm-5.2": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
       "zen/mimo-v2.5-free": {
         "empty_replies": 0,
         "ewma_quality": 0.0,
@@ -80,6 +123,20 @@
       }
     },
     "coding_agentic": {
+      "minimaxai/minimax-m3": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
       "model-a": {
         "empty_replies": 0,
         "ewma_quality": 0.3,
@@ -110,9 +167,23 @@
       },
       "nvidia/nemotron-3-super-120b-a12b": {
         "empty_replies": 0,
+        "ewma_quality": 0.657,
+        "failures": 0,
+        "last_updated": 1785112650.9276779,
+        "score_delta": 7.88,
+        "successes": 3,
+        "thompson_alpha": 4.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 3,
+        "unavailable": 0
+      },
+      "qwen/qwen3.5-122b-a10b": {
+        "empty_replies": 0,
         "ewma_quality": 0.51,
         "failures": 0,
-        "last_updated": 1785112396.869971,
+        "last_updated": 1785112650.369238,
         "score_delta": 6.12,
         "successes": 2,
         "thompson_alpha": 3.0,
@@ -122,18 +193,32 @@
         "total_requests": 2,
         "unavailable": 0
       },
-      "qwen/qwen3.5-122b-a10b": {
+      "stepfun/step-3.7-flash": {
         "empty_replies": 0,
-        "ewma_quality": 0.3,
+        "ewma_quality": 0.0,
         "failures": 0,
-        "last_updated": 1785112395.79019,
-        "score_delta": 3.6,
-        "successes": 1,
-        "thompson_alpha": 2.0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
         "thompson_beta": 1.0,
         "tool_fail": 0,
         "tool_ok": 0,
-        "total_requests": 1,
+        "total_requests": 0,
+        "unavailable": 0
+      },
+      "zai/glm-5.2": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
         "unavailable": 0
       },
       "zen/mimo-v2.5-free": {
@@ -151,7 +236,37 @@
         "unavailable": 0
       }
     },
+    "embeddings": {
+      "nim/nv-embed-v1": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      }
+    },
     "long_horizon": {
+      "minimaxai/minimax-m3": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
       "model-a": {
         "empty_replies": 0,
         "ewma_quality": 0.0,
@@ -195,6 +310,34 @@
         "unavailable": 0
       },
       "qwen/qwen3.5-122b-a10b": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
+      "stepfun/step-3.7-flash": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
+      "zai/glm-5.2": {
         "empty_replies": 0,
         "ewma_quality": 0.0,
         "failures": 0,
@@ -224,6 +367,20 @@
       }
     },
     "reasoning": {
+      "minimaxai/minimax-m3": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
       "model-a": {
         "empty_replies": 0,
         "ewma_quality": 0.0,
@@ -280,6 +437,34 @@
         "total_requests": 0,
         "unavailable": 0
       },
+      "stepfun/step-3.7-flash": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
+      "zai/glm-5.2": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
       "zen/mimo-v2.5-free": {
         "empty_replies": 0,
         "ewma_quality": 0.0,
@@ -296,7 +481,35 @@
       }
     },
     "vision": {
+      "minimaxai/minimax-m3": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
       "qwen/qwen3.5-122b-a10b": {
+        "empty_replies": 0,
+        "ewma_quality": 0.0,
+        "failures": 0,
+        "last_updated": 0.0,
+        "score_delta": 0.0,
+        "successes": 0,
+        "thompson_alpha": 1.0,
+        "thompson_beta": 1.0,
+        "tool_fail": 0,
+        "tool_ok": 0,
+        "total_requests": 0,
+        "unavailable": 0
+      },
+      "stepfun/step-3.7-flash": {
         "empty_replies": 0,
         "ewma_quality": 0.0,
         "failures": 0,
@@ -326,5 +539,5 @@
       }
     }
   },
-  "saved_at": 1785112397.734795
+  "saved_at": 1785112650.928688
 }
