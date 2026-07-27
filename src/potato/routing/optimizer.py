@@ -89,7 +89,20 @@ def _speed_factor(health: Any, model_id: str) -> float:
     """
     h = health._by_model.get(model_id) if health is not None else None
     if h is None or (h.samples == 0 and h.ewma_tok_per_s <= 0):
-        return 0.85  # unexplored — slight discount vs proven fast
+        # Intelligent cold-start speed signal combining provider capability and model scale
+        from potato.catalog.presets import speed_prior_for_provider
+        from potato.catalog.providers import split_provider_model
+
+        provider_ids = getattr(health, "_provider_ids", set()) if health is not None else set()
+        pid, _ = split_provider_model(model_id, provider_ids, default_provider="nim")
+        prior = speed_prior_for_provider(pid)
+        lower_mid = model_id.lower()
+        scale = 1.0
+        if any(token in lower_mid for token in ("flash", "mini", "8b", "7b", "3b", "1.5b", "instant", "fast", "turbo", "haiku")):
+            scale = 1.22
+        elif any(token in lower_mid for token in ("550b", "405b", "120b", "122b", "70b", "ultra", "pro", "opus", "max", "large")):
+            scale = 0.86
+        return max(0.40, min(2.20, prior * scale))
 
     # Tokens/sec (normalize ~40 TPS = 1.0, 120+ = elite)
     tps = h.ewma_tok_per_s
