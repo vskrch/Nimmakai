@@ -368,6 +368,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         if registry is not None:
             registry.ladder.provider_ids = set(hub.provider_ids)
+            registry.rl_engine = rl_engine
+            if hasattr(registry, "health") and registry.health is not None:
+                registry.health._rl_engine = rl_engine
             selector = ModelSelector(
                 registry,
                 settings,

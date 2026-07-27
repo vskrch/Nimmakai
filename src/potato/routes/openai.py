@@ -389,6 +389,8 @@ async def _prepare_routed(
             decision.feature_vector = extract_feature_vector(
                 body, headers=request.headers, intent_name=intent.intent.value
             )
+            if decision.feature_vector and selector and getattr(selector, "rl_engine", None):
+                decision.chain = selector.rank_chain_with_rl(decision.chain, decision.feature_vector)
         except Exception:
             decision.feature_vector = None
         # Rough token estimate for context-length filtering (T13)
