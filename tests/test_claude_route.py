@@ -232,3 +232,36 @@ def test_v1_messages_anthropic_endpoint(client, monkeypatch):
     assert data["role"] == "assistant"
     assert data["content"][0]["text"] == "Response for Claude UI"
     assert data["usage"]["input_tokens"] == 12
+
+
+def test_tool_call_auto_recovery():
+    from potato.routes.claude import _extract_raw_tool_calls_from_text, transform_openai_to_anthropic_json
+
+    raw_text = "<|tool_calls_section_begin|><|tool_call:read_file{\"path\": \"src/main.py\"}|><|tool_calls_section_end|>"
+    clean_text, tools = _extract_raw_tool_calls_from_text(raw_text)
+    assert clean_text == ""
+    assert len(tools) == 1
+    assert tools[0]["type"] == "tool_use"
+    assert tools[0]["name"] == "read_file"
+    assert tools[0]["input"] == {"path": "src/main.py"}
+
+    # Test full Anthropic JSON conversion with raw text tool call
+    openai_resp = {
+        "id": "cmpl-raw-tool",
+        "choices": [
+            {
+                "finish_reason": "stop",
+                "message": {
+                    "role": "assistant",
+                    "content": raw_text,
+                },
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 10},
+    }
+    converted = transform_openai_to_anthropic_json(openai_resp, "potato/coding")
+    assert converted["stop_reason"] == "tool_use"
+    assert len(converted["content"]) == 1
+    assert converted["content"][0]["type"] == "tool_use"
+    assert converted["content"][0]["name"] == "read_file"
+

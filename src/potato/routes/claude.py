@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -22,6 +23,58 @@ from potato.routes.openai import _chat_like
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["claude"])
+
+
+def _extract_raw_tool_calls_from_text(text: str) -> tuple[str, list[dict[str, Any]]]:
+    """Recover tool_use blocks and strip raw tool tokens from open-source model responses."""
+    if not text:
+        return text, []
+
+    extracted_tools: list[dict[str, Any]] = []
+    clean_text = text
+
+    # Pattern 1: <|tool_call:name{args}|>
+    for m in re.finditer(r"<\|tool_call:([a-zA-Z0-9_-]+)(\{.*?\})\|>", text, re.DOTALL):
+        name, args_str = m.group(1), m.group(2)
+        try:
+            input_data = json.loads(args_str)
+        except Exception:
+            input_data = {}
+        extracted_tools.append({
+            "type": "tool_use",
+            "id": f"toolu_{uuid.uuid4().hex[:12]}",
+            "name": name,
+            "input": input_data,
+        })
+        clean_text = clean_text.replace(m.group(0), "")
+
+    # Pattern 2: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+    for m in re.finditer(r"<tool_call>\s*(\{.*?\})\s*</tool_call>", text, re.DOTALL):
+        try:
+            payload = json.loads(m.group(1))
+            name = payload.get("name") or payload.get("function", {}).get("name", "tool")
+            args = payload.get("arguments") or payload.get("parameters") or payload.get("input") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except Exception:
+                    args = {}
+            extracted_tools.append({
+                "type": "tool_use",
+                "id": f"toolu_{uuid.uuid4().hex[:12]}",
+                "name": str(name),
+                "input": args if isinstance(args, dict) else {},
+            })
+            clean_text = clean_text.replace(m.group(0), "")
+        except Exception:
+            pass
+
+    # Strip raw section markers
+    clean_text = re.sub(r"<\|tool_calls_section_begin\|>", "", clean_text)
+    clean_text = re.sub(r"<\|tool_calls_section_end\|>", "", clean_text)
+    clean_text = clean_text.strip()
+
+    return clean_text, extracted_tools
 
 
 def _extract_text_content(content: Any) -> str:
@@ -273,11 +326,20 @@ def transform_openai_to_anthropic_json(
 
                 if content_blocks:
                     stop_reason = "tool_use"
+            elif text_content:
+                # Auto-recovery: recover tool calls printed as raw tokens/XML by open-source models
+                clean_text, recovered = _extract_raw_tool_calls_from_text(text_content)
+                if recovered:
+                    content_blocks = []
+                    if clean_text:
+                        content_blocks.append({"type": "text", "text": clean_text})
+                    content_blocks.extend(recovered)
+                    stop_reason = "tool_use"
 
             reason = first.get("finish_reason")
             if reason == "length":
                 stop_reason = "max_tokens"
-            elif reason == "stop" and not tool_calls:
+            elif reason == "stop" and not tool_calls and stop_reason != "tool_use":
                 stop_reason = "end_turn"
 
     if not content_blocks:
