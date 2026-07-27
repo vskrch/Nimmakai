@@ -44,6 +44,22 @@ aliases:
   o4-mini: chain:reasoning
   cursor-small: chain:chat_fast
   default: chain:coding_agentic
+  # Anthropic / Claude Code CLI proxy names — real Anthropic model IDs that
+  # the CLI validates client-side.  Gateway routes them to potato chains.
+  claude-3-5-sonnet-20241022: chain:coding_agentic
+  claude-3-opus-20240229: chain:coding_agentic
+  claude-3-5-haiku-20241022: chain:chat_fast
+  claude-sonnet-4-5: chain:coding_agentic
+  claude-sonnet-4-6: chain:coding_agentic
+  claude-opus-4-5: chain:coding_agentic
+  claude-opus-4-6: chain:coding_agentic
+  claude-opus-4-7: chain:coding_agentic
+  claude-opus-4-8: chain:coding_agentic
+  claude-opus-5: chain:coding_agentic
+  claude-haiku-4-5: chain:chat_fast
+  claude-sonnet-5: chain:coding_agentic
+  claude-fable-5: chain:reasoning
+  claude-mythos-5: chain:reasoning
   # OpenRouter / Kilo names are handled as auto-router virtual models
   # (see routing/auto_router.py) — not as chain aliases.
 

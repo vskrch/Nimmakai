@@ -521,7 +521,7 @@ async def get_model(model_id: str, request: Request) -> JSONResponse:
             "kilo-auto/balanced",
             "kilo-auto/efficient",
             "kilo-auto/free",
-        }:
+        } or registry.is_alias(model_id):
             for m in registry.synthetic_auto_models():
                 if m["id"] == model_id or (
                     model_id == "auto" and m["id"] in {"auto", "potato/auto"}

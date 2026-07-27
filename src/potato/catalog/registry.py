@@ -1184,6 +1184,10 @@ class ModelRegistry:
 
         Includes OpenRouter- and Kilo-compatible auto-router ids so clients that
         hard-code ``openrouter/auto`` or ``kilo-auto/*`` work drop-in.
+
+        Also includes Anthropic model-name proxies so Claude Code CLI (which
+        validates model names client-side against /v1/models) can pass its own
+        model ids through to the gateway unchanged.
         """
         from potato.routing.auto_router import all_auto_router_ids
 
@@ -1217,4 +1221,23 @@ class ModelRegistry:
                     "owned_by": owned.get(mid, "potato"),
                 }
             )
+
+        # Anthropic / Claude Code CLI proxy names ─ these appear in /v1/models
+        # so the CLI's client-side model validation passes.  The alias system
+        # in models.yaml routes them to the correct intent chain.
+        anthropic_base = {
+            **base,
+            "owned_by": "anthropic",
+        }
+        for alias_name in self.catalog.aliases:
+            if alias_name.startswith("claude-"):
+                out.append(
+                    {
+                        **anthropic_base,
+                        "id": alias_name,
+                        "root": alias_name,
+                    }
+                )
+
         return out
+
