@@ -34,10 +34,12 @@ def test_transform_anthropic_to_openai():
         ],
         "max_tokens": 500,
         "temperature": 0.5,
+        "tool_choice": {"type": "any"},
     }
     openai_payload = transform_anthropic_to_openai(anthropic_payload)
     assert openai_payload["model"] == "potato/auto"
     assert openai_payload["max_tokens"] == 500
+    assert openai_payload["tool_choice"] == "required"
     assert openai_payload["temperature"] == 0.5
     assert len(openai_payload["messages"]) == 2
     assert openai_payload["messages"][0] == {"role": "system", "content": "Be concise"}

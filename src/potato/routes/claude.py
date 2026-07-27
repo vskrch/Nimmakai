@@ -149,6 +149,25 @@ def transform_anthropic_to_openai(body: dict[str, Any]) -> dict[str, Any]:
                 })
         openai_body["tools"] = openai_tools
 
+    # Transform Anthropic tool_choice format to OpenAI tool_choice format
+    if "tool_choice" in body:
+        tc = body["tool_choice"]
+        if isinstance(tc, str):
+            openai_body["tool_choice"] = tc
+        elif isinstance(tc, dict):
+            ttype = tc.get("type")
+            if ttype == "auto":
+                openai_body["tool_choice"] = "auto"
+            elif ttype == "any":
+                openai_body["tool_choice"] = "required"
+            elif ttype == "tool":
+                tname = tc.get("name")
+                if tname:
+                    openai_body["tool_choice"] = {
+                        "type": "function",
+                        "function": {"name": tname},
+                    }
+
     # Construct messages array
     openai_msgs: list[dict[str, Any]] = []
 
