@@ -7,7 +7,7 @@ defaults:
     - ""
   passthrough_if_known: true
   max_fallback_attempts: 6
-  classify_mode: rules_only
+  classify_mode: dynamic
   # Resolve families against live NVIDIA docs + /v1/models (no hardcoded best ids)
   dynamic_families: true
 

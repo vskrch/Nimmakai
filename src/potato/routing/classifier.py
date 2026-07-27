@@ -175,13 +175,36 @@ class IntentClassifier:
             self.stats[result.intent.value] = self.stats.get(result.intent.value, 0) + 1
             return result
 
-        if self.settings and getattr(self.settings, "classify_mode", "") == "tinyrouter":
+        mode = getattr(self.settings, "classify_mode", "rules_only") if self.settings else "rules_only"
+        if headers is not None and hasattr(headers, "get"):
+            override_mode = headers.get("x-potato-classify-mode") or headers.get("X-Potato-Classify-Mode")
+            if override_mode and str(override_mode).strip().lower() in ("dynamic", "tinyrouter", "rules_only", "rules_then_llm"):
+                mode = str(override_mode).strip().lower()
+
+        if mode == "tinyrouter":
             result = self.tiny_router.classify_intent(body=body, headers=headers, path=path_l)
             self.stats[result.intent.value] = self.stats.get(result.intent.value, 0) + 1
             return result
 
         features = self._extract_features(body, path_l)
-        result = self._rules(features, path_l)
+        rule_result = self._rules(features, path_l)
+
+        if mode == "dynamic":
+            if rule_result.confidence >= 0.70:
+                result = rule_result
+            else:
+                tr_result = self.tiny_router.classify_intent(body=body, headers=headers, path=path_l)
+                if tr_result.confidence > rule_result.confidence:
+                    result = IntentResult(
+                        intent=tr_result.intent,
+                        confidence=tr_result.confidence,
+                        rule_id="dynamic_tinyrouter_neural",
+                        features={**rule_result.features, **tr_result.features},
+                    )
+                else:
+                    result = rule_result
+        else:
+            result = rule_result
 
         # Auto-routing + weak classification → try tinyrouter neural classification or force coding
         raw_model = str(body.get("model") or "").lower()

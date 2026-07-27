@@ -60,3 +60,16 @@ def test_classifier_integration_with_tinyrouter_mode():
     )
     assert result.rule_id == "tinyrouter_10k_neural"
     assert "tinyrouter_probs" in result.features
+
+
+def test_classifier_integration_with_dynamic_mode():
+    settings = Settings(classify_mode="dynamic")
+    classifier = IntentClassifier(settings=settings)
+
+    result = classifier.classify(
+        path="/v1/chat/completions",
+        body={"messages": [{"role": "user", "content": "Write a complex Python script to compute prime factors"}]},
+    )
+    assert result.intent in (Intent.CODING_AGENTIC, Intent.REASONING, Intent.CHAT_FAST, Intent.LONG_HORIZON)
+    assert result.rule_id in ("dynamic_tinyrouter_neural", "rule_code_keywords", "short_chat", "forced_header")
+

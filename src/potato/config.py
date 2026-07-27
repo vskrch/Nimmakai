@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     # Catalog / routing
     models_config_path: str = "config/models.yaml"
     routing_enabled: bool = True
-    classify_mode: Literal["rules_only", "rules_then_llm", "tinyrouter"] = "rules_only"
+    classify_mode: Literal["rules_only", "rules_then_llm", "tinyrouter", "dynamic"] = "dynamic"
     enable_fallback_on_explicit: bool = True
     max_model_fallbacks: int = 10  # universal fallback cap; per-intent below
     per_attempt_budget_seconds: float = 30.0
