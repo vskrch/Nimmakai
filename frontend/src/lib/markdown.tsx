@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useState } from 'react'
 
 // ponytail: minimal markdown — fences, inline code, bold/italic, links, lists, headings.
 // No deps. Good enough for chat output. Upgrade to marked/react-markdown if needed.
@@ -7,6 +7,28 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, c => (
     { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!
   ))
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text).then(() => {
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        }).catch(() => {})
+      }}
+      className={`absolute top-2 right-2 px-2 py-1 rounded-md text-[10px] font-mono font-medium border transition-all ${
+        copied
+          ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+          : 'bg-zinc-900/80 border-white/[0.08] text-zinc-500 hover:text-zinc-200 hover:border-white/15'
+      }`}
+      title={copied ? 'Copied!' : 'Copy code'}
+    >
+      {copied ? '✓ copied' : 'copy'}
+    </button>
+  )
 }
 
 function renderInline(text: string, keyBase: string): React.ReactNode[] {
@@ -56,10 +78,13 @@ export function Markdown({ content }: { content: string }) {
       const lang = nl > 0 ? block.slice(0, nl).trim() : ''
       const code = nl > 0 ? block.slice(nl + 1) : block
       out.push(
-        <pre key={`pre-${bi}`} className="my-3 p-4 rounded-xl bg-zinc-950 border border-white/[0.08] overflow-x-auto custom-scrollbar">
-          {lang && <div className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2 font-semibold select-none">{lang}</div>}
-          <code className="font-mono text-[12.5px] text-zinc-200 leading-relaxed whitespace-pre">{code.replace(/\n$/, '')}</code>
-        </pre>
+        <div key={`pre-${bi}`} className="relative my-3 group">
+          <pre className="p-4 pr-16 rounded-xl bg-zinc-950 border border-white/[0.08] overflow-x-auto custom-scrollbar">
+            {lang && <div className="text-[10px] text-zinc-500 uppercase tracking-widest mb-2 font-semibold select-none">{lang}</div>}
+            <code className="font-mono text-[12.5px] text-zinc-200 leading-relaxed whitespace-pre">{code.replace(/\n$/, '')}</code>
+          </pre>
+          <CopyButton text={code.replace(/\n$/, '')} />
+        </div>
       )
       return
     }

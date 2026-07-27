@@ -46,6 +46,16 @@ const DEFAULT_MODEL = 'potato/auto'
 const DEFAULT_CONTEXT = 256000
 const MAX_CONVERSATIONS = 100
 
+// Empty-state prompt suggestions — clickable chips that prefill the composer.
+const SUGGESTIONS = [
+  { label: 'Write a Python function', prompt: 'Write a Python function to compute the nth Fibonacci number using memoization', icon: '🐍' },
+  { label: 'Explain a concept', prompt: 'Explain how transformer attention works, step by step', icon: '💡' },
+  { label: 'Debug some code', prompt: 'Why does this throw a TypeError?\n\n```python\nx = [1, 2, 3]\nprint(x.sum())\n```', icon: '🐛' },
+  { label: 'Draft an email', prompt: 'Draft a professional email to my team announcing a project kickoff meeting next Tuesday', icon: '✉' },
+  { label: 'Brainstorm ideas', prompt: 'Brainstorm 5 creative product ideas that combine AI with everyday household tasks', icon: '✨' },
+  { label: 'Compare options', prompt: 'Compare PostgreSQL vs MongoDB for a real-time analytics workload', icon: '⚖' },
+]
+
 interface ChatSettings {
   model: string
   temperature: number
@@ -610,6 +620,23 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
     inputRef.current?.focus()
   }, [])
 
+  // keyboard shortcuts: Cmd/Ctrl+K = new chat, Cmd/Ctrl+/ = focus model picker
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+      if (e.key === 'k' || e.key === 'K') {
+        e.preventDefault()
+        newChat()
+      } else if (e.key === '/') {
+        e.preventDefault()
+        setShowModels(true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [newChat])
+
   const deleteConv = useCallback((id: string) => {
     setConversations(prev => prev.filter(c => c.id !== id))
     if (activeId === id) setActiveId(null)
@@ -938,7 +965,7 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
                 <Zap className="w-8 h-8 text-white fill-white" />
               </div>
               <h1 className="text-2xl font-bold text-white mb-2">How can I help today?</h1>
-              <p className="text-[13px] text-zinc-400 max-w-md">
+              <p className="text-[13px] text-zinc-400 max-w-md mb-6">
                 Chat with {models.length || 'your'} available models through the Potato Gateway.
                 {!getAuthKey() && (
                   <span className="block mt-1 text-emerald-300">
@@ -948,19 +975,32 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
                 <span className="block mt-1 text-zinc-500">
                   Supports text, images, audio, and video inputs.
                 </span>
-                {!settings.keepHistory && (
-                  <span className="block mt-2 inline-flex items-center gap-1.5 text-amber-300">
-                    <ShieldOff className="w-3 h-3" /> No-retention mode — history never leaves this tab.
-                  </span>
-                )}
               </p>
+              {/* Prompt suggestion chips */}
+              <div className="flex flex-wrap gap-2 justify-center max-w-lg">
+                {SUGGESTIONS.map(s => (
+                  <button
+                    key={s.label}
+                    onClick={() => { setInput(s.prompt); inputRef.current?.focus() }}
+                    className="px-3 py-2 rounded-xl bg-zinc-900/80 border border-white/[0.08] text-[12px] text-zinc-300 hover:border-violet-500/40 hover:bg-violet-500/5 hover:text-violet-200 transition-all group"
+                  >
+                    <span className="text-violet-400/70 group-hover:text-violet-300 mr-1.5">{s.icon}</span>
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+              {!settings.keepHistory && (
+                <p className="mt-6 inline-flex items-center gap-1.5 text-[11px] text-amber-300">
+                  <ShieldOff className="w-3 h-3" /> No-retention mode — history never leaves this tab.
+                </p>
+              )}
             </div>
           )}
 
           {active && (
             <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
               {active.messages.map((m, i) => (
-                <div key={i} className="flex gap-3">
+                <div key={i} className="group flex gap-3">
                   <RoleAvatar role={m.role} model={m.model} />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
@@ -973,7 +1013,7 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
                       {m.content && (
                         <button
                           onClick={() => navigator.clipboard.writeText(m.content)}
-                          className="opacity-0 hover:opacity-100 transition-opacity p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05]"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md text-zinc-500 hover:text-zinc-200 hover:bg-white/[0.05]"
                           title="Copy"
                         >
                           <Copy className="w-3 h-3" />
@@ -1025,8 +1065,18 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
                 </div>
               ))}
               {streaming && active.messages[active.messages.length - 1]?.content && (
-                <div className="flex items-center gap-1.5 text-violet-400 text-[11px] font-mono pl-11">
-                  <span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-pulse" /> generating
+                <div className="flex items-center gap-3 pl-11 pt-1">
+                  <div className="flex items-center gap-1.5 text-violet-400 text-[11px] font-mono">
+                    <span className="w-1.5 h-1.5 bg-violet-400 rounded-full animate-pulse" /> generating
+                  </div>
+                  <button
+                    onClick={stop}
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 hover:bg-rose-500/15 text-[11px] font-medium transition-all"
+                    title="Stop generating"
+                  >
+                    <Square className="w-3 h-3 fill-current" />
+                    Stop
+                  </button>
                 </div>
               )}
             </div>
@@ -1139,43 +1189,31 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
             >
               {/* Attachment previews */}
               {attachments.length > 0 && (
-                <div className="flex flex-wrap gap-2 px-3 pt-3">
+                <div className="flex flex-wrap gap-1.5 px-3 pt-2.5">
                   {attachments.map(att => (
                     <div
                       key={att.id}
-                      className="relative group rounded-xl border border-white/[0.1] bg-zinc-950/60 overflow-hidden shrink-0"
+                      className="relative group rounded-lg border border-white/[0.08] bg-zinc-950/60 overflow-hidden shrink-0"
+                      style={{ width: '44px', height: '44px' }}
                     >
                       {att.modality === 'image' && (
-                        <img
-                          src={att.dataUrl}
-                          alt={att.name}
-                          className="w-16 h-16 object-cover"
-                        />
+                        <img src={att.dataUrl} alt={att.name} className="w-full h-full object-cover" />
                       )}
                       {att.modality === 'audio' && (
-                        <div className="w-16 h-16 flex flex-col items-center justify-center gap-1 text-zinc-300 bg-zinc-900">
-                          <audio className="hidden" />
-                          <span className="text-[9px] uppercase tracking-wider">{att.mime.split('/')[1]}</span>
-                          <span className="text-[8px] text-zinc-500">audio</span>
+                        <div className="w-full h-full flex items-center justify-center bg-zinc-900">
+                          <span className="text-[8px] uppercase tracking-wider text-violet-300">{att.mime.split('/')[1]}</span>
                         </div>
                       )}
                       {att.modality === 'video' && (
-                        <video
-                          src={att.dataUrl}
-                          className="w-16 h-16 object-cover"
-                          muted
-                        />
+                        <video src={att.dataUrl} className="w-full h-full object-cover" muted />
                       )}
                       <button
                         onClick={() => setAttachments(prev => prev.filter(a => a.id !== att.id))}
-                        className="absolute top-0.5 right-0.5 w-5 h-5 rounded-full bg-zinc-900/90 border border-white/20 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-rose-500/80 transition-all"
+                        className="absolute top-0 right-0 w-4 h-4 rounded-bl-md bg-zinc-950/90 border-l border-b border-white/15 flex items-center justify-center text-zinc-300 hover:text-white hover:bg-rose-500/80 transition-all"
                         title="Remove"
                       >
-                        <X className="w-3 h-3" />
+                        <X className="w-2.5 h-2.5" />
                       </button>
-                      <div className="absolute bottom-0 inset-x-0 px-1 py-0.5 bg-zinc-950/80 text-[8px] text-zinc-300 truncate text-center">
-                        {att.name}
-                      </div>
                     </div>
                   ))}
                 </div>
@@ -1272,9 +1310,14 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
                 </div>
               </div>
             </div>
-            <p className="text-center text-[10px] text-zinc-600 mt-2">
-              Enter to send · Shift+Enter newline · Drop files to attach · {settings.keepHistory ? 'History saved in browser' : 'No data retention'} · {!getAuthKey() && 'Public mode (no account)'}
-            </p>
+            <div className="flex items-center justify-between mt-2 text-[10px] text-zinc-600">
+              <span>
+                Enter to send · Shift+Enter newline · Drop files · {settings.keepHistory ? 'History saved' : 'No retention'}{!getAuthKey() && ' · Public mode'}
+              </span>
+              <span className="font-mono">
+                {input.length > 0 && `~${Math.max(1, Math.round(input.length / 4))} tokens`}
+              </span>
+            </div>
           </div>
         </div>
       </div>
