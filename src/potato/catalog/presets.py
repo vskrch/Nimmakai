@@ -232,7 +232,7 @@ PROVIDER_PRESETS: list[dict[str, Any]] = [
     {
         "id": "ollama",
         "name": "Ollama Cloud",
-        "base_url": "https://api.ollama.com/v1",
+        "base_url": "https://ollama.com/v1",
         "api_keys_env": "OLLAMA_CLOUD_API_KEYS",
         "rpm_limit": 60,
         "rpd_limit": 10000,

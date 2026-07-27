@@ -14,7 +14,7 @@ from potato.catalog.presets import (
 def test_ollama_cloud_preset():
     p = get_preset("ollama")
     assert p is not None
-    assert p["base_url"] == "https://api.ollama.com/v1"
+    assert p["base_url"] == "https://ollama.com/v1"
     assert p["api_keys_env"] == "OLLAMA_CLOUD_API_KEYS"
     assert p["free_tier"] is True
     assert "openai-compatible" in p["tags"]
