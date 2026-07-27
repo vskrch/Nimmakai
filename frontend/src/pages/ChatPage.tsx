@@ -458,10 +458,24 @@ async function* streamChat(
 // ponytail: regex-based scrub; the gateway also normalizes but this guards
 // against models that emit tool tokens inside delta.content directly.
 const TOOL_TOKEN_RE = /<\|tool_calls_section_begin\|>|<\|tool_calls_section_end\|>|<\|tool_call_begin\|>|<\|tool_call_end\|>|<\|tool▁calls▁begin\|>|<\|tool▁calls▁end\|>|<\|tool▁call▁begin\|>|<\|tool▁call▁end\|>|<\|im_start\|>|<\|im_end\|>/g
+
+// Reasoning blocks: many open models (DeepSeek-R1, Qwen-QwQ, GLM-Zero,
+// Nemotron, etc.) stream their internal chain-of-thought wrapped in
+// <think>...</think> (or <thinking>...</thinking>) inside delta.content.
+// The chat UI must show only the final answer, not the model's scratchpad.
+// Strip completed blocks and trailing open blocks (the answer follows).
+const THINK_BLOCK_RE = /<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>|<think(?:ing)?>[\s\S]*$/g
+
 function stripToolTokens(text: string): string {
   if (!text) return text
-  if (!text.includes('<│') && !text.includes('<|')) return text
-  return text.replace(TOOL_TOKEN_RE, '')
+  let out = text
+  if (out.includes('<think') || out.includes('<Thinking') || out.includes('<THINK')) {
+    out = out.replace(THINK_BLOCK_RE, '')
+  }
+  if (out.includes('<│') || out.includes('<|')) {
+    out = out.replace(TOOL_TOKEN_RE, '')
+  }
+  return out
 }
 
 // ---------- icons ----------

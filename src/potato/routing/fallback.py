@@ -646,7 +646,15 @@ class FallbackExecutor:
         return max(1.0, min(remaining, _per_attempt))
 
     def _is_auto_decision(self, decision: RouteDecision) -> bool:
-        """True when the client asked for auto routing (potato/auto etc.)."""
+        """True when the client asked for auto routing (potato/auto etc.).
+
+        Custom ladders (potato/coding with an admin-defined chain) are NOT
+        auto decisions — the admin picked specific models, so we must not
+        widen the chain with the live pool.  Detected via rule_id prefix
+        ``custom_ladder:`` (set by ModelSelector.resolve for admin ladders).
+        """
+        if str(decision.rule_id or "").startswith("custom_ladder:"):
+            return False
         mode = str(decision.mode or "")
         if mode in {"auto", "unknown_alias_as_auto"}:
             return True

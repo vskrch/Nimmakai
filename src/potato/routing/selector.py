@@ -183,14 +183,26 @@ class ModelSelector:
                         variant=variant,
                         allowed_models=list(opts.allowed_models),
                     )
-                # ponytail: ladder existed but _finalize_chain emptied it
+                # ponytail: custom ladder existed but _finalize_chain emptied it
                 # (chain models not live, admin-disabled, or pool-gated out).
-                # Log so this is diagnosable instead of a silent auto fallthrough.
+                # Fall back to potato/auto rather than the generic intent pool —
+                # the admin defined this ladder for a reason; if it can't serve,
+                # let the auto-router pick a working model instead of pulling
+                # random models from the intent pool.
                 logger.warning(
                     "custom_ladder %s chain emptied by finalize (live/disabled/pool) — "
-                    "falling through to auto for %s",
+                    "falling back to potato/auto for %s",
                     lad.model_id,
                     target_id,
+                )
+                # Recurse as potato/auto so the auto-router serves the request.
+                # Preserve intent + variant so the auto-router still respects the
+                # classified intent rather than re-classifying.
+                return self.resolve(
+                    "potato/auto",
+                    intent_result,
+                    auto_opts=auto_opts,
+                    preferred_model=preferred_model,
                 )
 
         # User preferences first
