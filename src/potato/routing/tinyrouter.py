@@ -90,6 +90,25 @@ class TinyRouterEngine:
             except Exception as e:
                 logger.warning("Failed to load tinyrouter weights from %s: %s", self.weights_path, e)
 
+    def save_weights(self, filepath: str | None = None) -> None:
+        """Persist tinyrouter ~10K neural weight matrices to disk."""
+        target_path = filepath or self.weights_path
+        try:
+            import json
+            payload = {
+                "w1": self._state.w1,
+                "b1": self._state.b1,
+                "w2": self._state.w2,
+                "b2": self._state.b2,
+                "last_updated": time.time(),
+            }
+            os.makedirs(os.path.dirname(target_path) or ".", exist_ok=True)
+            with open(target_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2)
+            logger.info("Persisted tinyrouter weights to %s", target_path)
+        except Exception as e:
+            logger.warning("Failed to save tinyrouter weights to %s: %s", target_path, e)
+
     def _compute_semantic_embedding(self, text: str) -> list[float]:
         """Compute a fast 64-D n-gram semantic hash vector in < 0.2ms."""
         vec = [0.0] * _EMBED_DIM
