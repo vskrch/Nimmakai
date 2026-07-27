@@ -26,7 +26,8 @@ flowchart TD
 
     subgraph Ingress ["Potato API Gateway Ingress"]
         Auth["Account Guard & Auth"]
-        Classifier["Deterministic Intent Classifier"]
+        Classifier["Dynamic Intent Blending (Rules + Neural Boost)"]
+        TinyRouter["TinyRouter (~10K Parameter CPU Neural Head)"]
         Extractor["12-D Feature Extractor (x)"]
     end
 
@@ -44,14 +45,16 @@ flowchart TD
         Custom["OpenAI Compatible Endpoints"]
     end
 
-    subgraph Feedback ["Closed-Loop Multi-Signal Feedback"]
+    subgraph Feedback ["Closed-Loop Multi-Signal Feedback & Persistence"]
         Telemetry["TTFB, Tool Syntax, Error 429/503"]
-        DB[(SQLite Policy Store)]
+        DB[(SQLite Policy Store & JSON Weights)]
     end
 
     Client --> Auth
     Auth --> Classifier
-    Classifier --> Extractor
+    Classifier -->|Rule Confidence < 70%| TinyRouter
+    Classifier -->|Rule Confidence >= 70%| Extractor
+    TinyRouter --> Extractor
     Extractor --> Ladder
     Ladder --> LinUCB
     LinUCB --> Optimizer
@@ -59,16 +62,21 @@ flowchart TD
     Pool --> Telemetry
     Telemetry --> DB
     DB --> LinUCB
+    DB --> TinyRouter
 ```
 
 ---
 
 ## 🚀 Key Features
 
+* **🔬 TinyRouter (~10K Parameter CPU Neural Head)**: Ultra-fast $< 0.5\text{ms}$ neural intent classification using 64-D semantic n-gram hashing and 12-D RL structural feature vectors without LLM overhead.
+* **⚖️ Dynamic Intent Blending Mode**: Automatically combines deterministic regex fast-paths ($\ge 70\%$ confidence) with neural boosting for ambiguous prompts via header control (`x-potato-classify-mode: dynamic`).
 * **🧠 LinUCB Contextual Bandit Engine**: Dynamically weights routing choices per request using a 12-dimensional feature vector ($X$) and Sherman-Morrison rank-1 matrix inverse updates in under 1 microsecond.
 * **⚡ Dual-Stage Intelligent Routing**:
   - **Stage 1 (Ladder)**: Precomputed composite score combining benchmark quality, intent affinity, parameter sizes, and provider capabilities.
   - **Stage 2 (Cobb-Douglas Optimizer)**: Real-time request adaptation balancing quality, latency, key pool availability, and provider health.
+* **🔌 Universal Protocol Compatibility & Auto-Tool Recovery**: Native Anthropic Messages API (`tool_choice` translation) and OpenAI Responses API support with intelligent XML/JSON parser recovery (`_extract_raw_tool_calls_from_text`) to prevent agentic loops in Cursor, Claude Code, and Cascade.
+* **💾 Persistent Self-Healing Telemetry Loop**: Automatic 60-second asynchronous persistence of LinUCB $12 \times 12$ covariance matrices ($A^{-1}, \theta, b$) to SQLite (`potato.db`) and neural weights to `config/tinyrouter_weights.json`.
 * **🎯 Granular Model Pool & Intent Gating**: Surgically restrict high-cost frontier models to specialized endpoints (e.g., `potato/coding` or `potato/best`) while excluding them from general auto-routing (`potato/auto`) to prevent token waste.
 * **🔑 4-Pillar Multi-Tenant Architecture & BYOK**: Dedicated tenant isolation where standard users manage their own encrypted API keys at rest (AES-256-GCM) and view private analytics, with Admin shared fallbacks and cross-tenant oversight (`multi-tenant` branch).
 * **🛡️ Zero-Downtime Fallback & Circuit Breakers**: Automatic fallbacks across providers. If a model encounters a 504 gateway timeout, rate limit (429), or 5xx server error, Potato immediately advances down the intelligence ladder without failing client requests.
@@ -337,6 +345,28 @@ python3 -m uvicorn potato.main:app --port 8080 --reload
 ```bash
 python3 -m pytest -v
 ```
+
+---
+
+## 🏆 Credits & Acknowledgements
+
+Potato Gateway is built on the shoulders of giants. We extend our heartfelt thanks and generous credits to the research, open-source projects, and engineering breakthroughs that made this system possible:
+
+### 🧠 Core Algorithms & Research
+* **TinyRouter Neural Head**: Inspired by lightweight evolution strategies (**sep-CMA-ES**) and fast n-gram semantic hashing. This enables sub-millisecond CPU inference (~10K parameters) without ever calling an external LLM for classification.
+* **LinUCB Contextual Bandit Engine**: Built upon **Lihong Li et al.'s** landmark research on contextual bandits for web content recommendation, adapted here with **Sherman-Morrison rank-1 matrix updates** for $O(d^2)$ real-time reinforcement learning across multi-provider LLM pools.
+* **Cobb-Douglas Live Optimizer**: Leveraging microeconomic utility functions to balance multi-criteria constraints (quality, TTFT latency, TPS throughput, token cost, and API rate limits) in real time.
+
+### 🌐 Upstream Providers & Model Ecosystems
+* **NVIDIA NIM**, **Groq**, **Cerebras**, **Together**, **SambaNova**, and **DeepSeek** for providing ultra-high-speed inference endpoints and frontier open-weights models.
+* **OpenCode (Zen & Go)** and **Ollama** for enabling democratized local and zero-cost agentic coding pools.
+
+### 🤖 Agent Harnesses & SDK Compatibility
+* **Cursor IDE**, **Anthropic Claude Code CLI**, **Cline VS Code**, **Windsurf**, and **Continue.dev** for inspiring our protocol translation layer, robust XML/JSON tool recovery (`_extract_raw_tool_calls_from_text`), and strict schema compliance.
+
+### 🛠️ Open-Source Frameworks & Tech Stack
+* **Python Backend**: [FastAPI](https://fastapi.tiangolo.com/), [Pydantic v2](https://docs.pydantic.dev/), [Uvicorn](https://www.uvicorn.org/), and [SQLite](https://sqlite.org/) for blazing-fast asynchronous networking and zero-maintenance embedded storage.
+* **Modern Frontend**: [React 18](https://react.dev/), [Tailwind CSS](https://tailwindcss.com/), [Vite](https://vitejs.dev/), [Recharts](https://recharts.org/), and [Lucide Icons](https://lucide.dev/) for our glassmorphic, real-time SSE telemetry dashboard.
 
 ---
 

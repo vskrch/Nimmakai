@@ -517,6 +517,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                                     )
                         except Exception:
                             logger.debug("RL policy persistence failed", exc_info=True)
+                        try:
+                            classifier.tiny_router.save_weights()
+                        except Exception:
+                            logger.debug("TinyRouter weights persistence failed", exc_info=True)
 
             refresh_task = asyncio.create_task(_refresh_loop())
 

@@ -1,6 +1,6 @@
 {
   "intent_totals": {
-    "chat_fast": 0,
+    "chat_fast": 3,
     "coding_agentic": 4,
     "long_horizon": 0,
     "reasoning": 0,
@@ -10,16 +10,16 @@
     "chat_fast": {
       "model-a": {
         "empty_replies": 0,
-        "ewma_quality": 0.0,
-        "failures": 0,
-        "last_updated": 0.0,
-        "score_delta": 0.0,
-        "successes": 0,
-        "thompson_alpha": 1.0,
-        "thompson_beta": 1.0,
+        "ewma_quality": 0.237,
+        "failures": 1,
+        "last_updated": 1785112397.734504,
+        "score_delta": 2.84,
+        "successes": 2,
+        "thompson_alpha": 3.0,
+        "thompson_beta": 2.0,
         "tool_fail": 0,
         "tool_ok": 0,
-        "total_requests": 0,
+        "total_requests": 3,
         "unavailable": 0
       },
       "model-b": {
@@ -84,7 +84,7 @@
         "empty_replies": 0,
         "ewma_quality": 0.3,
         "failures": 0,
-        "last_updated": 1785106969.461204,
+        "last_updated": 1785112395.040838,
         "score_delta": 3.6,
         "successes": 1,
         "thompson_alpha": 2.0,
@@ -112,7 +112,7 @@
         "empty_replies": 0,
         "ewma_quality": 0.51,
         "failures": 0,
-        "last_updated": 1785106971.012473,
+        "last_updated": 1785112396.869971,
         "score_delta": 6.12,
         "successes": 2,
         "thompson_alpha": 3.0,
@@ -126,7 +126,7 @@
         "empty_replies": 0,
         "ewma_quality": 0.3,
         "failures": 0,
-        "last_updated": 1785106970.062987,
+        "last_updated": 1785112395.79019,
         "score_delta": 3.6,
         "successes": 1,
         "thompson_alpha": 2.0,
@@ -326,5 +326,5 @@
       }
     }
   },
-  "saved_at": 1785106971.012693
+  "saved_at": 1785112397.734795
 }

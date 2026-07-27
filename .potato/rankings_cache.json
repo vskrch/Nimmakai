@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "computed_at": 1785106972.46147,
+  "computed_at": 1785112398.705472,
   "frozen": true,
   "live_ids": [
     "minimaxai/minimax-m3",
@@ -78,11 +78,11 @@
         "minimaxai/minimax-m3"
       ],
       "scores": {
-        "qwen/qwen3.5-122b-a10b": 91.41,
-        "nvidia/nemotron-3-super-120b-a12b": 91.24,
-        "zai/glm-5.2": 66.91,
-        "stepfun/step-3.7-flash": 66.91,
-        "minimaxai/minimax-m3": 66.91
+        "qwen/qwen3.5-122b-a10b": 87.3,
+        "nvidia/nemotron-3-super-120b-a12b": 87.13,
+        "zai/glm-5.2": 62.79,
+        "stepfun/step-3.7-flash": 62.79,
+        "minimaxai/minimax-m3": 62.79
       },
       "built_from_live": 5
     },
@@ -97,11 +97,11 @@
         "nvidia/nemotron-3-super-120b-a12b"
       ],
       "scores": {
-        "zai/glm-5.2": 37.97,
-        "stepfun/step-3.7-flash": 37.97,
-        "minimaxai/minimax-m3": 37.97,
-        "qwen/qwen3.5-122b-a10b": 14.0,
-        "nvidia/nemotron-3-super-120b-a12b": 13.99
+        "zai/glm-5.2": 33.86,
+        "stepfun/step-3.7-flash": 33.86,
+        "minimaxai/minimax-m3": 33.86,
+        "qwen/qwen3.5-122b-a10b": 9.89,
+        "nvidia/nemotron-3-super-120b-a12b": 9.88
       },
       "built_from_live": 5
     },
@@ -116,11 +116,11 @@
         "minimaxai/minimax-m3"
       ],
       "scores": {
-        "qwen/qwen3.5-122b-a10b": 97.14,
-        "nvidia/nemotron-3-super-120b-a12b": 96.96,
-        "zai/glm-5.2": 70.91,
-        "stepfun/step-3.7-flash": 70.91,
-        "minimaxai/minimax-m3": 70.91
+        "qwen/qwen3.5-122b-a10b": 93.03,
+        "nvidia/nemotron-3-super-120b-a12b": 92.85,
+        "zai/glm-5.2": 66.8,
+        "stepfun/step-3.7-flash": 66.8,
+        "minimaxai/minimax-m3": 66.8
       },
       "built_from_live": 5
     },
