@@ -57,6 +57,7 @@ fi
 # CLI Argument Parsing
 ENABLE_CLOUDFLARE_TUNNEL="${ENABLE_CLOUDFLARE_TUNNEL:-false}"
 CLOUDFLARE_TUNNEL_TOKEN="${CLOUDFLARE_TUNNEL_TOKEN:-}"
+EXPLICIT_QUICK_TUNNEL="false"
 
 USE_DOCKER="${USE_DOCKER:-true}"
 
@@ -64,6 +65,7 @@ for arg in "$@"; do
     case $arg in
         --tunnel|-t)
             ENABLE_CLOUDFLARE_TUNNEL="true"
+            EXPLICIT_QUICK_TUNNEL="true"
             ;;
         --token=*)
             CLOUDFLARE_TUNNEL_TOKEN="${arg#*=}"
@@ -249,7 +251,9 @@ if [[ -f .env ]]; then
     if [[ "${ENABLE_CLOUDFLARE_TUNNEL}" == "false" ]]; then
         ENABLE_CLOUDFLARE_TUNNEL=$(grep -E "^ENABLE_CLOUDFLARE_TUNNEL=" .env | cut -d'=' -f2- || echo "false")
     fi
-    if [[ -z "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
+    if [[ "${EXPLICIT_QUICK_TUNNEL}" == "true" ]]; then
+        CLOUDFLARE_TUNNEL_TOKEN=""
+    elif [[ -z "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
         CLOUDFLARE_TUNNEL_TOKEN=$(grep -E "^[\"\']?CLOUDFLARE_TUNNEL_TOKEN[\"\']?=" .env 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'" | tr -d '\r' | tr -d '\n' | tr -d ' ' | grep -v '^$' | tail -n1 || true)
     fi
     # Sanitize token: remove quotes, newlines, and trailing spaces
