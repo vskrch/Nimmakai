@@ -1,12 +1,13 @@
-// Browser-side web search — runs in the user's browser, uses their IP, no server key.
-// Sources: Wikipedia (CORS-enabled), DuckDuckGo Instant Answers (CORS-enabled).
-// Results are fed as context to the LLM; the LLM synthesizes the answer.
+// Web search — calls the server-side proxy at /chat/api/search which queries
+// DuckDuckGo HTML (full web, no API key, no CORS limits) + Wikipedia.
+// The server proxy bypasses browser CORS so we get real web results (news,
+// blogs, docs) instead of just encyclopedic/factoid entries.
 
 export interface SearchResult {
   title: string
   snippet: string
   url: string
-  source: 'wikipedia' | 'duckduckgo'
+  source: 'duckduckgo' | 'wikipedia'
 }
 
 export interface SearchResponse {
@@ -15,83 +16,27 @@ export interface SearchResponse {
   synthesizedContext: string
 }
 
-const MAX_RESULTS = 5
-const SNIPPET_CHARS = 400
-
-async function searchWikipedia(query: string): Promise<SearchResult[]> {
-  try {
-    const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=${MAX_RESULTS}`
-    const res = await fetch(url)
-    if (!res.ok) return []
-    const body = await res.json()
-    const items = body?.query?.search || []
-    return items.map((item: { title: string; snippet: string; pageid: number }) => ({
-      title: item.title,
-      snippet: stripHtml(item.snippet).slice(0, SNIPPET_CHARS),
-      url: `https://en.wikipedia.org/?curid=${item.pageid}`,
-      source: 'wikipedia' as const,
-    }))
-  } catch {
-    return []
-  }
-}
-
-async function searchDuckDuckGo(query: string): Promise<SearchResult[]> {
-  try {
-    // DDG Instant Answer API — CORS-enabled, returns related topics
-    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`
-    const res = await fetch(url)
-    if (!res.ok) return []
-    const body = await res.json()
-    const results: SearchResult[] = []
-    // Abstract (top answer)
-    if (body.Abstract) {
-      results.push({
-        title: body.Heading || query,
-        snippet: body.Abstract.slice(0, SNIPPET_CHARS),
-        url: body.AbstractURL || `https://duckduckgo.com/?q=${encodeURIComponent(query)}`,
-        source: 'duckduckgo',
-      })
-    }
-    // Related topics
-    const topics: Array<{ Text: string; FirstURL: string }> = body.RelatedTopics || []
-    for (const t of topics) {
-      if (t.Text && t.FirstURL) {
-        results.push({
-          title: t.Text.split(' - ')[0] || query,
-          snippet: t.Text.slice(0, SNIPPET_CHARS),
-          url: t.FirstURL,
-          source: 'duckduckgo',
-        })
-      }
-      if (results.length >= MAX_RESULTS) break
-    }
-    return results.slice(0, MAX_RESULTS)
-  } catch {
-    return []
-  }
-}
-
-function stripHtml(html: string): string {
-  return html.replace(/<[^>]*>/g, '').replace(/&[a-z]+;/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
 export async function webSearch(query: string): Promise<SearchResponse> {
-  const [wiki, ddg] = await Promise.allSettled([searchWikipedia(query), searchDuckDuckGo(query)])
-  const wikiResults = wiki.status === 'fulfilled' ? wiki.value : []
-  const ddgResults = ddg.status === 'fulfilled' ? ddg.value : []
-  // De-dup by title, prefer Wikipedia first
-  const seen = new Set<string>()
-  const results: SearchResult[] = []
-  for (const r of [...wikiResults, ...ddgResults]) {
-    const key = r.title.toLowerCase().slice(0, 60)
-    if (seen.has(key)) continue
-    seen.add(key)
-    results.push(r)
-    if (results.length >= MAX_RESULTS) break
+  try {
+    const res = await fetch(`/chat/api/search?q=${encodeURIComponent(query)}`)
+    if (!res.ok) {
+      return { query, results: [], synthesizedContext: '' }
+    }
+    const body = await res.json()
+    const results: SearchResult[] = (body.results || []).map((r: SearchResult) => ({
+      title: r.title,
+      snippet: r.snippet,
+      url: r.url,
+      source: r.source,
+    }))
+    return {
+      query,
+      results,
+      synthesizedContext: buildContext(query, results),
+    }
+  } catch {
+    return { query, results: [], synthesizedContext: '' }
   }
-  const synthesizedContext = buildContext(query, results)
-  return { query, results, synthesizedContext }
 }
 
 function buildContext(query: string, results: SearchResult[]): string {
