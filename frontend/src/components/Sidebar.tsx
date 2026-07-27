@@ -19,7 +19,8 @@ import {
   Zap,
   ShieldCheck,
   Key,
-  Layers
+  Layers,
+  Filter
 } from 'lucide-react'
 
 interface SidebarProps {
@@ -58,6 +59,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'models', label: 'Model Catalog', icon: Cpu },
   { id: 'routing', label: 'Routing Engine', icon: GitFork },
   { id: 'ladders', label: 'Model Ladders', icon: Layers },
+  { id: 'pools', label: 'Model Pool Gating', icon: Filter },
   { id: 'rl', label: 'Adaptive RL', icon: Zap },
 ]
 

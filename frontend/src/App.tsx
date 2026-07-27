@@ -17,6 +17,7 @@ import HealthPage from './pages/HealthPage'
 import ModelsPage from './pages/ModelsPage'
 import RoutingPage from './pages/RoutingPage'
 import ModelLaddersPage from './pages/ModelLaddersPage'
+import ModelPoolGatingPage from './pages/ModelPoolGatingPage'
 import RLPage from './pages/RLPage'
 import PlaygroundPage from './pages/PlaygroundPage'
 import UsersPage from './pages/UsersPage'
@@ -39,6 +40,7 @@ const PAGE_META: Record<string, { title: string; subtitle: string }> = {
   models: { title: 'Model Catalog', subtitle: 'Live model pool, quality scores & ELO rankings' },
   routing: { title: 'Routing Strategy', subtitle: 'Custom preference chains & ladder configuration' },
   ladders: { title: 'Model Ladders', subtitle: 'Drag-and-drop custom fallback chains per virtual model' },
+  pools: { title: 'Model Pool Gating', subtitle: 'Per-model intent gating & auto-router inclusion' },
   rl: { title: 'Adaptive RL', subtitle: 'LinUCB contextual bandit telemetry & feature weights' },
 }
 
@@ -181,6 +183,7 @@ export default function App() {
           {page === 'models' && isAdmin && <ModelsPage />}
           {page === 'routing' && isAdmin && <RoutingPage />}
           {page === 'ladders' && isAdmin && <ModelLaddersPage />}
+          {page === 'pools' && isAdmin && <ModelPoolGatingPage />}
           {page === 'rl' && isAdmin && <RLPage />}
           {page === 'playground' && <PlaygroundPage />}
         </main>
