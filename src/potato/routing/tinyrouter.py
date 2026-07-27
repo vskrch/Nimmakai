@@ -79,7 +79,7 @@ class TinyRouterEngine:
         if os.path.exists(self.weights_path):
             try:
                 import json
-                with open(self.weights_path, "r", encoding="utf-8") as f:
+                with open(self.weights_path, encoding="utf-8") as f:
                     data = json.load(f)
                 if "w1" in data and "w2" in data:
                     self._state.w1 = data["w1"]
@@ -97,7 +97,7 @@ class TinyRouterEngine:
             return vec
         # Normalized character/word token distribution across buckets
         words = text.lower().split()
-        for i, word in enumerate(words[:256]):
+        for word in words[:256]:
             h = hashlib.fnv1a_32(word.encode("utf-8")) if hasattr(hashlib, "fnv1a_32") else int(hashlib.md5(word.encode()).hexdigest()[:8], 16)
             idx = h % _EMBED_DIM
             vec[idx] += 1.0 / max(1, len(words))
@@ -165,7 +165,7 @@ class TinyRouterEngine:
             confidence=confidence,
             rule_id="tinyrouter_10k_neural",
             features={
-                "tinyrouter_probs": {intent.value: round(prob, 3) for intent, prob in zip(_TARGET_INTENTS, probs)},
+                "tinyrouter_probs": {intent.value: round(prob, 3) for intent, prob in zip(_TARGET_INTENTS, probs, strict=False)},
                 "rl_features": rl_vec,
             },
         )

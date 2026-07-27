@@ -2,6 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
+
 from potato.config import Settings
 from potato.main import create_app
 

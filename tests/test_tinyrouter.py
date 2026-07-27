@@ -1,11 +1,10 @@
 """Tests for TinyRouter and its integration with LinUCB RL Bandit Engine."""
 
-import pytest
-from potato.routing.intents import Intent
-from potato.routing.tinyrouter import TinyRouterEngine, TinyRouterState
-from potato.routing.rl_engine import LinUCBPolicyEngine
-from potato.routing.classifier import IntentClassifier
 from potato.config import Settings
+from potato.routing.classifier import IntentClassifier
+from potato.routing.intents import Intent
+from potato.routing.rl_engine import LinUCBPolicyEngine
+from potato.routing.tinyrouter import TinyRouterEngine
 
 
 def test_tinyrouter_basic_classification():
