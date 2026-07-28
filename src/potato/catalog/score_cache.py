@@ -227,15 +227,15 @@ def _compute_intent_affinity(
     ]
     # Built-in defaults so cold-start (empty YAML) still produces sane affinities.
     _DEFAULT_DELTAS: dict[str, dict[str, float]] = {
-        "tools_confirmed_true": {"coding_agentic": 0.25, "reasoning": 0.15},
-        "tools_confirmed_false": {"coding_agentic": -0.80},
+        "tools_confirmed_true": {"coding_agentic": 0.25, "reasoning": 0.25},
+        "tools_confirmed_false": {"coding_agentic": -0.80, "reasoning": -0.80},
         "vision_confirmed_true": {"vision": 0.30},
         "vision_confirmed_false": {"vision": -0.95},
-        "reasoning_confirmed_true": {"reasoning": 0.30, "coding_agentic": 0.10},
+        "reasoning_confirmed_true": {"reasoning": 0.30, "coding_agentic": 0.30},
         "long_context": {"long_horizon": 0.25},
         "short_context": {"long_horizon": -0.30},
         "small_param": {"chat_fast": 0.20},
-        "frontier_param": {"coding_agentic": 0.20, "reasoning": 0.30},
+        "frontier_param": {"coding_agentic": 0.30, "reasoning": 0.30},
         "embed_confirmed_true": {"embeddings": 0.30},
         "embed_confirmed_false": {"embeddings": -0.95},
     }

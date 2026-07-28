@@ -1,18 +1,21 @@
 """
-Continuous request-time optimizer: always pick best intelligence × speed.
+Continuous request-time optimizer: always pick best intelligence × speed × latency.
 
 On every request (not just cache refresh):
 
-    score(m) = quality_prior(m)^α × speed(m)^β × avail(m)^γ × provider(m)^δ
+    score(m) = intel(m)^α × speed(m)^β × lat(m)^λ × avail(m)^γ × prov(m)^δ
 
 where:
-  quality_prior = ladder precomputed score normalized to (0, 1]
-  speed = live EWMA tokens/s + inverse latency
-  avail = health / responding (cooldown → near 0)
-  provider = provider speed prior (Zen, Groq, Cerebras, …)
+  intel  = ladder precomputed score (quality × affinity × capability) normalized to (0, 1]
+  speed  = live EWMA tokens/s (throughput)
+  lat    = live EWMA TTFT / latency (inverse — lower latency = higher factor)
+  avail  = health / responding (cooldown → near 0)
+  prov   = provider speed prior (Zen, Groq, Cerebras, …)
 
-α dominates (0.55): a 95-quality model at 40 TPS beats an 80-quality at 120 TPS.
-Dead models never lead (availability gate near-zero).
+Priority ladder enforced by exponent magnitudes:
+  intelligence + knowledge >> speed > latency > availability >> provider
+  α dominates: a 95-intel model at 40 TPS beats an 80-intel model at 120 TPS.
+  Dead models never lead (availability gate near-zero).
 """
 
 from __future__ import annotations
@@ -26,28 +29,37 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Weights: intelligence dominates for coding efficiency + low latency.
-# A 95-quality model at 40 TPS beats an 80-quality model at 120 TPS.
+# 5-tuple weights: (intel, speed, lat, avail, prov)
+# Priority: intelligence+knowledge >> speed > latency > availability >> provider
+# A 95-intel model at 40 TPS beats an 80-intel model at 120 TPS.
 # Loaded from YAML scoring.intent_optimizer_weights at startup (NMK-RT601).
-_INTENT_WEIGHTS: dict[str, tuple[float, float, float, float]] = {
-    "coding_agentic": (0.90, 0.06, 0.03, 0.01),
-    "reasoning": (0.92, 0.05, 0.02, 0.01),
-    "long_horizon": (0.90, 0.06, 0.03, 0.01),
-    "chat_fast": (0.85, 0.10, 0.04, 0.01),
-    "vision": (0.88, 0.08, 0.03, 0.01),
-    "embeddings": (0.75, 0.18, 0.05, 0.02),
-    "_default": (0.88, 0.08, 0.03, 0.01),
+# ponytail: lat defaults to speed*0.45 when YAML omits it (preserves the old
+# 4-key blend where speed conflated throughput+latency 0.55/0.45).
+_INTENT_WEIGHTS: dict[str, tuple[float, float, float, float, float]] = {
+    "coding_agentic": (0.92, 0.04, 0.02, 0.01, 0.01),
+    "reasoning": (0.92, 0.04, 0.02, 0.01, 0.01),
+    "long_horizon": (0.92, 0.04, 0.02, 0.01, 0.01),
+    "chat_fast": (0.85, 0.08, 0.04, 0.02, 0.01),
+    "vision": (0.88, 0.06, 0.03, 0.02, 0.01),
+    "embeddings": (0.75, 0.15, 0.06, 0.03, 0.01),
+    "_default": (0.88, 0.06, 0.03, 0.02, 0.01),
 }
 
 
 def load_intent_weights(yaml_scoring: dict) -> None:
-    """Called at startup after yaml is loaded. Overrides default weights from YAML."""
+    """Called at startup after yaml is loaded. Overrides default weights from YAML.
+
+    Accepts 5-key (intel, speed, lat, avail, prov) or legacy 4-key (lat derived
+    from speed*0.45 to preserve the old throughput+latency blend ratio).
+    """
     global _INTENT_WEIGHTS
     for intent, w in (yaml_scoring.get("intent_optimizer_weights") or {}).items():
         with contextlib.suppress(KeyError, TypeError, ValueError):
+            speed_v = float(w["speed"])
             _INTENT_WEIGHTS[intent] = (
                 float(w["intel"]),
-                float(w["speed"]),
+                speed_v,
+                float(w.get("lat", speed_v * 0.45)),
                 float(w["avail"]),
                 float(w["prov"]),
             )
@@ -82,8 +94,10 @@ def _quality_prior(
 
 def _speed_factor(health: Any, model_id: str) -> float:
     """
-    Live speed 0.25–2.4 — continuously adapts from TTFT + tokens/s.
-    Unknown models get a mild prior; proven fast models climb hard.
+    Live throughput (tokens/sec) factor 0.25–2.4 — pure generation speed.
+    Unknown models get a mild prior from provider; proven-fast models climb hard.
+    Latency/TTFT is handled separately by _latency_factor so exponents can
+    weight throughput above raw latency (priority: speed > latency).
     """
     h = health._by_model.get(model_id) if health is not None else None
     if h is None or (h.samples == 0 and h.ewma_tok_per_s <= 0):
@@ -99,19 +113,27 @@ def _speed_factor(health: Any, model_id: str) -> float:
     tps = h.ewma_tok_per_s
     tps_f = min(2.4, max(0.25, tps / 40.0)) if tps > 0 else 0.8
 
-    # Latency / TTFT (0.15s → boost, 1s → ~1.0, 3s+ → cut)
-    lat = h.ewma_latency if h.ewma_latency > 0 else 1.0
-    lat_f = min(2.2, max(0.2, 1.15 / (0.3 + lat)))
-
-    # Recent success streak → small boost (model is hot)
+    # Throughput hot streak — small boost for models on a success run
     streak = 1.0
     if h.consecutive_successes >= 3:
         streak = 1.12
     elif h.consecutive_fails >= 2:
         streak = 0.75
+    return tps_f * streak
 
-    # Blend: throughput + latency + hot streak (no arbitrary +0.10 constant bias)
-    return (0.55 * tps_f + 0.45 * lat_f) * streak
+
+def _latency_factor(health: Any, model_id: str) -> float:
+    """
+    Live latency (TTFT) factor 0.2–2.2 — lower latency = higher factor.
+    0.15s → boost, 1s → ~1.0, 3s+ → cut. Independent from throughput so the
+    optimizer can weight speed (TPS) above raw latency per the priority ladder.
+    """
+    h = health._by_model.get(model_id) if health is not None else None
+    if h is None or h.samples == 0:
+        # Unknown latency: neutral-to-mild prior (don't punish untested models)
+        return 1.0
+    lat = h.ewma_latency if h.ewma_latency > 0 else 1.0
+    return min(2.2, max(0.2, 1.15 / (0.3 + lat)))
 
 
 def _provider_factor(model_id: str, provider_ids: set[str], health: Any = None) -> float:
@@ -162,18 +184,23 @@ def score_model_live(
     max_score: float | None = None,
     intent: str = "_default",
 ) -> float:
-    """Single composite score for continuous ranking (intent-weighted)."""
+    """Single composite score for continuous ranking (intent-weighted).
+
+    Priority: intelligence+knowledge >> speed > latency > availability >> provider
+    Enforced by per-intent exponents (alpha > beta > lat_exp > gamma > delta).
+    """
     if health is not None and health.is_unhealthy(model_id):
         return 1e-6 * _quality_prior(model_id, ladder_scores=ladder_scores, max_score=max_score)
 
-    alpha, beta, gamma, delta = _INTENT_WEIGHTS.get(intent, _INTENT_WEIGHTS["_default"])
+    alpha, beta, lat_exp, gamma, delta = _INTENT_WEIGHTS.get(intent, _INTENT_WEIGHTS["_default"])
 
     intel = _quality_prior(model_id, ladder_scores=ladder_scores, max_score=max_score)
     speed = _speed_factor(health, model_id)
+    lat = _latency_factor(health, model_id)
     avail = _availability_factor(health, model_id)
     prov = _provider_factor(model_id, provider_ids, health)
 
-    score = (intel**alpha) * (speed**beta) * (avail**gamma) * (prov**delta)
+    score = (intel**alpha) * (speed**beta) * (lat**lat_exp) * (avail**gamma) * (prov**delta)
 
     # Dynamic RL feedback multiplier bounded in [0.5, 2.0]
     rl_engine = getattr(health, "_rl_engine", None) if health is not None else None
@@ -266,6 +293,7 @@ def explain_top(
     for mid in sticky[: max(n * 3, 12)]:
         intel = _quality_prior(mid, ladder_scores=ladder_scores, max_score=max_score)
         speed = _speed_factor(health, mid)
+        lat = _latency_factor(health, mid)
         hs = health.health_score(mid) if health else 1.0
         total = score_model_live(
             mid,
@@ -281,6 +309,7 @@ def explain_top(
                 "score": round(total, 4),
                 "intelligence": round(intel, 3),
                 "speed": round(speed, 3),
+                "latency": round(lat, 3),
                 "health": round(hs, 3),
                 "unhealthy": bool(health and health.is_unhealthy(mid)),
             }
