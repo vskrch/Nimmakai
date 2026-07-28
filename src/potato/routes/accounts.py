@@ -171,7 +171,7 @@ async def verify_email(request: Request, token: str = "") -> Response:
         issued_key = store.issue_api_key(user_id)
 
     accept = request.headers.get("accept") or ""
-    if "text/html" in accept or "token=" in str(request.url):
+    if "text/html" in accept and "application/json" not in accept:
         msg = (
             "Email verified successfully. An administrator will review and approve your account."
             if not issued_key
