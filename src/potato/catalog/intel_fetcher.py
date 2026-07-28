@@ -94,8 +94,16 @@ async def _fetch_openrouter(client: httpx.AsyncClient) -> dict[str, IntelBundle]
         input_mods = set(arch.get("input_modalities") or [])
         output_mods = set(arch.get("output_modalities") or [])
         desc = str(m.get("description") or "").lower()
+        param_b: float | None = None
+        m_param = PARAM_RE.search(slug)
+        if m_param:
+            try:
+                param_b = float(m_param.group(1))
+            except (ValueError, TypeError):
+                pass
         bundles[slug] = IntelBundle(
             model_slug=slug,
+            param_b=param_b,
             context_length=_safe_int(m.get("context_length")),
             supports_tools="tools" in sp,
             supports_vision="image" in input_mods,

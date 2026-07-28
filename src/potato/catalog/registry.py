@@ -113,6 +113,10 @@ class ModelRegistry:
             probe_budget_per_hour=probe_budget_per_hour,
         )
         reg._yaml_path = p
+        reg._yaml_scoring_config = reg._load_yaml_scoring_config()
+        reg._sync_score_cache_once()
+        if reg.live_ids:
+            reg.recompute_rankings(persist=False)
         return reg
 
     def _apply_catalog_policy(self) -> None:
@@ -638,7 +642,7 @@ class ModelRegistry:
         try:
             from potato.catalog.score_cache import ModelScoreCache, recompute
 
-            bundles = self._intel_fetcher._load_disk_cache() or {}
+            bundles = (self._intel_fetcher._load_disk_cache() if self._intel_fetcher is not None else {}) or {}
             cache = recompute(
                 live_ids=self.active_live_ids(),
                 intel_bundles=bundles,

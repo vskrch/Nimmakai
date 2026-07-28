@@ -22,6 +22,8 @@ from potato.catalog.intel_fetcher import IntelBundle
 
 logger = logging.getLogger(__name__)
 
+PARAM_RE = re.compile(r"(?:^|[^a-z0-9])(\d{1,4})b(?:[^a-z0-9]|$)", re.I)
+
 
 @dataclass
 class ModelScore:
@@ -86,9 +88,18 @@ def _compute_quality(bundle: IntelBundle | None, slug: str, yaml_cfg: dict) -> f
         if bundle.arena_elo is not None:
             elo_norm = min(100.0, max(0.0, (bundle.arena_elo - arena_base) / arena_scale))
             signals.append((elo_norm, w_elo))
-        if bundle.param_b is not None and bundle.param_b > 0:
-            param_q = min(95.0, max(10.0, 60.0 + 8.0 * math.log2(bundle.param_b / 7.0)))
-            signals.append((param_q, w_par))
+        if not signals:
+            param_b = bundle.param_b
+            if param_b is None:
+                m_param = PARAM_RE.search(slug)
+                if m_param:
+                    try:
+                        param_b = float(m_param.group(1))
+                    except (ValueError, TypeError):
+                        pass
+            if param_b is not None and param_b > 0:
+                param_q = min(95.0, max(10.0, 60.0 + 8.0 * math.log2(param_b / 7.0)))
+                signals.append((param_q, w_par))
 
     if signals:
         total_w = sum(w for _, w in signals)
@@ -105,10 +116,39 @@ def _hf_composite(bundle: IntelBundle) -> float | None:
 
 
 def _slug_quality_fallback(slug: str, cfg: dict) -> float:
-    kws = cfg.get("quality_floor_keywords", {})
-    default = float(kws.get("_default", 60.0))
+    s = str(slug or "").strip().lower()
+
+    # 1. Flagship model family quality priors (well-established benchmarks)
+    if any(k in s for k in ("claude-3-7", "claude-3.7", "gpt-4.5", "o3", "o1")):
+        return 96.0
+    if any(k in s for k in ("claude-3-5-sonnet", "claude-3.5-sonnet", "gpt-4o", "deepseek-r1", "deepseek-v3")):
+        return 94.0
+    if any(k in s for k in ("gemini-2.0-pro", "gemini-1.5-pro", "claude-3-opus")):
+        return 92.0
+    if any(k in s for k in ("qwen3.5-122b", "qwen-2.5-72b", "qwen2.5-72b", "llama-3.3-70b", "mistral-large")):
+        return 90.0
+    if any(k in s for k in ("qwen2.5-coder-32b", "qwen2.5-coder", "code-llama-70b", "starcoder2")):
+        return 88.0
+    if any(k in s for k in ("gemini-2.0-flash", "gemini-1.5-flash", "gpt-4o-mini", "claude-3-5-haiku")):
+        return 84.0
+    if any(k in s for k in ("glm-4", "glm-5", "step-3", "minimax-m3")):
+        return 85.0
+
+    # 2. Extract parameter size estimate log scale
+    m = PARAM_RE.search(s)
+    if m:
+        try:
+            p = int(m.group(1))
+            if p > 0:
+                return min(95.0, max(50.0, 60.0 + 8.0 * math.log2(p / 7.0)))
+        except (ValueError, TypeError):
+            pass
+
+    # 3. Keyword floors from config
+    kws = cfg.get("quality_floor_keywords", {}) if cfg else {}
+    default = float(kws.get("_default", 65.0))
     for kw, score in kws.items():
-        if kw != "_default" and kw in slug:
+        if kw != "_default" and kw in s:
             return float(score)
     return default
 

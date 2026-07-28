@@ -28,7 +28,7 @@ from potato.catalog.families import (
 from potato.catalog.health import ModelHealthStore
 from potato.catalog.learning import LearningStore
 from potato.catalog.providers import scoring_model_id
-from potato.catalog.score_cache import ModelScoreCache
+from potato.catalog.score_cache import ModelScoreCache, _slug_quality_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -423,14 +423,8 @@ class LadderService:
             ms = cache.scores.get(model_id) or cache.scores.get(mid_lower)
             if ms:
                 return ms.quality
-        # Cold start: param estimate (log-scale heuristic)
-        m = PARAM_RE.search(mid_lower)
-        if m:
-            try:
-                return min(95.0, max(10.0, 60.0 + 8.0 * math.log2(int(m.group(1)) / 7.0)))
-            except (ValueError, ZeroDivisionError):
-                pass
-        return 65.0  # optimistic default for unknown models
+        # Cold start fallback using calibrated quality function
+        return _slug_quality_fallback(mid_lower, {})
 
     def _intent_affinity(self, mid_lower: str, intent: str, model_id: str = "") -> float:
         """Affinity from ModelScoreCache; default fallback for cold start."""
