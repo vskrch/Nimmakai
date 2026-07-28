@@ -89,33 +89,13 @@ fi
 # 3. Provision Tailscale Funnel on port
 log "Enabling Tailscale Funnel for local port ${PORT}..."
 TAILSCALE_BIN="$(command -v tailscale || echo /usr/bin/tailscale)"
-if command -v systemctl &>/dev/null && [[ $EUID -eq 0 ]]; then
-    log "Creating systemd service for Tailscale Funnel..."
-    cat <<EOF > /etc/systemd/system/tailscale-funnel-potato.service
-[Unit]
-Description=Potato Gateway Tailscale Funnel Daemon
-After=network-online.target tailscaled.service
-Wants=network-online.target tailscaled.service
 
-[Service]
-Type=simple
-User=root
-ExecStart=${TAILSCALE_BIN} funnel ${PORT}
-Restart=always
-RestartSec=5s
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    systemctl daemon-reload >/dev/null 2>&1 || true
-    systemctl enable --now tailscale-funnel-potato >/dev/null 2>&1 || true
-else
-    pkill -f "tailscale funnel" || true
+# Run tailscale funnel in non-blocking background mode via tailscaled daemon
+if ! timeout 10 ${TAILSCALE_BIN} funnel --bg "${PORT}" >/tmp/tailscale_funnel.log 2>&1; then
+    # Fallback to nohup if --bg is not supported in older tailscale versions
+    pkill -f "tailscale funnel" 2>/dev/null || true
     nohup ${TAILSCALE_BIN} funnel "${PORT}" >/tmp/tailscale_funnel.log 2>&1 &
 fi
-
-# Also trigger interactive background funnel in case daemon mode requires it
-${TAILSCALE_BIN} funnel --bg "${PORT}" >/dev/null 2>&1 || ${TAILSCALE_BIN} funnel "${PORT}" on >/dev/null 2>&1 || true
 
 # 4. Extract Tailscale node domain name
 log "Resolving Tailscale public HTTPS domain..."
