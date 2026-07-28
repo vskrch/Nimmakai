@@ -232,9 +232,9 @@ fi
 
 # 3. Provision Tailscale Funnel on port
 log "Enabling Tailscale Funnel for local port ${PORT}..."
-if ! timeout 10 ${TAILSCALE_BIN} funnel --bg "${PORT}" >/tmp/tailscale_funnel.log 2>&1; then
+if ! timeout 10 ${TAILSCALE_BIN} funnel --bg "http://localhost:${PORT}" >/tmp/tailscale_funnel.log 2>&1; then
     pkill -f "tailscale funnel" 2>/dev/null || true
-    nohup ${TAILSCALE_BIN} funnel "${PORT}" >/tmp/tailscale_funnel.log 2>&1 &
+    nohup ${TAILSCALE_BIN} funnel "http://localhost:${PORT}" >/tmp/tailscale_funnel.log 2>&1 &
 fi
 
 # Detect Tailscale Funnel one-time approval URL if Funnel is disabled on Tailnet
