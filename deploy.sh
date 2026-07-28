@@ -237,19 +237,6 @@ if [[ -f .env ]]; then
     if [[ -z "${NIM_KEY}" ]]; then
         NIM_KEY=$(grep -E "^NIM_API_KEYS=" .env | cut -d'=' -f2- || true)
     fi
-    if [[ "${ENABLE_CLOUDFLARE_TUNNEL}" == "false" ]]; then
-        ENABLE_CLOUDFLARE_TUNNEL=$(grep -E "^ENABLE_CLOUDFLARE_TUNNEL=" .env | cut -d'=' -f2- || echo "false")
-    fi
-    if [[ "${EXPLICIT_QUICK_TUNNEL}" == "true" ]]; then
-        CLOUDFLARE_TUNNEL_TOKEN=""
-    elif [[ -z "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
-        CLOUDFLARE_TUNNEL_TOKEN=$(grep -E "^[\"\']?CLOUDFLARE_TUNNEL_TOKEN[\"\']?=" .env 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'" | tr -d '\r' | tr -d '\n' | tr -d ' ' | grep -v '^$' | tail -n1 || true)
-    fi
-    # Sanitize token: remove quotes, newlines, and trailing spaces
-    CLOUDFLARE_TUNNEL_TOKEN=$(echo "${CLOUDFLARE_TUNNEL_TOKEN}" | tr -d '"' | tr -d "'" | tr -d '\r' | tr -d '\n' | tr -d ' ')
-    if [[ -n "${CLOUDFLARE_TUNNEL_TOKEN}" ]]; then
-        ENABLE_CLOUDFLARE_TUNNEL="true"
-    fi
     # Preserve every provider env var present in the old .env.
     for var in "${_PROVIDER_ENV_VARS[@]}"; do
         val=$(grep -E "^${var}=" .env | cut -d'=' -f2- || true)
@@ -277,8 +264,6 @@ log "Writing production configuration (.env)..."
     echo "ROUTING_ENABLED=true"
     echo "ADMIN_PASSWORD=${ADMIN_PASS}"
     echo "ADMIN_EMAIL=${ADMIN_EMAIL_ADDR}"
-    echo "ENABLE_CLOUDFLARE_TUNNEL=${ENABLE_CLOUDFLARE_TUNNEL}"
-    echo "CLOUDFLARE_TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}"
     echo "NIM_API_KEYS=${NIM_KEY}"
     echo "HOST=0.0.0.0"
     echo "PORT=8080"
