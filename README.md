@@ -183,24 +183,22 @@ Potato exposes three primary protocol surfaces:
 
 ## 📦 Production & Local Deployment Guide
 
-### ⚡ 1-Line Automatic Deployment (Self-Healing Cloudflare Tunnel & Zero-Config HTTPS)
+### ⚡ 1-Line Automatic Deployment & Networking
 
-Run any of the following commands on any fresh Debian PC, Ubuntu server, local Linux machine, or DigitalOcean Droplet to auto-provision Docker/Python, auto-create credentials, configure firewalls, and launch Potato Gateway out of the box:
+Run the following commands on any fresh Debian PC, Ubuntu server, local Linux machine, or homelab to provision Docker, generate credentials, and launch Potato Gateway out of the box:
 
-#### Option 1: Free Cloudflare HTTPS Quick Tunnel (No Domain Required)
+#### Step 1: Deploy Potato Gateway (Build & Docker Setup)
 
 ```bash
-# Method A: Direct pipe to bash
-curl -sSL https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh | bash -s -- --tunnel
-
-# Method B: Download & run locally
-curl -sSL -o deploy.sh https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh && bash deploy.sh --tunnel
+# Download and execute core deployment script
+curl -sSL -o deploy.sh https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh && sudo bash deploy.sh
 ```
 
-#### Option 2: Persistent Named Tunnel (Custom Domain with Cloudflare Token)
+#### Step 2: Configure Networking & GoDaddy Domain (Tailscale Funnel — Zero 499s)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/vskrch/potato-gateway/main/deploy.sh | bash -s -- --token=YOUR_CLOUDFLARE_TOKEN --domain=potato.yourdomain.com
+# Setup Tailscale Funnel for zero-config HTTPS & GoDaddy custom domain
+sudo bash scripts/setup-tunnel.sh --domain=api.yourdomain.com
 ```
 
 ---
@@ -227,73 +225,38 @@ When deploying locally on Debian or Ubuntu:
 
 ---
 
-### 🌐 Zero-Config Internet Tunneling (No IP / Port Forwarding Required)
+### 🌐 Zero-Config Internet Tunneling & GoDaddy Domain Setup
 
-To expose your local Debian deployment to the public internet securely without a static IP address or router port forwarding:
+To expose your homelab deployment to the public internet securely without a static IP address or router port forwarding:
 
-#### Method 1: Cloudflare Tunnel (`cloudflared`) — RECOMMENDED (Free & Automatic HTTPS)
+#### Method 1: Tailscale Funnel — RECOMMENDED (Zero 499 Timeouts + Custom Domain)
 
-Cloudflare Tunnel creates an outbound-only encrypted connection to Cloudflare's edge network, giving you a free, public HTTPS URL.
+Tailscale Funnel passes raw HTTPS streams directly to your server without intermediate proxy buffering or Cloudflare's 100-second HTTP response timeout limit.
 
-##### 1. Install `cloudflared` on Debian / Ubuntu:
+##### 1. Automatic Automated Setup Script:
 ```bash
-# Add Cloudflare GPG key and APT repository
-sudo mkdir -p /etc/apt/keyrings
-curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /etc/apt/keyrings/cloudflare-main.gpg >/dev/null
-echo "deb [signed-by=/etc/apt/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/cloudflared.list
-
-# Update & install
-sudo apt-get update && sudo apt-get install -y cloudflared
+sudo bash scripts/setup-tunnel.sh --domain=api.yourdomain.com
 ```
 
-##### 2. Launch Instant Public HTTPS Tunnel:
+##### 2. Manual CLI Step-by-Step:
 ```bash
-cloudflared tunnel --url http://localhost:8080
-```
-*Outputs a public URL like:* `https://your-random-subdomain.trycloudflare.com`
+# Install Tailscale
+curl -fsSL https://tailscale.com/install.sh | sh
 
-##### 3. (Optional) Run as a Background Systemd Daemon (Custom Domain):
-```bash
-# Authenticate cloudflared
-cloudflared tunnel login
+# Authenticate server
+sudo tailscale up
 
-# Create a persistent tunnel
-cloudflared tunnel create potato-gateway
-
-# Route your domain (e.g. gateway.yourdomain.com)
-cloudflared tunnel route dns potato-gateway gateway.yourdomain.com
-
-# Install as systemd service on Debian
-sudo cloudflared service install
-```
-
-#### Method 2: Tailscale Funnel
-
-If you use Tailscale on your Debian machine, expose local port 8080 directly over public HTTPS:
-
-```bash
+# Enable HTTPS Funnel on port 8080
 sudo tailscale funnel 8080
 ```
-*Access your gateway at:* `https://<node-name>.<tailnet-name>.ts.net`
 
-#### Method 3: `ngrok`
-
-```bash
-# Install ngrok
-curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null
-echo "deb https://ngrok-agent.s3.amazonaws.com buster main" | sudo tee /etc/apt/sources.list.d/ngrok.list
-sudo apt update && sudo apt install ngrok
-
-# Expose local port 8080
-ngrok http 8080
-```
-
-#### Method 4: `localtunnel`
-
-```bash
-# Requires Node.js
-npx localtunnel --port 8080
-```
+##### 3. GoDaddy CNAME DNS Setup:
+1. Log into **GoDaddy** → **Domain Portfolio** → Select your domain → **DNS Records**.
+2. Add a **CNAME Record**:
+   - **Type**: `CNAME`
+   - **Name**: `api` *(or custom subdomain)*
+   - **Value**: `admin-potato.your-tailnet.ts.net` *(your Tailscale domain)*
+   - **TTL**: `1 Hour`
 
 ---
 
