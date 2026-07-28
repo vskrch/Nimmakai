@@ -118,20 +118,33 @@ def _hf_composite(bundle: IntelBundle) -> float | None:
 def _slug_quality_fallback(slug: str, cfg: dict) -> float:
     s = str(slug or "").strip().lower()
 
-    # 1. Flagship model family quality priors (well-established benchmarks)
-    if any(k in s for k in ("claude-3-7", "claude-3.7", "gpt-4.5", "o3", "o1", "nemotron-3-ultra")):
-        return 96.0
-    if any(k in s for k in ("claude-3-5-sonnet", "claude-3.5-sonnet", "gpt-4o", "deepseek-r1", "deepseek-v3", "nemotron-3-super")):
-        return 94.0
-    if any(k in s for k in ("gemini-2.0-pro", "gemini-1.5-pro", "claude-3-opus", "glm-5", "glm-5.2")):
-        return 93.0
-    if any(k in s for k in ("qwen3.5-122b", "qwen-2.5-72b", "qwen2.5-72b", "llama-3.3-70b", "mistral-large")):
-        return 90.0
-    if any(k in s for k in ("qwen2.5-coder-32b", "qwen2.5-coder", "code-llama-70b", "starcoder2")):
-        return 88.0
-    if any(k in s for k in ("gemini-2.0-flash", "gemini-1.5-flash", "gpt-4o-mini", "claude-3-5-haiku")):
-        return 84.0
-    if any(k in s for k in ("glm-4", "glm-5", "step-3", "minimax-m3")):
+    # Real-world benchmark quality priors (LMSYS Chatbot Arena ELO / Artificial Analysis Quality Index)
+    # Tier 1: SOTA Reasoning & Agentic Coding (LMSYS 1350+ / SWE-bench 65%+)
+    if any(k in s for k in ("claude-3-7", "claude-3.7", "o3-mini", "o3", "o1")):
+        return 98.0
+    if any(k in s for k in ("claude-3-5-sonnet", "claude-3.5-sonnet", "gpt-4.5")):
+        return 97.0
+    if any(k in s for k in ("deepseek-r1", "deepseek-v3")):
+        return 96.5
+    if any(k in s for k in ("gpt-4o-mini", "claude-3-5-haiku")):
+        return 86.0
+    if any(k in s for k in ("gpt-4o", "claude-3-opus")):
+        return 95.0
+    if any(k in s for k in ("gemini-2.0-pro", "gemini-1.5-pro", "qwen3.5-397b")):
+        return 93.5
+
+    # Tier 2: High-Capability Frontier & Agentic Coding Specialists (LMSYS 1300–1340)
+    if any(k in s for k in ("glm-5.2", "glm-5", "qwen2.5-coder-32b", "qwen2.5-coder", "qwen3.5-122b")):
+        return 92.5
+    if any(k in s for k in ("qwen-2.5-72b", "qwen2.5-72b", "llama-3.3-70b", "kimi-k1.5", "kimi-k3", "nemotron-3-ultra")):
+        return 91.0
+    if any(k in s for k in ("nemotron-3-super", "mistral-large")):
+        return 89.0
+
+    # Tier 3: Capable Mid-Size & Fast Flash Models (LMSYS 1240–1290)
+    if any(k in s for k in ("gemini-2.0-flash", "gemini-1.5-flash")):
+        return 86.0
+    if any(k in s for k in ("glm-4-plus", "glm-4", "step-3.7", "step-3", "minimax-m3")):
         return 85.0
 
     # 2. Config keyword floors (e.g. 70b: 78.0)
