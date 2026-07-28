@@ -134,23 +134,23 @@ def _slug_quality_fallback(slug: str, cfg: dict) -> float:
     if any(k in s for k in ("glm-4", "glm-5", "step-3", "minimax-m3")):
         return 85.0
 
-    # 2. Extract parameter size estimate log scale
+    # 2. Config keyword floors (e.g. 70b: 78.0)
+    kws = cfg.get("quality_floor_keywords", {}) if isinstance(cfg, dict) else {}
+    for kw, score in kws.items():
+        if kw != "_default" and kw in s:
+            return float(score)
+
+    # 3. Extract parameter size estimate log scale (capped at 85.0 without live intel)
     m = PARAM_RE.search(s)
     if m:
         try:
             p = int(m.group(1))
             if p > 0:
-                return min(95.0, max(50.0, 60.0 + 8.0 * math.log2(p / 7.0)))
+                return min(85.0, max(50.0, 60.0 + 8.0 * math.log2(p / 7.0)))
         except (ValueError, TypeError):
             pass
 
-    # 3. Keyword floors from config
-    kws = cfg.get("quality_floor_keywords", {}) if cfg else {}
-    default = float(kws.get("_default", 65.0))
-    for kw, score in kws.items():
-        if kw != "_default" and kw in s:
-            return float(score)
-    return default
+    return float(kws.get("_default", 65.0))
 
 
 # ---------------------------------------------------------------------------
