@@ -171,16 +171,37 @@ async def verify_email(request: Request, token: str = "") -> Response:
         issued_key = store.issue_api_key(user_id)
 
     accept = request.headers.get("accept") or ""
-    if "text/html" in accept:
+    if "text/html" in accept or "token=" in str(request.url):
         msg = (
-            "Email verified. An admin will approve your account shortly."
+            "Email verified successfully. An administrator will review and approve your account."
             if not issued_key
-            else "Email verified. Your admin account is active."
+            else "Email verified successfully. Your admin account is active."
         )
-        html = f"""<!doctype html><html><body style="font-family:system-ui;background:#09090b;color:#fff;padding:2rem">
-        <h1>Potato</h1><p>{msg}</p>
-        <p><a style="color:#a78bfa" href="/dashboard">Open dashboard</a></p>
-        </body></html>"""
+        html = f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Potato Gateway — Email Verified</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #09090b; color: #f4f4f5; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 1rem; box-sizing: border-box; }}
+    .card {{ background: #121215; border: 1px solid rgba(255,255,255,0.08); border-radius: 1.25rem; padding: 2.5rem; max-width: 440px; width: 100%; text-align: center; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }}
+    .icon {{ width: 56px; height: 56px; background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.3); border-radius: 1rem; display: flex; align-items: center; justify-content: center; margin: 0 auto 1.5rem; color: #10b981; font-size: 28px; font-weight: bold; }}
+    h1 {{ font-size: 1.25rem; font-weight: 700; margin: 0 0 0.5rem; color: #fff; }}
+    p {{ font-size: 0.875rem; color: #a1a1aa; line-height: 1.5; margin: 0 0 1.75rem; }}
+    .btn {{ display: inline-block; background: #8b5cf6; color: #fff; text-decoration: none; padding: 0.75rem 1.5rem; border-radius: 0.75rem; font-size: 0.875rem; font-weight: 600; transition: background 0.2s; }}
+    .btn:hover {{ background: #7c3aed; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">✓</div>
+    <h1>Email Address Verified</h1>
+    <p>{msg}</p>
+    <a class="btn" href="/dashboard">Open Gateway Dashboard</a>
+  </div>
+</body>
+</html>"""
         return HTMLResponse(html)
 
     payload: dict[str, Any] = {
@@ -195,6 +216,60 @@ async def verify_email(request: Request, token: str = "") -> Response:
     if issued_key:
         payload["api_key"] = issued_key["api_key"]
         payload["key_prefix"] = issued_key["key_prefix"]
+    return JSONResponse(payload)
+
+
+@router.post("/auth/resend-verification")
+async def resend_verification(request: Request) -> JSONResponse:
+    """Resend email verification link to an unverified user account."""
+    store = _store(request)
+    settings = _settings(request)
+    if store is None:
+        return JSONResponse({"error": {"message": "Accounts not initialized"}}, status_code=503)
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    email = str(body.get("email") or "").strip().lower()
+    if not email:
+        ctx = resolve_auth(request, settings)
+        if ctx.user_id:
+            u = store.get_user(ctx.user_id)
+            if u:
+                email = u["email"]
+    if not email:
+        return JSONResponse({"error": {"message": "Email is required", "code": "email_required"}}, status_code=400)
+    user = store.get_user_by_email(email)
+    if not user:
+        return JSONResponse({"ok": True, "message": "If that email exists and is unverified, a new link has been sent."})
+    if user["status"] != STATUS_UNVERIFIED:
+        return JSONResponse({"ok": True, "message": "Account is already verified."})
+
+    token = store.create_verify_token(user["id"])
+    verify_url = f"{_base_url(request, settings)}/auth/verify?token={token}"
+    sender = get_email_sender(
+        getattr(settings, "email_backend", "stub") or "stub",
+        settings=settings,
+    )
+    result = sender.send(
+        OutboundEmail(
+            to=email,
+            subject="Verify your Potato account",
+            text=(
+                f"Welcome to Potato.\n\n"
+                f"Verify your email:\n{verify_url}\n\n"
+                f"After verification an admin must approve your account "
+                f"before an API key is issued.\n"
+            ),
+        )
+    )
+    payload: dict[str, Any] = {
+        "ok": True,
+        "message": "Verification link sent. Check your email.",
+    }
+    if (getattr(settings, "email_backend", "stub") or "stub") == "stub":
+        payload["verify_url"] = verify_url
+        payload["email_preview"] = result
     return JSONResponse(payload)
 
 

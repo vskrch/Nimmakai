@@ -39,6 +39,16 @@ export default function AccountPage({ session, onRefresh }: AccountPageProps) {
     await onRefresh()
   }
 
+  async function resendEmail() {
+    setMsg('')
+    const r = await ap<{ message?: string; verify_url?: string }>('/auth/resend-verification', {})
+    if (!okBody(r)) {
+      setMsg(errMsg(r, 'Failed to resend email'))
+      return
+    }
+    setMsg(r?.message || 'Verification link sent. Check your email.')
+  }
+
   const sampleCurl = `curl -X POST https://api.potato.ai/v1/chat/completions \\
   -H "Authorization: Bearer ${newKey || 'YOUR_POTATO_API_KEY'}" \\
   -H "Content-Type: application/json" \\
@@ -107,12 +117,17 @@ export default function AccountPage({ session, onRefresh }: AccountPageProps) {
         </div>
       )}
       {user?.status === 'unverified' && (
-        <div className="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-5 text-xs text-sky-200 flex items-center gap-3">
-          <AlertCircle className="w-5 h-5 text-sky-400 shrink-0" />
-          <div>
-            <strong className="font-semibold text-sky-100">Email Unverified: </strong>
-            Please check your inbox for the verification link to activate your access.
+        <div className="rounded-2xl border border-sky-500/30 bg-sky-500/10 p-5 text-xs text-sky-200 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-sky-400 shrink-0" />
+            <div>
+              <strong className="font-semibold text-sky-100">Email Unverified: </strong>
+              Please check your inbox for the verification link to activate your access.
+            </div>
           </div>
+          <Button size="xs" variant="primary" onClick={resendEmail}>
+            <span>Resend Link</span>
+          </Button>
         </div>
       )}
 
