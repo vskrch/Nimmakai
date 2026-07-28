@@ -1,0 +1,22 @@
+{
+  "name": "Potato Gateway",
+  "short_name": "Potato",
+  "description": "Enterprise LLM API gateway with adaptive contextual-RL auto-routing.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#09090b",
+  "theme_color": "#09090b",
+  "orientation": "any",
+  "scope": "/",
+  "categories": ["developer", "utilities", "productivity"],
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Dashboard", "short_name": "Dashboard", "description": "System overview", "url": "/", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Chat", "short_name": "Chat", "description": "Open Claude-style chat", "url": "/chat", "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }] }
+  ]
+}

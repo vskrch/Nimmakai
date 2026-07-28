@@ -443,3 +443,73 @@ async def admin_suspend_user(user_id: str, request: Request) -> JSONResponse:
         return JSONResponse({"error": {"message": "Not found"}}, status_code=404)
     store.delete_sessions_for_user(user_id)
     return JSONResponse({"ok": True, "user": store.public_user(user)})
+
+
+@router.post("/admin/users/{user_id}/rotate-key")
+async def admin_rotate_user_key(user_id: str, request: Request) -> JSONResponse:
+    """Admin endpoint to rotate an API key for any user account."""
+    store = _store(request)
+    settings = _settings(request)
+    require_admin(request, settings)
+    if store is None:
+        return JSONResponse({"error": {"message": "Accounts not initialized"}}, status_code=503)
+    user = store.get_user(user_id)
+    if not user:
+        return JSONResponse({"error": {"message": "User not found", "code": "not_found"}}, status_code=404)
+    issued = store.issue_api_key(user_id, name="rotated_by_admin")
+    return JSONResponse(
+        {
+            "ok": True,
+            "user": store.public_user(user),
+            "api_key": issued["api_key"],
+            "key_prefix": issued["key_prefix"],
+            "message": "User API key rotated by admin. Copy new key now — it will not be shown again.",
+        }
+    )
+
+
+@router.post("/admin/users/{user_id}/role")
+async def admin_set_user_role(user_id: str, request: Request) -> JSONResponse:
+    """Admin endpoint to promote or demote a user role (admin vs user)."""
+    store = _store(request)
+    settings = _settings(request)
+    require_admin(request, settings)
+    if store is None:
+        return JSONResponse({"error": {"message": "Accounts not initialized"}}, status_code=503)
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": {"message": "Invalid JSON"}}, status_code=400)
+    role = str(body.get("role") or "").strip().lower()
+    if role not in {"admin", "user"}:
+        return JSONResponse({"error": {"message": "Role must be 'admin' or 'user'", "code": "invalid_role"}}, status_code=400)
+    user = store.set_role(user_id, role)
+    if not user:
+        return JSONResponse({"error": {"message": "User not found"}}, status_code=404)
+    return JSONResponse({"ok": True, "user": store.public_user(user)})
+
+
+@router.get("/admin/users/{user_id}/keys")
+async def admin_list_user_keys(user_id: str, request: Request) -> JSONResponse:
+    """Admin endpoint to view all keys for a specific user."""
+    store = _store(request)
+    settings = _settings(request)
+    require_admin(request, settings)
+    if store is None:
+        return JSONResponse({"error": {"message": "Accounts not initialized"}}, status_code=503)
+    keys = store.list_api_keys(user_id)
+    return JSONResponse({"user_id": user_id, "keys": keys})
+
+
+@router.post("/admin/users/{user_id}/keys/{key_id}/revoke")
+async def admin_revoke_user_key(user_id: str, key_id: str, request: Request) -> JSONResponse:
+    """Admin endpoint to revoke a specific API key for a user."""
+    store = _store(request)
+    settings = _settings(request)
+    require_admin(request, settings)
+    if store is None:
+        return JSONResponse({"error": {"message": "Accounts not initialized"}}, status_code=503)
+    ok = store.revoke_api_key(user_id, key_id)
+    if not ok:
+        return JSONResponse({"error": {"message": "Key not found or already revoked"}}, status_code=404)
+    return JSONResponse({"ok": True, "message": f"Key {key_id} revoked"})
