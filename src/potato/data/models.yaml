@@ -162,6 +162,6 @@ scoring:
   capability_hints:
     tools_true_patterns:    ["*gpt*","*claude*","*gemini*","*deepseek*","*qwen*","*mimo*","*glm*","*step*","*nemotron*","*llama*","*mistral*"]
     vision_true_patterns:   ["*vision*","*vl*","*omni*","*gemini*","*gpt-4o*","*m3*"]
-    reasoning_true_patterns: ["*r1*","*o1*","*o3*","*o4*","*thinking*","*deepseek-r1*","*qwq*","*kimi*"]
+    reasoning_true_patterns: ["*r1*","*o1*","*o3*","*o4*","*thinking*","*deepseek-r1*","*qwq*","*kimi*","*glm-5*"]
     embed_true_patterns:    ["*embed*","*rerank*","*retrieval*"]
     exclude_chat_patterns:  ["*embed*","*rerank*","*ocr*","*asr*","*tts*","*diffusion*","*guard*","*safety*"]

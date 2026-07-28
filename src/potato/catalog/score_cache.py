@@ -123,8 +123,8 @@ def _slug_quality_fallback(slug: str, cfg: dict) -> float:
         return 96.0
     if any(k in s for k in ("claude-3-5-sonnet", "claude-3.5-sonnet", "gpt-4o", "deepseek-r1", "deepseek-v3", "nemotron-3-super")):
         return 94.0
-    if any(k in s for k in ("gemini-2.0-pro", "gemini-1.5-pro", "claude-3-opus")):
-        return 92.0
+    if any(k in s for k in ("gemini-2.0-pro", "gemini-1.5-pro", "claude-3-opus", "glm-5", "glm-5.2")):
+        return 93.0
     if any(k in s for k in ("qwen3.5-122b", "qwen-2.5-72b", "qwen2.5-72b", "llama-3.3-70b", "mistral-large")):
         return 90.0
     if any(k in s for k in ("qwen2.5-coder-32b", "qwen2.5-coder", "code-llama-70b", "starcoder2")):
