@@ -305,6 +305,22 @@ sudo bash scripts/kill-switch.sh --force
 
 ---
 
+### 🔄 Updating & Hot Refreshing Server
+
+Whenever new code updates are pushed to GitHub, update your server in 1 command:
+
+```bash
+# Pull latest code, auto-backup SQLite DB, rebuild Docker, and verify health
+git pull origin main && sudo bash deploy.sh
+```
+
+- **For a 2-second fast restart (without rebuilding Docker):**
+  ```bash
+  sudo bash deploy.sh --restart
+  ```
+
+---
+
 ### ❓ Troubleshooting & FAQ
 
 #### Q1: Why was I seeing HTTP 499 errors mid-work before?
