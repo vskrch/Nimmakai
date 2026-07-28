@@ -57,6 +57,7 @@ fi
 # CLI Argument Parsing
 USE_DOCKER="${USE_DOCKER:-true}"
 DOMAIN_NAME="${DOMAIN_NAME:-}"
+ACTION="deploy"
 
 for arg in "$@"; do
     case $arg in
@@ -66,8 +67,94 @@ for arg in "$@"; do
         --native|-n)
             USE_DOCKER="false"
             ;;
+        --status)
+            ACTION="status"
+            ;;
+        --logs)
+            ACTION="logs"
+            ;;
+        --restart)
+            ACTION="restart"
+            ;;
+        --clean)
+            ACTION="clean"
+            ;;
+        --backup)
+            ACTION="backup"
+            ;;
+        --help|-h)
+            echo "Potato Gateway All-in-One Deployment & Management Script"
+            echo ""
+            echo "Usage: sudo bash deploy.sh [options]"
+            echo ""
+            echo "Options:"
+            echo "  --domain=api.potatolabs.cloud Set custom domain name"
+            echo "  --native                      Deploy natively via uvicorn instead of Docker"
+            echo "  --status                      View container & gateway health status"
+            echo "  --logs                        Tail live gateway container logs"
+            echo "  --restart                     Restart Potato Gateway container/service"
+            echo "  --backup                      Create SQLite database backup"
+            echo "  --clean                       Stop container and clean volumes"
+            exit 0
+            ;;
     esac
 done
+
+# Action: Status
+if [[ "${ACTION}" == "status" ]]; then
+    echo -e "${BOLD}=============================================================================="
+    echo "                 🥔 POTATO GATEWAY STATUS & HEALTH                             "
+    echo "=============================================================================="
+    echo -e "${NC}"
+    if command -v docker &>/dev/null && docker ps --format '{{.Names}}' | grep -q "^potato-gateway$"; then
+        ok "Docker Container 'potato-gateway' is RUNNING."
+        docker stats --no-stream potato-gateway 2>/dev/null || true
+    else
+        warn "Docker Container 'potato-gateway' is NOT running."
+    fi
+    echo ""
+    log "Probing Gateway HTTP Health..."
+    if curl -s -f http://127.0.0.1:8080/health >/dev/null 2>&1; then
+        ok "Potato Gateway HTTP API is HEALTHY (200 OK)."
+    else
+        warn "Potato Gateway HTTP API health probe failed."
+    fi
+    echo "=============================================================================="
+    exit 0
+fi
+
+# Action: Logs
+if [[ "${ACTION}" == "logs" ]]; then
+    log "Tailing live Potato Gateway logs..."
+    if command -v docker &>/dev/null && docker ps -a --format '{{.Names}}' | grep -q "^potato-gateway$"; then
+        exec docker logs -f --tail 100 potato-gateway
+    else
+        err "No potato-gateway Docker container found."
+    fi
+fi
+
+# Action: Restart
+if [[ "${ACTION}" == "restart" ]]; then
+    log "Restarting Potato Gateway container..."
+    if command -v docker &>/dev/null && docker ps -a --format '{{.Names}}' | grep -q "^potato-gateway$"; then
+        docker restart potato-gateway
+        ok "Potato Gateway restarted successfully."
+    else
+        err "No potato-gateway Docker container found."
+    fi
+    exit 0
+fi
+
+# Action: Clean
+if [[ "${ACTION}" == "clean" ]]; then
+    warn "Cleaning Potato Gateway containers and cache..."
+    if command -v docker &>/dev/null; then
+        docker stop potato-gateway 2>/dev/null || true
+        docker rm -f potato-gateway 2>/dev/null || true
+        ok "Docker container cleaned."
+    fi
+    exit 0
+fi
 
 DOMAIN_NAME="${DOMAIN_NAME:-}"
 PROXY_KEY="${PROXY_API_KEYS:-}"
@@ -224,6 +311,15 @@ fi
 declare -A SAVED_PROVIDER_KEYS
 if [[ -f .env ]]; then
     log "Existing .env configuration found. Preserving your credentials..."
+    # Auto-backup SQLite database snapshot before redeploying
+    for db_path in "data/potato.db" "/opt/potato/data/potato.db" "potato.db"; do
+        if [[ -f "${db_path}" ]]; then
+            mkdir -p backups
+            cp "${db_path}" "backups/potato_$(date +%Y%m%d_%H%M%S).db" 2>/dev/null || true
+            ok "Database snapshot backed up to backups/."
+            break
+        fi
+    done
     if [[ -z "${PROXY_KEY}" ]]; then
         PROXY_KEY=$(grep -E "^PROXY_API_KEYS=" .env | cut -d'=' -f2- || true)
     fi
@@ -355,12 +451,12 @@ if [[ ${READY} -eq 0 ]]; then
 fi
 
 if [[ ${HEALTHY} -ne 1 ]]; then
-    warn "Potato container did not respond on /ready or /health within 60s. Checking logs:"
-    docker compose -f docker-compose.do.yml logs --tail=50
+    warn "Potato container did not respond on /ready or /health within 60s. Extracting recent diagnostic logs:"
+    docker logs potato-gateway --tail=50 2>/dev/null || docker compose -f docker-compose.do.yml logs --tail=50 2>/dev/null || true
     warn "Your generated credentials are saved in .env:"
     warn "  ADMIN_PASSWORD=${ADMIN_PASS}"
     warn "  PROXY_API_KEYS=${PROXY_KEY}"
-    err "Deployment health check failed."
+    err "Deployment health check failed. Review the logs above for details."
 fi
 
 if [[ ${READY} -eq 1 ]]; then

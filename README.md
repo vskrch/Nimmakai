@@ -251,12 +251,88 @@ sudo tailscale funnel 8080
 ```
 
 ##### 3. GoDaddy CNAME DNS Setup:
-1. Log into **GoDaddy** → **Domain Portfolio** → Select your domain → **DNS Records**.
+1. Log into **GoDaddy** → **Domain Portfolio** → Select your domain (`potatolabs.cloud`) → **DNS Records**.
 2. Add a **CNAME Record**:
    - **Type**: `CNAME`
    - **Name**: `api` *(or custom subdomain)*
    - **Value**: `admin-potato.your-tailnet.ts.net` *(your Tailscale domain)*
    - **TTL**: `1 Hour`
+
+---
+
+### 🧰 CLI Management Commands Reference
+
+Potato Gateway includes single-command utilities to manage, monitor, and troubleshoot your deployment:
+
+#### Core Gateway Management (`deploy.sh`)
+```bash
+# View live container state, memory/CPU stats, and health probe
+sudo bash deploy.sh --status
+
+# Tail live application logs in real-time
+sudo bash deploy.sh --logs
+
+# Safely restart the Potato Gateway container
+sudo bash deploy.sh --restart
+
+# Manually trigger a timestamped SQLite database snapshot
+sudo bash deploy.sh --backup
+
+# Stop container and clean volume state
+sudo bash deploy.sh --clean
+```
+
+#### Networking & Tunnel Management (`scripts/setup-tunnel.sh`)
+```bash
+# Verify Tailscale status, active domain, and GoDaddy DNS propagation
+sudo bash scripts/setup-tunnel.sh --status
+
+# Test end-to-end public HTTPS health & measure latency (ms)
+sudo bash scripts/setup-tunnel.sh --test
+
+# Disable Tailscale Funnel
+sudo bash scripts/setup-tunnel.sh --stop
+```
+
+---
+
+### ❓ Troubleshooting & FAQ
+
+#### Q1: Why was I seeing HTTP 499 errors mid-work before?
+**Cause:** Cloudflare's HTTP proxy (orange cloud) enforces a strict **100-second HTTP response timeout** and buffers SSE responses (`text/event-stream`). When long reasoning models (Claude 3.7, O3, DeepSeek R1) stream output for >100s, Cloudflare drops the TCP connection, causing your IDE client to disconnect and logging `HTTP 499`.  
+**Solution:** Using **Tailscale Funnel** (`scripts/setup-tunnel.sh`) passes raw HTTPS streams directly to your server without Cloudflare proxy timeouts or response buffering.
+
+#### Q2: How do I verify if my GoDaddy DNS record has propagated?
+Run the built-in DNS propagation checker:
+```bash
+sudo bash scripts/setup-tunnel.sh --status
+```
+It will query public DNS servers and confirm when `api.potatolabs.cloud` resolves to your Tailscale node. (GoDaddy DNS propagation usually takes 1–2 minutes).
+
+#### Q3: What if Tailscale HTTPS says "HTTPS disabled"?
+1. Log into your **Tailscale Admin Console** at [login.tailscale.com/admin/settings/dns](https://login.tailscale.com/admin/settings/dns).
+2. Scroll to **HTTPS Certificates** and click **Enable HTTPS Certificates**.
+3. Re-run `sudo bash scripts/setup-tunnel.sh --domain=api.potatolabs.cloud`.
+
+#### Q4: How do I retrieve my Admin Password or API Keys?
+Your generated credentials are saved securely in `/opt/potato/.env`:
+```bash
+# View Admin Password
+sudo grep ADMIN_PASSWORD /opt/potato/.env
+
+# View Direct API Key
+sudo grep PROXY_API_KEYS /opt/potato/.env
+```
+
+#### Q5: How do I backup or restore my SQLite database?
+Automated backups are stored under `/opt/potato/backups/`:
+```bash
+# List all database snapshots
+ls -la /opt/potato/backups/
+
+# Manual backup snapshot
+sudo bash deploy.sh --backup
+```
 
 ---
 
