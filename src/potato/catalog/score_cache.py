@@ -119,9 +119,9 @@ def _slug_quality_fallback(slug: str, cfg: dict) -> float:
     s = str(slug or "").strip().lower()
 
     # 1. Flagship model family quality priors (well-established benchmarks)
-    if any(k in s for k in ("claude-3-7", "claude-3.7", "gpt-4.5", "o3", "o1")):
+    if any(k in s for k in ("claude-3-7", "claude-3.7", "gpt-4.5", "o3", "o1", "nemotron-3-ultra")):
         return 96.0
-    if any(k in s for k in ("claude-3-5-sonnet", "claude-3.5-sonnet", "gpt-4o", "deepseek-r1", "deepseek-v3")):
+    if any(k in s for k in ("claude-3-5-sonnet", "claude-3.5-sonnet", "gpt-4o", "deepseek-r1", "deepseek-v3", "nemotron-3-super")):
         return 94.0
     if any(k in s for k in ("gemini-2.0-pro", "gemini-1.5-pro", "claude-3-opus")):
         return 92.0
