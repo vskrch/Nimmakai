@@ -15,6 +15,7 @@ from potato.accounts.store import (
     STATUS_PENDING,
     STATUS_REJECTED,
     STATUS_SUSPENDED,
+    STATUS_UNVERIFIED,
     AccountStore,
 )
 from potato.auth import require_admin, resolve_auth

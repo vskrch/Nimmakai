@@ -19,6 +19,7 @@ import math
 import re
 import time
 import urllib.request
+from contextlib import suppress
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
@@ -99,10 +100,8 @@ async def _fetch_openrouter(client: httpx.AsyncClient) -> dict[str, IntelBundle]
         param_b: float | None = None
         m_param = PARAM_RE.search(slug)
         if m_param:
-            try:
+            with suppress(ValueError, TypeError):
                 param_b = float(m_param.group(1))
-            except (ValueError, TypeError):
-                pass
         bundles[slug] = IntelBundle(
             model_slug=slug,
             param_b=param_b,

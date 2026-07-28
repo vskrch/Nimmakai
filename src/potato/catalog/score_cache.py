@@ -15,6 +15,7 @@ import logging
 import math
 import re
 import time
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -93,10 +94,8 @@ def _compute_quality(bundle: IntelBundle | None, slug: str, yaml_cfg: dict) -> f
             if param_b is None:
                 m_param = PARAM_RE.search(slug)
                 if m_param:
-                    try:
+                    with suppress(ValueError, TypeError):
                         param_b = float(m_param.group(1))
-                    except (ValueError, TypeError):
-                        pass
             if param_b is not None and param_b > 0:
                 param_q = min(95.0, max(10.0, 60.0 + 8.0 * math.log2(param_b / 7.0)))
                 signals.append((param_q, w_par))
