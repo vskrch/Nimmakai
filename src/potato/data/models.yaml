@@ -91,7 +91,7 @@ scoring:
     # 5-factor: intel >> speed > lat > avail >> prov
     coding_agentic:  {intel: 0.82, speed: 0.09, lat: 0.05, avail: 0.03, prov: 0.01}
     reasoning:       {intel: 0.85, speed: 0.07, lat: 0.04, avail: 0.03, prov: 0.01}
-    long_horizon:    {intel: 0.80, speed: 0.06, lat: 0.04, avail: 0.07, prov: 0.03}
+    long_horizon:    {intel: 0.80, speed: 0.08, lat: 0.05, avail: 0.04, prov: 0.03}
     chat_fast:       {intel: 0.55, speed: 0.22, lat: 0.13, avail: 0.08, prov: 0.02}
     vision:          {intel: 0.68, speed: 0.12, lat: 0.09, avail: 0.08, prov: 0.03}
     embeddings:      {intel: 0.35, speed: 0.30, lat: 0.20, avail: 0.13, prov: 0.02}

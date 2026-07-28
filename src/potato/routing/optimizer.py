@@ -36,13 +36,13 @@ logger = logging.getLogger(__name__)
 # ponytail: lat defaults to speed*0.45 when YAML omits it (preserves the old
 # 4-key blend where speed conflated throughput+latency 0.55/0.45).
 _INTENT_WEIGHTS: dict[str, tuple[float, float, float, float, float]] = {
-    "coding_agentic": (0.92, 0.04, 0.02, 0.01, 0.01),
-    "reasoning": (0.92, 0.04, 0.02, 0.01, 0.01),
-    "long_horizon": (0.92, 0.04, 0.02, 0.01, 0.01),
-    "chat_fast": (0.85, 0.08, 0.04, 0.02, 0.01),
-    "vision": (0.88, 0.06, 0.03, 0.02, 0.01),
-    "embeddings": (0.75, 0.15, 0.06, 0.03, 0.01),
-    "_default": (0.88, 0.06, 0.03, 0.02, 0.01),
+    "coding_agentic": (0.82, 0.09, 0.05, 0.03, 0.01),
+    "reasoning": (0.85, 0.07, 0.04, 0.03, 0.01),
+    "long_horizon": (0.80, 0.08, 0.05, 0.04, 0.03),
+    "chat_fast": (0.55, 0.22, 0.13, 0.08, 0.02),
+    "vision": (0.68, 0.12, 0.09, 0.08, 0.03),
+    "embeddings": (0.35, 0.30, 0.20, 0.13, 0.02),
+    "_default": (0.72, 0.13, 0.08, 0.05, 0.02),
 }
 
 

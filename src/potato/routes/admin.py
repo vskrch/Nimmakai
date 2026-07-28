@@ -410,7 +410,7 @@ async def rankings_view(request: Request) -> JSONResponse:
 
     return JSONResponse(
         {
-            "algorithm": "score = I^0.50 × S^0.38 × H^0.08 × P^0.04 (every request)",
+            "algorithm": "score = I^α × S^β × L^λ × A^γ × P^δ  (intel>>speed>lat>avail>>prov, every request)",
             "sticky": registry.rankings_sticky,
             "frozen": registry.ladder.frozen,
             "adaptive_routing": getattr(settings, "adaptive_routing", True),
