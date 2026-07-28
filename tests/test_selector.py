@@ -254,6 +254,24 @@ def test_custom_model_ladder_empty_chain_falls_through() -> None:
     assert d.mode in {"auto", "unknown_alias_as_auto"}
 
 
+def test_custom_model_group_dynamic_reranking() -> None:
+    """Admin custom model group is treated as a closed candidate pool re-ranked dynamically."""
+    s = _selector()
+    ladders = ModelLadderStore(db=None)
+    # Admin defines a custom model group with models
+    group_models = ["minimaxai/minimax-m3", "zai/glm-5.2", "qwen/qwen3.5-122b-a10b"]
+    ladders.set("potato/coding", group_models)
+    s.model_ladders = ladders
+
+    d = s.resolve("potato/coding", _intent(Intent.CODING_AGENTIC))
+    assert d.mode == "passthrough_with_fallback"
+    assert d.rule_id == "custom_ladder:potato/coding"
+    # All models in chain belong exclusively to the admin group candidate pool
+    assert set(d.chain).issubset(set(group_models))
+    # Dynamic scoring & health re-ranking ranks highest scoring model in the group first
+    assert d.chain[0] in ("zai/glm-5.2", "qwen/qwen3.5-122b-a10b")
+
+
 # ── User preferences (selector.py:152-185) ──
 
 

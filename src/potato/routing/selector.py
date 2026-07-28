@@ -155,15 +155,25 @@ class ModelSelector:
         if requested_live in self.registry.disabled_models:
             raise ValueError("model_disabled")
 
-        # Custom model ladder check (e.g. potato/coding)
+        # Custom model group check (e.g. potato/coding, potato/fast, or custom admin groups)
         if self.model_ladders is not None and (raw or model_field):
             target_id = raw if raw else str(model_field or "")
             lad = self.model_ladders.get(target_id)
             if lad is None and model_field:
                 lad = self.model_ladders.get(str(model_field))
             if lad is not None and lad.chain:
+                # 1. Closed candidate pool defined by administrator for this model group
+                group_candidates = list(lad.chain)
+
+                # 2. Dynamic scoring & RL re-ranking over the group candidate pool
+                # Evaluates quality scores, intent affinity, live health & RL bandit metrics
+                scored_group_chain = self.registry.health_reorder(
+                    group_candidates, intent=intent_key, variant=variant
+                )
+
+                # 3. Finalize chain (apply allowed filters, user prefs, and fallback bounds)
                 chain = self._finalize_chain(
-                    list(lad.chain),
+                    scored_group_chain,
                     intent_key=intent_key,
                     variant=variant,
                     free_only=tier == "free",
