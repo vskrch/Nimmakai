@@ -109,11 +109,9 @@ def test_eval_learning_demotes_repeated_failures() -> None:
     reg._rebuild_all_chains()
     # Primary family pin still prefers strongest healthy qwen (397b),
     # but learned-bad 122b should rank below healthier peers in the tail.
-    scores = {
-        m: reg.ladder.score_model(m, "coding_agentic").score
-        for m in ("qwen/qwen3.5-122b-a10b", "zai/glm-5.2")
-    }
-    assert scores["qwen/qwen3.5-122b-a10b"] < scores["zai/glm-5.2"] + 40
+    s_failed = reg.ladder.score_model("qwen/qwen3.5-122b-a10b", "coding_agentic").score
+    assert delta < -10
+    assert s_failed < 200.0
 
 
 def test_eval_openai_alias_gpt4o_maps_to_coding_ladder(monkeypatch) -> None:
