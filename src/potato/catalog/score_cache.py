@@ -89,20 +89,10 @@ def _compute_quality(bundle: IntelBundle | None, slug: str, yaml_cfg: dict) -> f
         if bundle.arena_elo is not None:
             elo_norm = min(100.0, max(0.0, (bundle.arena_elo - arena_base) / arena_scale))
             signals.append((elo_norm, w_elo))
-        if not signals:
-            param_b = bundle.param_b
-            if param_b is None:
-                m_param = PARAM_RE.search(slug)
-                if m_param:
-                    with suppress(ValueError, TypeError):
-                        param_b = float(m_param.group(1))
-            if param_b is not None and param_b > 0:
-                param_q = min(95.0, max(10.0, 60.0 + 8.0 * math.log2(param_b / 7.0)))
-                signals.append((param_q, w_par))
 
     if signals:
         total_w = sum(w for _, w in signals)
-        quality = sum(v * w for v, w in signals) / total_w
+        quality = sum(v * w for v, w in signals) / max(1e-5, total_w)
     else:
         quality = _slug_quality_fallback(slug, cfg)
 
@@ -118,49 +108,43 @@ def _slug_quality_fallback(slug: str, cfg: dict) -> float:
     s = str(slug or "").strip().lower()
 
     # Real-world benchmark quality priors (LMSYS Chatbot Arena ELO / Artificial Analysis Quality Index)
-    # Tier 1: SOTA Reasoning & Agentic Coding (LMSYS 1350+ / SWE-bench 65%+)
-    if any(k in s for k in ("claude-3-7", "claude-3.7", "o3-mini", "o3", "o1")):
-        return 98.0
-    if any(k in s for k in ("claude-3-5-sonnet", "claude-3.5-sonnet", "gpt-4.5")):
-        return 97.0
-    if any(k in s for k in ("deepseek-r1", "deepseek-v3")):
+    # Tier 1: SOTA Reasoning & Agentic Coding (97.0 - 99.0)
+    if any(k in s for k in ("claude-3-7", "claude-3.7", "o3-mini", "o3", "o1", "gpt-4.5")):
+        return 98.5
+    if any(k in s for k in ("claude-3-5-sonnet", "claude-3.5-sonnet", "gpt-4o")):
+        return 97.5
+    if any(k in s for k in ("glm-5.2", "deepseek-r1", "deepseek-v3", "qwen3.5-397b")):
         return 96.5
-    if any(k in s for k in ("gpt-4o-mini", "claude-3-5-haiku")):
-        return 86.0
-    if any(k in s for k in ("gpt-4o", "claude-3-opus")):
-        return 95.0
-    if any(k in s for k in ("gemini-2.0-pro", "gemini-1.5-pro", "qwen3.5-397b")):
-        return 93.5
 
-    # Tier 2: High-Capability Frontier & Agentic Coding Specialists (LMSYS 1300–1340)
-    if any(k in s for k in ("glm-5.2", "glm-5", "qwen2.5-coder-32b", "qwen2.5-coder", "qwen3.5-122b")):
-        return 92.5
-    if any(k in s for k in ("qwen-2.5-72b", "qwen2.5-72b", "llama-3.3-70b", "kimi-k1.5", "kimi-k3", "nemotron-3-ultra")):
-        return 91.0
-    if any(k in s for k in ("nemotron-3-super", "mistral-large")):
-        return 89.0
+    # Tier 2: High-Capability Frontier & Agentic Coding Specialists (89.5 - 94.0)
+    if any(k in s for k in ("glm-5.1", "gemini-2.0-pro", "gemini-1.5-pro", "claude-3-opus")):
+        return 94.0
+    if any(k in s for k in ("glm-5", "qwen2.5-coder-32b", "qwen2.5-coder", "qwen3.5-122b", "llama-3.3-70b")):
+        return 93.0
+    if any(k in s for k in ("nemotron-3-ultra", "nemotron-3-ultra-550b", "nemotron-4-340b")):
+        return 91.5
+    if any(k in s for k in ("nemotron-3-super", "nemotron-3-super-120b", "mistral-large")):
+        return 89.5
 
-    # Tier 3: Capable Mid-Size & Fast Flash Models (LMSYS 1240–1290)
-    if any(k in s for k in ("gemini-2.0-flash", "gemini-1.5-flash")):
-        return 86.0
+    # Tier 3: Capable Mid-Size & Fast Flash Models (85.0 - 87.0)
+    if any(k in s for k in ("gpt-4o-mini", "claude-3-5-haiku", "gemini-2.0-flash", "gemini-1.5-flash")):
+        return 86.5
     if any(k in s for k in ("glm-4-plus", "glm-4", "step-3.7", "step-3", "minimax-m3")):
         return 85.0
 
-    # 2. Config keyword floors (e.g. 70b: 78.0)
+    # 2. Config keyword floors
     kws = cfg.get("quality_floor_keywords", {}) if isinstance(cfg, dict) else {}
     for kw, score in kws.items():
         if kw != "_default" and kw in s:
             return float(score)
 
-    # 3. Extract parameter size estimate log scale (capped at 85.0 without live intel)
+    # 3. Extract parameter size estimate log scale (capped at 84.0 so unknown param models never exceed known SOTA)
     m = PARAM_RE.search(s)
     if m:
-        try:
-            p = int(m.group(1))
+        with suppress(ValueError, TypeError):
+            p = float(m.group(1))
             if p > 0:
-                return min(85.0, max(50.0, 60.0 + 8.0 * math.log2(p / 7.0)))
-        except (ValueError, TypeError):
-            pass
+                return min(84.0, max(50.0, 58.0 + 6.0 * math.log2(p / 7.0)))
 
     return float(kws.get("_default", 65.0))
 

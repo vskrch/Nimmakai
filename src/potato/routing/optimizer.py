@@ -59,27 +59,25 @@ def _quality_prior(
     ladder_scores: dict[str, float] | None,
     max_score: float | None = None,
 ) -> float:
-    """Quality prior from precomputed ladder scores, normalized to (0, 1].
-
-    Uses the ladder's actual composite score to preserve the full quality
-    spread. A 95-quality model maps to ~0.95, a 60-quality model to ~0.60.
-    Floor at 0.35 so weak models participate as deep fallbacks only.
-
-    max_score: precomputed max of ladder_scores (avoids recomputing per model).
-    """
-    if not ladder_scores:
-        return 0.50
-    raw = ladder_scores.get(model_id)
+    """Quality prior normalized to (0, 1]."""
+    raw: float | None = None
+    if ladder_scores:
+        raw = ladder_scores.get(model_id)
     if raw is None:
+        with contextlib.suppress(Exception):
+            from potato.catalog.score_cache import ModelScoreCache
+            cache = ModelScoreCache.current()
+            if cache:
+                ms = cache.get(model_id)
+                if ms is not None:
+                    raw = float(ms.quality)
+    if raw is None or raw <= 0 or raw != raw:
         return 0.50
-    raw = float(raw)
-    if raw <= 0 or raw != raw:  # NaN guard: NaN != NaN
-        return 0.50
-    if max_score is None:
+    if max_score is None and ladder_scores:
         max_score = max(ladder_scores.values())
-    if max_score <= 0:
-        return 0.50
-    return max(0.35, min(1.0, raw / max_score))
+    if max_score is None or max_score <= 0:
+        max_score = 100.0
+    return max(0.35, min(1.0, float(raw) / float(max_score)))
 
 
 def _speed_factor(health: Any, model_id: str) -> float:
