@@ -294,6 +294,15 @@ sudo bash scripts/setup-tunnel.sh --test
 sudo bash scripts/setup-tunnel.sh --stop
 ```
 
+#### All-in-One Kill Switch & Reset (`scripts/kill-switch.sh`)
+```bash
+# Interactively stop, disable, and nuke all containers, daemons, and processes
+sudo bash scripts/kill-switch.sh
+
+# Skip confirmation prompt for automated scripts
+sudo bash scripts/kill-switch.sh --force
+```
+
 ---
 
 ### ❓ Troubleshooting & FAQ
