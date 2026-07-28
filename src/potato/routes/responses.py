@@ -608,7 +608,7 @@ async def _handle_responses(request: Request) -> JSONResponse | StreamingRespons
     # Non-streaming JSON translation back to Responses shape.
     if isinstance(resp, JSONResponse):
         try:
-            resp_json = json.loads(resp.body.decode("utf-8"))
+            resp_json = json.loads(bytes(resp.body).decode("utf-8"))
             responses_json = transform_chat_to_responses_json(resp_json, requested_model)
             return JSONResponse(content=responses_json, status_code=resp.status_code)
         except Exception as exc:

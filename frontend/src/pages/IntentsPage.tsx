@@ -3,7 +3,7 @@ import { Card, CardBody, CardHeader, StatBox, Badge, Skeleton, EmptyState } from
 import { Donut, HorizontalBars } from '../components/charts'
 import { useBreakdown } from '../hooks/useAnalytics'
 import { RangePicker } from '../components/RangePicker'
-import { fmtPct, fmtMs } from '../lib/format'
+import { fmtPct, fmtMs, fmtNum } from '../lib/format'
 import type { BreakdownItem } from '../types/analytics'
 import {
   BrainCircuit,
@@ -46,7 +46,7 @@ export default function IntentsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <StatBox
             label="Total Classified Prompts"
-            value={total.toLocaleString()}
+            value={fmtNum(total)}
             sub="Requests routed via classifier"
             icon={BrainCircuit}
           />
@@ -109,7 +109,7 @@ export default function IntentsPage() {
                         {i ? (i.key || '—') : <Skeleton lines={1} className="w-24" />}
                       </td>
                       <td className="px-4 sm:px-5 py-3.5 font-mono text-zinc-300">
-                        {i ? i.request_count.toLocaleString() : <Skeleton lines={1} className="w-12" />}
+                        {i ? fmtNum(i.request_count) : <Skeleton lines={1} className="w-12" />}
                       </td>
                       <td className="px-4 sm:px-5 py-3.5 font-mono text-emerald-400">
                         {i ? (i.avg_confidence ?? 0).toFixed(2) : <Skeleton lines={1} className="w-12" />}

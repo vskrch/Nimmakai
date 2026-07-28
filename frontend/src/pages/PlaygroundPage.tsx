@@ -29,7 +29,7 @@ export default function PlaygroundPage() {
   const [params, setParams] = useState({ temperature: 0.7, max_tokens: 1024 })
   const msgsRef = useRef<HTMLDivElement>(null)
 
-  const allModels = catalog?.dynamic_chains?.coding_agentic || []
+  const liveIds = catalog?.live_ids || []
 
   useEffect(() => {
     if (msgsRef.current) {
@@ -54,7 +54,7 @@ export default function PlaygroundPage() {
           ...(key ? { Authorization: `Bearer ${key}` } : {}),
         },
         body: JSON.stringify({
-          model: model === 'auto' ? undefined : model,
+          model: model === 'auto' ? 'potato/auto' : model,
           messages: newMsgs.map(m => ({ role: m.role, content: m.content })),
           stream: true,
           temperature: params.temperature,
@@ -184,8 +184,12 @@ export default function PlaygroundPage() {
                 value={model}
                 onChange={e => setModel(e.target.value)}
               >
-                <option value="auto">auto (Auto-Router Managed)</option>
-                {allModels.slice(0, 25).map(m => (
+                <option value="auto">potato/auto (Auto-Router Managed)</option>
+                <option value="potato/coding">potato/coding (Coding & Agentic)</option>
+                <option value="potato/best">potato/best (Frontier Reasoning)</option>
+                <option value="potato/auto-fast">potato/auto-fast (Low Latency)</option>
+                <option value="potato/auto-cheap">potato/auto-cheap (Cost-Aware)</option>
+                {liveIds.map(m => (
                   <option key={m} value={m}>{m}</option>
                 ))}
               </Select>

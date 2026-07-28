@@ -440,20 +440,25 @@ class ModelSelector:
         """Always produce an intent-aligned chain for potato/auto (and aliases).
 
         Guarantees: if any active model exists and hard filters allow it, the
-        chain is non-empty. Primary intent leads; related intents extend the
-        fallback tail so the request can always be processed.
+        chain is non-empty. Intent-ladder models lead (highest score first);
+        ALL remaining live models fill the tail so the best available model is
+        always reachable — nothing is silently excluded from the candidate set.
         """
         free_only = tier == "free"
         max_n = self._max_n_for_intent(intent_key)
-        # Auto gets a longer attempt budget so intent can always be served
-        # Pull a wide intent-aware pool, then finalize (health, filters, pin)
+
+        # Build a full-catalog pool: intent-ranked models lead, then ALL live
+        # models follow (score-sorted). include_all_live=True ensures potato/auto
+        # has the complete catalog as its candidate set before finalization.
         chain = build_intent_aware_pool(
             self.registry,
             primary_intent=intent_key,
             variant=variant,
-            max_n=max(max_n * 2, 16),
+            max_n=max_n,
             include_related=True,
+            include_all_live=True,
         )
+
         # Soft sticky: only pin when the model fits this intent (or low confidence)
         pin = preferred_model
         if pin and not sticky_fits_intent_pool(
@@ -475,6 +480,11 @@ class ModelSelector:
             models_fallback=opts.models_fallback,
         )
 
+        # Cap to max_n after finalization (not before) so health_reorder gets the
+        # full scored pool and the actual best model is at the head.
+        if chain and max_n and len(chain) > max_n:
+            chain = chain[:max_n]
+
         # Hard guarantee for auto: never return empty when the live pool has models
         if not chain:
             chain = build_intent_aware_pool(
@@ -483,6 +493,7 @@ class ModelSelector:
                 variant=variant,
                 max_n=max_n,
                 include_related=True,
+                include_all_live=True,
             )
             chain = filter_chain(
                 chain,

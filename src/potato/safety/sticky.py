@@ -104,9 +104,10 @@ class StickySessionStore:
         now = time.monotonic()
         prev = self._map.get(session_id)
         prev_ok = prev is not None and now <= prev.expires
+        prev_binding = prev if prev_ok else None  # narrows StickyBinding | None → StickyBinding
         self._map[session_id] = StickyBinding(
-            key_id=key_id if key_id else (prev.key_id if prev_ok else None),
-            model_id=model_id if model_id else (prev.model_id if prev_ok else None),
+            key_id=key_id if key_id else (prev_binding.key_id if prev_binding is not None else None),
+            model_id=model_id if model_id else (prev_binding.model_id if prev_binding is not None else None),
             expires=now + self.ttl_seconds,
         )
         self._map.move_to_end(session_id)

@@ -96,6 +96,7 @@ async def public_models(request: Request) -> JSONResponse:
 
 
 @router.post("/chat/api/completions", response_model=None)
+@router.post("/chat/api/chat/completions", response_model=None)
 async def public_completions(request: Request) -> JSONResponse | StreamingResponse:
     """Public chat completion (no auth). Per-IP rate limited. Uses gateway keys."""
     settings = _settings(request)
@@ -282,14 +283,12 @@ async def public_search(request: Request) -> JSONResponse:
     import asyncio
 
     ddg_results, wiki_results = await asyncio.gather(ddg_task, wiki_task, return_exceptions=True)
-    if isinstance(ddg_results, Exception):
-        ddg_results = []
-    if isinstance(wiki_results, Exception):
-        wiki_results = []
+    ddg_list: list[dict[str, str]] = [] if isinstance(ddg_results, BaseException) else ddg_results  # type: ignore[assignment]
+    wiki_list: list[dict[str, str]] = [] if isinstance(wiki_results, BaseException) else wiki_results  # type: ignore[assignment]
     # De-dup by title, DDG first (full web), then Wikipedia (encyclopedic)
     seen: set[str] = set()
     results: list[dict[str, str]] = []
-    for r in [*ddg_results, *wiki_results]:
+    for r in [*ddg_list, *wiki_list]:
         key = r.get("title", "").lower()[:60]
         if not key or key in seen:
             continue

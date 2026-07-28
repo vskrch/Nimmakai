@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Card, CardHeader, CardBody, Badge, Button, Input, StatBox, Skeleton, ErrorState, EmptyState } from '../components/ui'
 import { useStats } from '../hooks/useApi'
 import { api } from '../lib/api'
+import { fmtNum } from '../lib/format'
 import { Activity, BarChart3, KeyRound, RefreshCw, Search } from 'lucide-react'
 
 interface TraceEntry {
@@ -81,8 +82,8 @@ export default function TracingPage() {
                     <tr key={mid} className="hover:bg-white/[0.02] transition-colors">
                       <td className="px-4 sm:px-6 py-4 font-semibold text-white">{mid.split('/').pop()}</td>
                       <td className="px-4 sm:px-6 py-4 text-zinc-300 font-mono">{routing.models_total?.[mid] ?? 0}</td>
-                      <td className="px-4 sm:px-6 py-4 text-zinc-300 font-mono">{tok.prompt_tokens.toLocaleString()}</td>
-                      <td className="px-4 sm:px-6 py-4 text-zinc-300 font-mono">{tok.completion_tokens.toLocaleString()}</td>
+                    <td className="px-4 sm:px-6 py-4 text-zinc-300 font-mono">{fmtNum(tok.prompt_tokens)}</td>
+                    <td className="px-4 sm:px-6 py-4 text-zinc-300 font-mono">{fmtNum(tok.completion_tokens)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -116,8 +117,8 @@ export default function TracingPage() {
                   {Object.entries(routing.key_tokens).sort((a, b) => (b[1].prompt_tokens + b[1].completion_tokens) - (a[1].prompt_tokens + a[1].completion_tokens)).map(([kid, tok]) => (
                     <tr key={kid} className="hover:bg-white/[0.02] transition-colors">
                       <td className="px-4 sm:px-6 py-4 font-mono text-white">{kid.slice(0, 12)}…</td>
-                      <td className="px-4 sm:px-6 py-4 text-zinc-300 font-mono">{tok.prompt_tokens.toLocaleString()}</td>
-                      <td className="px-4 sm:px-6 py-4 text-zinc-300 font-mono">{tok.completion_tokens.toLocaleString()}</td>
+                      <td className="px-4 sm:px-6 py-4 text-zinc-300 font-mono">{fmtNum(tok.prompt_tokens)}</td>
+                      <td className="px-4 sm:px-6 py-4 text-zinc-300 font-mono">{fmtNum(tok.completion_tokens)}</td>
                     </tr>
                   ))}
                 </tbody>

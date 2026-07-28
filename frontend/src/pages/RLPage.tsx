@@ -162,7 +162,7 @@ export default function RLPage() {
           <CardBody className="p-4 flex items-center justify-between">
             <div>
               <p className="text-xs font-medium text-slate-400">Total Adaptations</p>
-              <p className="text-2xl font-bold text-slate-100 mt-1">{totalDecisions.toLocaleString()}</p>
+              <p className="text-2xl font-bold text-slate-100 mt-1">{(totalDecisions ?? 0).toLocaleString()}</p>
             </div>
             <BarChart2 className="w-8 h-8 text-indigo-400/70" />
           </CardBody>

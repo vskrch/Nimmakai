@@ -237,7 +237,10 @@ def test_v1_messages_anthropic_endpoint(client, monkeypatch):
 
 
 def test_tool_call_auto_recovery():
-    from potato.routes.claude import _extract_raw_tool_calls_from_text, transform_openai_to_anthropic_json
+    from potato.routes.claude import (
+        _extract_raw_tool_calls_from_text,
+        transform_openai_to_anthropic_json,
+    )
 
     raw_text = "<|tool_calls_section_begin|><|tool_call:read_file{\"path\": \"src/main.py\"}|><|tool_calls_section_end|>"
     clean_text, tools = _extract_raw_tool_calls_from_text(raw_text)

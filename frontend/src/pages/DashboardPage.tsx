@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Card, CardBody, CardHeader, StatBox, Badge, StatusDot, Button, Skeleton, ErrorState } from '../components/ui'
 import { useHealth, useStats, useSSE } from '../hooks/useApi'
 import { api, okBody } from '../lib/api'
-import { fmtMs, fmtTokens, fmtUsd, fmtPct, rangeSince, qs } from '../lib/format'
+import { fmtMs, fmtTokens, fmtUsd, fmtPct, fmtNum, rangeSince, qs } from '../lib/format'
 import type { AnalyticsSummary } from '../types/analytics'
 import {
   Activity,
@@ -103,8 +103,8 @@ export default function DashboardPage({ onRefresh }: { onRefresh: () => void }) 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatBox
             label="Total Requests (1h)"
-            value={summary.total_requests.toLocaleString()}
-            sub={`${summary.requests_per_minute.toFixed(1)} req/min average`}
+            value={fmtNum(summary.total_requests)}
+            sub={`${(summary.requests_per_minute ?? 0).toFixed(1)} req/min average`}
             icon={Zap}
           />
           <StatBox

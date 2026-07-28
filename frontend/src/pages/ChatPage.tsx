@@ -12,15 +12,16 @@ import { webSearch, looksLikeSearchQuery, type SearchResult } from '../lib/webSe
 // ponytail: localStorage-only history. No server persistence. No retention when toggle off.
 
 type Role = 'user' | 'assistant' | 'system'
-type Modality = 'image' | 'audio' | 'video'
+type Modality = 'image' | 'audio' | 'video' | 'text'
 
 interface Attachment {
   id: string
   modality: Modality
-  dataUrl: string  // base64 data URL
+  dataUrl: string  // base64 data URL (or empty for text)
   name: string
   mime: string
   size: number
+  textContent?: string
 }
 
 interface ChatMessage {
@@ -156,16 +157,25 @@ function titleFrom(text: string): string {
 
 // ---------- file handling ----------
 const MAX_FILE_MB = 20
-const ACCEPTED = {
-  image: ['image/png', 'image/jpeg', 'image/webp', 'image/gif'],
-  audio: ['audio/wav', 'audio/mp3', 'audio/mpeg', 'audio/ogg', 'audio/webm'],
-  video: ['video/mp4', 'video/webm', 'video/ogg'],
-}
 
-function detectModality(mime: string): Modality | null {
-  if (ACCEPTED.image.includes(mime)) return 'image'
-  if (ACCEPTED.audio.includes(mime)) return 'audio'
-  if (ACCEPTED.video.includes(mime)) return 'video'
+const CODE_TEXT_EXT_RE = /\.(txt|md|py|js|ts|tsx|jsx|json|csv|log|sh|bash|zsh|yaml|yml|xml|sql|c|cpp|h|hpp|rs|go|java|html|css|scss|less|toml|env|dockerfile|gitignore|ini|conf)$/i
+const IMAGE_EXT_RE = /\.(png|jpe?g|webp|gif|svg|bmp|avif|ico|heic)$/i
+const AUDIO_EXT_RE = /\.(mp3|wav|ogg|m4a|aac|flac|opus)$/i
+const VIDEO_EXT_RE = /\.(mp4|webm|mov|avi|mkv)$/i
+
+function detectModality(mime: string, filename: string): Modality | null {
+  const m = (mime || '').toLowerCase()
+  const name = (filename || '').toLowerCase()
+  if (m.startsWith('image/') || IMAGE_EXT_RE.test(name)) return 'image'
+  if (m.startsWith('audio/') || AUDIO_EXT_RE.test(name)) return 'audio'
+  if (m.startsWith('video/') || VIDEO_EXT_RE.test(name)) return 'video'
+  if (
+    m.startsWith('text/') ||
+    m.includes('json') ||
+    m.includes('javascript') ||
+    m.includes('xml') ||
+    CODE_TEXT_EXT_RE.test(name)
+  ) return 'text'
   return null
 }
 
@@ -178,22 +188,44 @@ function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
+function fileToText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(r.result as string || '')
+    r.onerror = () => reject(r.error)
+    r.readAsText(file)
+  })
+}
+
 async function filesToAttachments(files: FileList | File[]): Promise<Attachment[]> {
   const out: Attachment[] = []
   for (const f of Array.from(files)) {
-    const modality = detectModality(f.type)
+    const modality = detectModality(f.type, f.name)
     if (!modality) continue
     if (f.size > MAX_FILE_MB * 1024 * 1024) continue
     try {
-      const dataUrl = await fileToDataUrl(f)
-      out.push({
-        id: `a_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
-        modality,
-        dataUrl,
-        name: f.name,
-        mime: f.type,
-        size: f.size,
-      })
+      if (modality === 'text') {
+        const textContent = await fileToText(f)
+        out.push({
+          id: `a_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+          modality: 'text',
+          dataUrl: '',
+          name: f.name,
+          mime: f.type || 'text/plain',
+          size: f.size,
+          textContent,
+        })
+      } else {
+        const dataUrl = await fileToDataUrl(f)
+        out.push({
+          id: `a_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`,
+          modality,
+          dataUrl,
+          name: f.name,
+          mime: f.type,
+          size: f.size,
+        })
+      }
     } catch { /* ignore unreadable */ }
   }
   return out
@@ -380,15 +412,16 @@ function buildMessageContent(m: ChatMessage): string | unknown[] {
     if (att.modality === 'image') {
       parts.push({ type: 'image_url', image_url: { url: att.dataUrl } })
     } else if (att.modality === 'audio') {
-      // OpenAI audio format: { type: 'input_audio', input_audio: { data, format } }
       const fmt = att.mime.split('/')[1] || 'wav'
       const b64 = att.dataUrl.split(',')[1] || ''
       parts.push({ type: 'input_audio', input_audio: { data: b64, format: fmt } })
     } else if (att.modality === 'video') {
-      // Video: send as image_url with data URL (providers that accept video
-      // via the image_url field, e.g. Gemini via OpenAI compat). Fallback:
-      // most VLMs will reject; the router moves to the next vision model.
       parts.push({ type: 'image_url', image_url: { url: att.dataUrl } })
+    } else if (att.modality === 'text' && att.textContent) {
+      parts.push({
+        type: 'text',
+        text: `\n\n--- Attached File: ${att.name} ---\n${att.textContent}\n--- End of File: ${att.name} ---`,
+      })
     }
   }
   return parts
@@ -510,7 +543,7 @@ function AttachmentPreview({ att }: { att: Attachment }) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="rounded-xl border border-white/[0.1] bg-zinc-950/60 overflow-hidden hover:border-violet-500/40 transition-all"
+        className="rounded-xl border border-white/[0.1] bg-zinc-950/60 overflow-hidden hover:border-violet-500/40 transition-all text-left"
         title={att.name}
       >
         {att.modality === 'image' && (
@@ -524,6 +557,12 @@ function AttachmentPreview({ att }: { att: Attachment }) {
         )}
         {att.modality === 'video' && (
           <video src={att.dataUrl} className="w-20 h-20 object-cover" muted />
+        )}
+        {att.modality === 'text' && (
+          <div className="w-20 h-20 p-2 flex flex-col justify-between bg-zinc-900 border border-white/5">
+            <div className="text-[9px] font-mono text-violet-300 font-semibold truncate">{att.name}</div>
+            <div className="text-[8px] text-zinc-500 font-mono">{(att.size / 1024).toFixed(1)}k text</div>
+          </div>
         )}
       </button>
       {open && (
@@ -545,6 +584,12 @@ function AttachmentPreview({ att }: { att: Attachment }) {
           )}
           {att.modality === 'video' && (
             <video src={att.dataUrl} controls className="max-w-full max-h-full rounded-xl" />
+          )}
+          {att.modality === 'text' && (
+            <div className="bg-zinc-900 border border-white/10 rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] flex flex-col" onClick={e => e.stopPropagation()}>
+              <div className="text-sm font-semibold text-white mb-3 font-mono border-b border-white/10 pb-2">{att.name}</div>
+              <pre className="flex-1 overflow-y-auto text-[12px] font-mono text-zinc-300 bg-zinc-950 p-4 rounded-xl custom-scrollbar whitespace-pre-wrap">{att.textContent}</pre>
+            </div>
           )}
         </div>
       )}
@@ -1273,7 +1318,7 @@ export default function ChatPage({ embedded = false }: { embedded?: boolean }) {
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept={[...ACCEPTED.image, ...ACCEPTED.audio, ...ACCEPTED.video].join(',')}
+                  accept="image/*,audio/*,video/*,text/*,.py,.ts,.tsx,.jsx,.js,.json,.txt,.md,.csv,.log,.sh,.yaml,.yml,.xml,.sql,.c,.cpp,.rs,.go,.java,.html,.css"
                   multiple
                   className="hidden"
                   onChange={async e => {

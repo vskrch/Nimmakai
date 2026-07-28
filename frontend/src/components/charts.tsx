@@ -130,7 +130,7 @@ export function HorizontalBars({
               <span className="truncate text-zinc-300 font-medium max-w-[200px]" title={label}>
                 {label.split('/').pop()}
               </span>
-              <span className="tabular-nums text-zinc-400 font-mono text-[11px]">{val.toLocaleString()} reqs</span>
+              <span className="tabular-nums text-zinc-400 font-mono text-[11px]">{(val ?? 0).toLocaleString()} reqs</span>
             </div>
             <div className="w-full h-2 bg-zinc-950 rounded-full overflow-hidden border border-white/[0.05]">
               <div
@@ -192,7 +192,7 @@ export function Donut({
           )
         })}
         <text x={c} y={c - 4} textAnchor="middle" dominantBaseline="middle" className="fill-white text-base font-bold font-mono">
-          {total.toLocaleString()}
+          {(total ?? 0).toLocaleString()}
         </text>
         <text x={c} y={c + 14} textAnchor="middle" dominantBaseline="middle" className="fill-zinc-500 text-[10px] uppercase font-semibold">
           Total

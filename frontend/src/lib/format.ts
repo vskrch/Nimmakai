@@ -22,6 +22,11 @@ export function fmtPct(n: number | null | undefined): string {
   return `${(n * 100).toFixed(1)}%`
 }
 
+export function fmtNum(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return '—'
+  return n.toLocaleString()
+}
+
 export function fmtTime(ts: number | null | undefined): string {
   if (!ts) return '—'
   return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })

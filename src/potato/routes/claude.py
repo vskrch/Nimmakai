@@ -564,8 +564,8 @@ async def _handle_claude_or_chat(request: Request) -> JSONResponse | StreamingRe
 
     if isinstance(resp, JSONResponse):
         try:
-            resp_bytes = resp.body
-            resp_json = json.loads(resp_bytes.decode("utf-8"))
+            resp_bytes_raw = bytes(resp.body)
+            resp_json = json.loads(resp_bytes_raw.decode("utf-8"))
             if resp.status_code >= 400:
                 err_obj = resp_json.get("error", {}) if isinstance(resp_json, dict) else {}
                 err_msg = err_obj.get("message") if isinstance(err_obj, dict) else str(resp_json)

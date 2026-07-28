@@ -49,6 +49,7 @@ uv.lock
 logs/
 
 # Runtime catalog cache
+.potato/
 .nimmakai/
 
 # Node / frontend

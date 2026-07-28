@@ -672,6 +672,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(responses.router)
     app.include_router(public_chat.router)
 
+    @app.get("/manifest.json")
+    @app.get("/sw.js")
+    @app.get("/icon-192.png")
+    @app.get("/icon-512.png")
+    @app.get("/maskable-192.png")
+    @app.get("/maskable-512.png")
+    @app.get("/icon-192.svg")
+    @app.get("/icon-512.svg")
+    @app.get("/maskable-192.svg")
+    @app.get("/maskable-512.svg")
+    async def serve_static_root_file(request: Request) -> Any:
+        """Serve root PWA manifest, service worker, and icon assets."""
+        filename = request.url.path.lstrip("/")
+        file_path = Path(__file__).parent / "static" / "dist" / filename
+        if file_path.is_file():
+            from fastapi.responses import FileResponse
+
+            return FileResponse(file_path)
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+
     def _dashboard_html() -> HTMLResponse:
         """Serve the compiled React TypeScript dashboard bundle."""
         dist_index = Path(__file__).parent / "static" / "dist" / "index.html"
@@ -738,9 +758,11 @@ def run() -> None:
             "NIM_API_KEYS empty — ensure at least one provider has keys (NIM or /admin/providers)."
         )
     if not settings.proxy_api_keys and not settings.allow_insecure_auth:
-        raise SystemExit(
-            "PROXY_API_KEYS is empty. Set proxy keys, or ALLOW_INSECURE_AUTH=true for local dev."
+        logger.warning(
+            "PROXY_API_KEYS is empty — auto-enabling local development mode (ALLOW_INSECURE_AUTH=true). "
+            "Set PROXY_API_KEYS in .env or configure keys at /dashboard to enforce authentication."
         )
+        settings.allow_insecure_auth = True
     uvicorn.run(
         "potato.main:app",
         host=settings.host,

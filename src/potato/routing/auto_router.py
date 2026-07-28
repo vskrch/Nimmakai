@@ -20,12 +20,13 @@ from potato.catalog.aliases import normalize_model_name
 
 # Virtual auto-router ids (OpenRouter / Kilo / Potato)
 AutoTier = Literal[
-    "balanced",  # quality × speed (default openrouter/auto)
-    "frontier",  # max capability (kilo-auto/frontier, potato/best)
+    "balanced",   # quality × speed (default openrouter/auto)
+    "frontier",   # max capability (kilo-auto/frontier, potato/best)
     "efficient",  # cost-aware / cheapest capable (kilo-auto/efficient, auto-cheap)
-    "fast",  # latency first (potato/auto-fast)
-    "free",  # free-only pool (kilo-auto/free)
-    "coding",  # force coding ladder (potato/auto-coding)
+    "fast",       # latency first (potato/auto-fast)
+    "free",       # free-only pool (kilo-auto/free)
+    "coding",     # force coding ladder (potato/auto-coding)
+    "reasoning",  # reasoning-first (kimi-k3, deepseek-v4-pro, o3-mini aliases)
 ]
 
 # Map client model string → auto tier (or None if not an auto router)
@@ -384,13 +385,20 @@ def build_intent_aware_pool(
     variant: str = "default",
     max_n: int = 16,
     include_related: bool = True,
+    include_all_live: bool = True,
 ) -> list[str]:
-    """Build an intent-first candidate pool that prefers never going empty.
+    """Build an intent-first candidate pool that includes ALL live models.
 
     Order:
-      1. Primary intent ladder (best models for this job)
+      1. Primary intent ladder (best models for this job, highest score first)
       2. Related intents (still capable, slightly less ideal)
-      3. Emergency live catalog slice
+      3. ALL remaining live models (score-ranked), so potato/auto always has
+         the full catalog available — the best model is never silently excluded.
+      4. Emergency live catalog slice (last resort)
+
+    ``max_n`` applies only when *not* including the full live pool (i.e. when
+    called from a non-auto context). Auto always gets the uncapped pool so
+    _finalize_chain can health-reorder and pick the true best head.
     """
     primary = (primary_intent or "coding_agentic").strip().lower()
     intents = intent_expansion_order(primary) if include_related else [primary]
@@ -404,8 +412,43 @@ def build_intent_aware_pool(
             parts.append(part)
 
     pool = merge_unique(*parts)
+
+    # Always append all remaining live models (score-ranked) so potato/auto has
+    # the full catalog as its candidate set. Intent-ladder models lead because
+    # merge_unique preserves first-seen order; the rest fill the tail sorted by
+    # composite quality score from the ladder.
+    if include_all_live:
+        try:
+            # Get score-ranked full live catalog from the ladder
+            ladder = getattr(registry, "ladder", None)
+            if ladder is not None:
+                # Use the precomputed default ladder for the primary intent as the
+                # score-ranked view of the full live pool (already sorted best-first)
+                full_ranked = ladder.ladder_for(primary, variant=variant)
+                if not full_ranked:
+                    # Fallback: try coding_agentic as a universal quality rank
+                    full_ranked = ladder.ladder_for("coding_agentic", variant="default")
+                pool = merge_unique(pool, full_ranked)
+                # Append any remaining active models not yet in the pool
+                active = (
+                    registry.active_live_ids()
+                    if hasattr(registry, "active_live_ids")
+                    else sorted(getattr(registry, "live_ids", None) or [])
+                )
+                pool = merge_unique(pool, list(active))
+            else:
+                active = (
+                    registry.active_live_ids()
+                    if hasattr(registry, "active_live_ids")
+                    else sorted(getattr(registry, "live_ids", None) or [])
+                )
+                pool = merge_unique(pool, list(active))
+        except Exception:
+            pass
+
     if pool:
-        return pool[: max(1, max_n)] if max_n else pool
+        # When including all live models, don't cap — let _finalize_chain decide
+        return pool if include_all_live else (pool[: max(1, max_n)] if max_n else pool)
 
     # Last resort: any active live model, intent-scored when possible
     try:
@@ -413,7 +456,7 @@ def build_intent_aware_pool(
 
         emergency = emergency_chain(registry, intent=primary, max_n=max(max_n, 8))
         if emergency:
-            return list(emergency)[: max(1, max_n)] if max_n else list(emergency)
+            return list(emergency)
     except Exception:
         pass
 

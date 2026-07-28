@@ -234,7 +234,7 @@ async def _run_pre_router_interceptors(
         interceptors: list = []
         # Interceptor 1: Custom Catalog Override
         if db is not None:
-            features = {}
+            features: dict[str, Any] = {}
             try:
                 features = db.get_extensibility_features()
             except Exception:

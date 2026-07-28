@@ -130,7 +130,7 @@ class UpstreamClient:
         Non-streaming request with key rotation + retry on 429.
         Returns (status_code, body_json_or_text, response_headers, key).
         """
-        last_error: Exception | None = None
+        last_error: BaseException | None = None
         for attempt in range(max_retries):
             key = await self.pool.acquire(preferred_key_id=preferred_key_id)
             released = False
@@ -231,7 +231,7 @@ class UpstreamClient:
         Open a streaming response. Caller must consume the iterator fully
         so the key is released (wrapper handles release on completion/error).
         """
-        last_error: Exception | None = None
+        last_error: BaseException | None = None
         for attempt in range(max_retries):
             key = await self.pool.acquire(preferred_key_id=preferred_key_id)
             released = False
