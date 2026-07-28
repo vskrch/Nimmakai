@@ -80,21 +80,21 @@ models: {}
 # Duplicated here so installed wheels without the repo config still score models.
 scoring:
   quality_signal_weights:
-    aa_intelligence:  0.40
-    hf_leaderboard:   0.30
-    arena_elo:        0.20
-    param_estimate:   0.10
+    aa_intelligence:  0.75
+    hf_leaderboard:   0.15
+    arena_elo:        0.10
+    param_estimate:   0.00
   quality_bounds: {min: 10.0, max: 100.0}
   arena_elo_base: 800
   arena_elo_scale: 8.0
   intent_optimizer_weights:
-    coding_agentic:  {intel: 0.50, speed: 0.32, avail: 0.15, prov: 0.03}
-    reasoning:       {intel: 0.55, speed: 0.25, avail: 0.17, prov: 0.03}
-    long_horizon:    {intel: 0.50, speed: 0.28, avail: 0.19, prov: 0.03}
-    chat_fast:       {intel: 0.30, speed: 0.47, avail: 0.20, prov: 0.03}
-    vision:          {intel: 0.45, speed: 0.35, avail: 0.17, prov: 0.03}
-    embeddings:      {intel: 0.25, speed: 0.45, avail: 0.27, prov: 0.03}
-    _default:        {intel: 0.45, speed: 0.35, avail: 0.17, prov: 0.03}
+    coding_agentic:  {intel: 0.90, speed: 0.06, avail: 0.03, prov: 0.01}
+    reasoning:       {intel: 0.92, speed: 0.05, avail: 0.02, prov: 0.01}
+    long_horizon:    {intel: 0.90, speed: 0.06, avail: 0.03, prov: 0.01}
+    chat_fast:       {intel: 0.85, speed: 0.10, avail: 0.04, prov: 0.01}
+    vision:          {intel: 0.88, speed: 0.08, avail: 0.03, prov: 0.01}
+    embeddings:      {intel: 0.75, speed: 0.18, avail: 0.05, prov: 0.02}
+    _default:        {intel: 0.88, speed: 0.08, avail: 0.03, prov: 0.01}
   intent_max_fallbacks:
     coding_agentic: 10
     reasoning: 10

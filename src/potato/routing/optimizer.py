@@ -30,13 +30,13 @@ logger = logging.getLogger(__name__)
 # A 95-quality model at 40 TPS beats an 80-quality model at 120 TPS.
 # Loaded from YAML scoring.intent_optimizer_weights at startup (NMK-RT601).
 _INTENT_WEIGHTS: dict[str, tuple[float, float, float, float]] = {
-    "coding_agentic": (0.50, 0.32, 0.15, 0.03),
-    "reasoning": (0.55, 0.25, 0.17, 0.03),
-    "long_horizon": (0.50, 0.28, 0.19, 0.03),
-    "chat_fast": (0.30, 0.47, 0.20, 0.03),
-    "vision": (0.45, 0.35, 0.17, 0.03),
-    "embeddings": (0.25, 0.45, 0.27, 0.03),
-    "_default": (0.45, 0.35, 0.17, 0.03),
+    "coding_agentic": (0.90, 0.06, 0.03, 0.01),
+    "reasoning": (0.92, 0.05, 0.02, 0.01),
+    "long_horizon": (0.90, 0.06, 0.03, 0.01),
+    "chat_fast": (0.85, 0.10, 0.04, 0.01),
+    "vision": (0.88, 0.08, 0.03, 0.01),
+    "embeddings": (0.75, 0.18, 0.05, 0.02),
+    "_default": (0.88, 0.08, 0.03, 0.01),
 }
 
 
