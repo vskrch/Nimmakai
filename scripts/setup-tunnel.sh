@@ -237,6 +237,15 @@ if ! timeout 10 ${TAILSCALE_BIN} funnel --bg "${PORT}" >/tmp/tailscale_funnel.lo
     nohup ${TAILSCALE_BIN} funnel "${PORT}" >/tmp/tailscale_funnel.log 2>&1 &
 fi
 
+# Detect Tailscale Funnel one-time approval URL if Funnel is disabled on Tailnet
+if grep -q "login.tailscale.com" /tmp/tailscale_funnel.log 2>/dev/null; then
+    FUNNEL_AUTH_URL=$(grep -oE 'https://login.tailscale.com/f/funnel\?[^ ]+' /tmp/tailscale_funnel.log | head -n1 || true)
+    if [[ -n "${FUNNEL_AUTH_URL}" ]]; then
+        warn "Tailscale Funnel requires a one-time approval for your tailnet!"
+        warn "👉 Click this link to approve in your browser: ${BOLD}${FUNNEL_AUTH_URL}${NC}"
+    fi
+fi
+
 # 4. Extract Tailscale node domain name
 log "Resolving Tailscale public HTTPS domain..."
 TS_DOMAIN=""
