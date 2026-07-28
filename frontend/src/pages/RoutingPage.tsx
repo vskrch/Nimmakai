@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Card, CardHeader, CardBody, Badge, Button, Spinner } from '../components/ui'
+import { Card, CardHeader, CardBody, Badge, Button, ErrorState, Skeleton } from '../components/ui'
 import { useRankings, usePreferences } from '../hooks/useApi'
 import { ap, ad, errMsg } from '../lib/api'
 import {
@@ -24,8 +24,9 @@ const INTENTS: Record<string, { label: string; desc: string }> = {
 }
 
 export default function RoutingPage() {
-  const { data: rankings, reload: reloadRankings } = useRankings()
-  const { prefs, reload: reloadPrefs } = usePreferences()
+  const { data: rankings, reload: reloadRankings, loading: rankingsLoading, error: rankingsError } = useRankings()
+  const { data: prefsData, reload: reloadPrefs, loading: prefsLoading, error: prefsError } = usePreferences()
+  const prefs = prefsData?.preferences || []
   const [msg, setMsg] = useState<string | null>(null)
 
   async function handleRefreshRankings() {
@@ -41,7 +42,18 @@ export default function RoutingPage() {
     reloadPrefs()
   }
 
-  if (!rankings) return <Spinner />
+  if (rankingsLoading || prefsLoading) return (
+    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+      <div className="flex items-center gap-2">
+        <GitFork className="w-5 h-5 text-violet-400" />
+        <h2 className="text-lg font-bold text-white tracking-tight">Intent-Based Dynamic Routing Engine</h2>
+      </div>
+      <Skeleton lines={2} className="max-w-2xl" />
+      <Skeleton cards={3} />
+    </div>
+  )
+  if (rankingsError) return <ErrorState title="Routing data failed" message={rankingsError} onRetry={reloadRankings} />
+  if (!rankings) return <ErrorState title="No routing data" message="The rankings endpoint returned an empty response." />
 
   const ladders = rankings.ladders || {}
 

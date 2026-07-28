@@ -89,6 +89,40 @@ class LinUCBPolicyEngine:
                 self._states[model_id] = state
             return self._states[model_id]
 
+    @staticmethod
+    def _is_finite_vec(x: list[float]) -> bool:
+        """True if every element is a finite real number (rejects NaN/Inf)."""
+        return all(not (v != v or v in (float("inf"), float("-inf"))) for v in x)
+
+    def _reset_state_locked(self, model_id: str) -> ModelLinUCBState:
+        """Re-initialize a model's A_inv to (1/lambda) * I. Caller holds _lock."""
+        init_val = 1.0 / max(1e-4, self.ridge_lambda)
+        state = ModelLinUCBState(
+            model_id=model_id,
+            a_inv=[
+                [init_val if i == j else 0.0 for j in range(FEATURE_DIM)]
+                for i in range(FEATURE_DIM)
+            ],
+        )
+        self._states[model_id] = state
+        return state
+
+    def _pd_ok_locked(self, state: ModelLinUCBState) -> bool:
+        """Cheap positive-definiteness guard: finite + strictly positive diagonal.
+
+        ponytail: full eigendecomposition is O(d^3) and overkill for d=12 on a
+        hot path. A PD matrix has a positive diagonal (Cholesky exists iff the
+        leading principal minors are positive, and the trace of A_inv's
+        diagonal is the cheapest necessary condition). If drift drives any
+        diagonal <= 0 or non-finite, we reset the whole model rather than
+        propagate corruption into theta and UCB.
+        """
+        for i in range(FEATURE_DIM):
+            d = state.a_inv[i][i]
+            if d != d or d <= 0.0:  # NaN or non-positive
+                return False
+        return True
+
     def score(
         self,
         model_id: str,
@@ -99,24 +133,36 @@ class LinUCBPolicyEngine:
         Calculate contextual score for model_id given feature vector x.
         Returns: (ucb_score, expected_reward, exploration_bonus)
         """
-        if len(x) != FEATURE_DIM:
+        if len(x) != FEATURE_DIM or not self._is_finite_vec(x):
             return (0.0, 0.0, 0.0)
 
         a_val = alpha if alpha is not None else self.default_alpha
         state = self.get_state(model_id)
 
         with self._lock:
+            # Self-heal: if A_inv lost positive-definiteness via float drift,
+            # re-initialize before scoring so UCB stays meaningful.
+            if not self._pd_ok_locked(state):
+                logger.warning(
+                    "LinUCB A_inv lost positive-definiteness for %s; resetting", model_id
+                )
+                state = self._reset_state_locked(model_id)
+
             # Expected reward: hat_r = theta^T * x
             hat_r = sum(state.theta[i] * x[i] for i in range(FEATURE_DIM))
+            if hat_r != hat_r:  # NaN guard
+                hat_r = 0.0
 
             # Variance estimation: v = A_inv * x
             v = [0.0] * FEATURE_DIM
             for i in range(FEATURE_DIM):
                 v[i] = sum(state.a_inv[i][j] * x[j] for j in range(FEATURE_DIM))
 
-            # var = x^T * v = x^T * A_inv * x
+            # var = x^T * v = x^T * A_inv * x  (clamped >= 0 for sqrt)
             var = sum(x[i] * v[i] for i in range(FEATURE_DIM))
-            ucb_bonus = a_val * math.sqrt(max(0.0, var))
+            if var != var or var < 0.0:  # NaN or negative from drift
+                var = 0.0
+            ucb_bonus = a_val * math.sqrt(var)
 
         score = hat_r + ucb_bonus
         return (score, hat_r, ucb_bonus)
@@ -126,23 +172,26 @@ class LinUCBPolicyEngine:
         Online update of LinUCB model parameters using Sherman-Morrison formula.
         O(d^2) complexity per update (~144 floating point ops for d=12).
         """
-        if len(x) != FEATURE_DIM:
+        if len(x) != FEATURE_DIM or not self._is_finite_vec(x):
             return
 
         # Bound reward to prevent numerical explosion
-        r = max(-2.0, min(2.0, float(reward)))
+        r = float(reward)
+        if r != r or r in (float("inf"), float("-inf")):  # reject NaN/Inf reward
+            return
+        r = max(-2.0, min(2.0, r))
 
         with self._lock:
             if model_id not in self._states:
-                init_val = 1.0 / max(1e-4, self.ridge_lambda)
-                self._states[model_id] = ModelLinUCBState(
-                    model_id=model_id,
-                    a_inv=[
-                        [init_val if i == j else 0.0 for j in range(FEATURE_DIM)]
-                        for i in range(FEATURE_DIM)
-                    ],
-                )
-            state = self._states[model_id]
+                state = self._reset_state_locked(model_id)
+            else:
+                state = self._states[model_id]
+                # Self-heal before mutating if A_inv is already corrupted
+                if not self._pd_ok_locked(state):
+                    logger.warning(
+                        "LinUCB A_inv corrupted for %s at feedback time; resetting", model_id
+                    )
+                    state = self._reset_state_locked(model_id)
 
             # 1. Update reward vector b: b_new = b + r * x
             for i in range(FEATURE_DIM):
@@ -154,17 +203,32 @@ class LinUCBPolicyEngine:
                 v[i] = sum(state.a_inv[i][j] * x[j] for j in range(FEATURE_DIM))
 
             # 3. Denominator: denom = 1.0 + x^T * v
+            #    Must be strictly positive for a PD A_inv; a negative or ~0
+            #    denom means A_inv lost PD (float drift) — skip the update
+            #    rather than corrupt A_inv further. Self-heal handles reset.
             denom = 1.0 + sum(x[i] * v[i] for i in range(FEATURE_DIM))
 
             # 4. Sherman-Morrison update: A_inv_new = A_inv - (v * v^T) / denom
-            if denom > 1e-12:
+            if denom > 1e-9 and denom == denom:  # finite + strictly positive
                 for i in range(FEATURE_DIM):
                     for j in range(FEATURE_DIM):
                         state.a_inv[i][j] -= (v[i] * v[j]) / denom
+            else:
+                # A_inv drifted out of PD — reset and replay b -> theta next.
+                logger.debug(
+                    "LinUCB non-positive denom=%.3e for %s; resetting A_inv",
+                    denom, model_id,
+                )
+                state = self._reset_state_locked(model_id)
+                # Re-apply the reward vector to the fresh state
+                for i in range(FEATURE_DIM):
+                    state.b[i] += r * x[i]
 
             # 5. Recompute theta: theta = A_inv * b
             for i in range(FEATURE_DIM):
                 state.theta[i] = sum(state.a_inv[i][j] * state.b[j] for j in range(FEATURE_DIM))
+            if any(t != t for t in state.theta):  # NaN guard on theta
+                state = self._reset_state_locked(model_id)
 
             state.request_count += 1
             state.total_reward += r

@@ -93,33 +93,34 @@ export default function ProvidersPage() {
     <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
       {/* Header controls */}
       <div className="flex justify-between items-start gap-4 flex-wrap">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <Server className="w-5 h-5 text-violet-400" />
-            <h2 className="text-lg font-bold text-white tracking-tight">LLM Endpoint Providers</h2>
+            <Server className="w-5 h-5 text-violet-400 shrink-0" />
+            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">LLM Endpoint Providers</h2>
           </div>
           <p className="text-zinc-400 text-xs mt-1 max-w-[600px]">
             Connect OpenAI-compatible API providers (OpenCode, Groq, Cerebras, OpenRouter, Gemini, etc.). Keys are securely stored in SQLite and merged into the active routing ladder.
           </p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="secondary" onClick={reload}>
+        <div className="flex gap-2 shrink-0">
+          <Button variant="secondary" onClick={reload} className="hidden sm:inline-flex">
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Refresh Pool</span>
           </Button>
           <Button variant="primary" onClick={() => setShowAdd(true)}>
             <Plus className="w-4 h-4" />
-            <span>Custom Endpoint</span>
+            <span className="hidden sm:inline">Custom Endpoint</span>
+            <span className="sm:hidden">Add</span>
           </Button>
         </div>
       </div>
 
       {msg && (
-        <div className={`p-4 rounded-xl text-xs flex items-center justify-between font-medium ${
+        <div className={`p-3 sm:p-4 rounded-xl text-xs flex items-start sm:items-center justify-between font-medium gap-3 ${
           msg.ok ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
         }`}>
-          <span>{msg.text}</span>
-          <button className="text-zinc-400 hover:text-white" onClick={() => setMsg(null)}>Dismiss</button>
+          <span className="break-words">{msg.text}</span>
+          <button className="text-zinc-400 hover:text-white shrink-0" onClick={() => setMsg(null)}>Dismiss</button>
         </div>
       )}
 
@@ -215,13 +216,13 @@ export default function ProvidersPage() {
                 </p>
               )}
             </div>
-            <div className="flex gap-2 justify-end pt-2">
-              <Button variant="default" onClick={() => setShowAdd(false)}>Cancel</Button>
-              <Button variant="secondary" onClick={() => handleTest(form.id)}>
+            <div className="flex flex-col sm:flex-row gap-2 justify-end pt-2">
+              <Button variant="default" onClick={() => setShowAdd(false)} className="order-3 sm:order-1">Cancel</Button>
+              <Button variant="secondary" onClick={() => handleTest(form.id)} className="order-2">
                 <Play className="w-3.5 h-3.5" />
                 <span>Test Connection</span>
               </Button>
-              <Button variant="primary" onClick={handleAdd} disabled={saving}>
+              <Button variant="primary" onClick={handleAdd} disabled={saving} className="order-1 sm:order-3">
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>{saving ? 'Saving…' : 'Save & Join Pool'}</span>
               </Button>
@@ -236,15 +237,15 @@ export default function ProvidersPage() {
         <Card>
           <CardBody className="p-0">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-left text-xs min-w-[800px]">
                 <thead>
                   <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
-                    <th className="px-6 py-3.5 font-semibold">Provider Name</th>
-                    <th className="px-6 py-3.5 font-semibold">Base URL</th>
-                    <th className="px-6 py-3.5 font-semibold">Active Keys</th>
-                    <th className="px-6 py-3.5 font-semibold">Live Models</th>
-                    <th className="px-6 py-3.5 font-semibold">Status</th>
-                    <th className="px-6 py-3.5 font-semibold">Actions</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Provider Name</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Base URL</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Active Keys</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Live Models</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Status</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold w-[220px]">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.06]">
@@ -253,28 +254,28 @@ export default function ProvidersPage() {
 
                     return (
                       <tr key={p.id} className="hover:bg-white/[0.02] transition-colors">
-                        <td className="px-6 py-4">
-                          <div className="flex items-center gap-2">
+                        <td className="px-4 sm:px-6 py-4">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <strong className="text-white text-xs">{p.name}</strong>
                             {p.free_tier && <Badge variant="free">Free</Badge>}
                             {(p.speed_tier === 'ultra' || p.speed_tier === 'fast') && <Badge variant="fast">{p.speed_tier === 'ultra' ? 'Ultra' : 'Fast'}</Badge>}
                           </div>
                           <div className="text-[11px] text-zinc-500 font-mono mt-0.5">{p.id}</div>
                         </td>
-                        <td className="px-6 py-4 font-mono text-zinc-300 max-w-[220px] truncate" title={p.base_url}>{p.base_url}</td>
-                        <td className="px-6 py-4 text-zinc-300 font-mono">
+                        <td className="px-4 sm:px-6 py-4 font-mono text-zinc-300 max-w-[180px] sm:max-w-[220px] truncate" title={p.base_url}>{p.base_url}</td>
+                        <td className="px-4 sm:px-6 py-4 text-zinc-300 font-mono">
                           {p.key_count ?? 0} keys
                           {p.available_keys != null && <span className="text-emerald-400 ml-1">({p.available_keys} ready)</span>}
                         </td>
-                        <td className="px-6 py-4 font-mono text-violet-300 font-semibold">{p.model_count ?? 0} models</td>
-                        <td className="px-6 py-4">
+                        <td className="px-4 sm:px-6 py-4 font-mono text-violet-300 font-semibold">{p.model_count ?? 0} models</td>
+                        <td className="px-4 sm:px-6 py-4">
                           <Badge variant={active ? 'ok' : !p.enabled ? 'default' : 'err'}>
                             <StatusDot ok={!!active} />
                             {!p.enabled ? 'Disabled' : active ? 'Active in Pool' : 'No Active Keys'}
                           </Badge>
                         </td>
-                        <td className="px-6 py-4">
-                          <div className="flex gap-2">
+                        <td className="px-4 sm:px-6 py-4">
+                          <div className="flex gap-2 flex-wrap">
                             <Button size="xs" variant="default" onClick={() => { setForm({ id: p.id, name: p.name, base_url: p.base_url, api_keys: '', rpm_limit: p.rpm_limit, rpd_limit: p.rpd_limit }); setShowAdd(true) }}>Edit</Button>
                             <Button size="xs" variant="secondary" onClick={() => handleTest(p.id)}>Test</Button>
                             <Button size="xs" variant={p.enabled ? 'default' : 'secondary'} onClick={() => handleToggleEnable(p.id, !!p.enabled)}>

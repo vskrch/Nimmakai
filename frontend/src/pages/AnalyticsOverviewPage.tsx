@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Card, CardBody, CardHeader, StatBox, Button, Spinner } from '../components/ui'
+import { Card, CardBody, CardHeader, StatBox, Button, Skeleton, ErrorState } from '../components/ui'
 import { StackedBars, HorizontalBars, Donut, Sparkline } from '../components/charts'
 import { useAnalyticsSummary, useTimeseries, useBreakdown } from '../hooks/useAnalytics'
 import { RangePicker } from '../components/RangePicker'
@@ -34,7 +34,14 @@ export default function AnalyticsOverviewPage() {
     reloadProviders()
   }
 
-  if (loading && !summary) return <Spinner />
+  if (loading && !summary) return (
+    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+      <Skeleton lines={1} className="max-w-md" />
+      <Skeleton cards={5} />
+      <Skeleton lines={8} />
+    </div>
+  )
+  if (error && !summary) return <ErrorState title="Analytics unavailable" message={error} onRetry={reloadAll} />
 
   const spark = points.map(p => p.requests || 0)
 
@@ -56,7 +63,8 @@ export default function AnalyticsOverviewPage() {
       </div>
 
       {error && (
-        <div className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-xl px-4 py-3">
+        <div className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 rounded-xl px-4 py-3 flex items-center gap-2">
+          <RefreshCw className="w-3.5 h-3.5" />
           {error}
         </div>
       )}

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Card, CardBody, CardHeader, StatBox, Badge, StatusDot, Button, Spinner } from '../components/ui'
+import { Card, CardBody, CardHeader, StatBox, Badge, StatusDot, Button, Skeleton, ErrorState } from '../components/ui'
 import { useHealth, useStats, useSSE } from '../hooks/useApi'
 import { api, okBody } from '../lib/api'
 import { fmtMs, fmtTokens, fmtUsd, fmtPct, rangeSince, qs } from '../lib/format'
@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 
 export default function DashboardPage({ onRefresh }: { onRefresh: () => void }) {
-  const { data: health, reload: reloadHealth } = useHealth()
+  const { data: health, reload: reloadHealth, loading: healthLoading, error: healthError } = useHealth()
   const { data: stats } = useStats()
   const sse = useSSE()
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null)
@@ -37,7 +37,19 @@ export default function DashboardPage({ onRefresh }: { onRefresh: () => void }) 
     })()
   }, [])
 
-  if (!health) return <Spinner />
+  if (healthLoading || !health) return (
+    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <div key={i} className="bg-zinc-900/60 backdrop-blur-xl border border-white/[0.08] rounded-2xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.2)]">
+            <Skeleton lines={2} />
+          </div>
+        ))}
+      </div>
+      <Skeleton lines={6} />
+    </div>
+  )
+  if (healthError) return <ErrorState title="Dashboard unavailable" message={healthError} onRetry={reloadHealth} />
 
   const providers = health.providers || []
   const runtimeP = providers.filter(p => p.runtime || (p.enabled && p.key_count > 0))
@@ -159,13 +171,13 @@ export default function DashboardPage({ onRefresh }: { onRefresh: () => void }) 
         </CardHeader>
         <CardBody className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs min-w-[560px]">
               <thead>
                 <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
-                  <th className="px-6 py-3.5 font-semibold">Provider ID</th>
-                  <th className="px-6 py-3.5 font-semibold">API Keys</th>
-                  <th className="px-6 py-3.5 font-semibold">Available Capacity</th>
-                  <th className="px-6 py-3.5 font-semibold">Runtime Status</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold">Provider ID</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold">API Keys</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold">Available Capacity</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold">Runtime Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.06]">
@@ -173,15 +185,15 @@ export default function DashboardPage({ onRefresh }: { onRefresh: () => void }) 
                   const active = p.runtime || (p.enabled && p.key_count > 0)
                   return (
                     <tr key={p.id} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="px-6 py-4 font-semibold text-white flex items-center gap-2">
+                      <td className="px-4 sm:px-6 py-4 font-semibold text-white flex items-center gap-2">
                         <span className="w-2 h-2 rounded-full bg-violet-400 shrink-0" />
                         <span>{p.id}</span>
                       </td>
-                      <td className="px-6 py-4 text-zinc-300 font-mono">{p.key_count} keys</td>
-                      <td className="px-6 py-4 text-violet-300 font-mono font-semibold">
+                      <td className="px-4 sm:px-6 py-4 text-zinc-300 font-mono">{p.key_count} keys</td>
+                      <td className="px-4 sm:px-6 py-4 text-violet-300 font-mono font-semibold">
                         {sse?.provider_health?.[p.id] ? `${sse.provider_health[p.id].available_keys} ready` : 'Active'}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4">
                         <Badge variant={active ? 'ok' : p.enabled ? 'warn' : 'default'}>
                           <StatusDot ok={!!active} />
                           {!p.enabled ? 'Disabled' : active ? 'Active in Pool' : 'Missing Keys'}

@@ -4,8 +4,21 @@ from potato.routing.rl_rewards import calculate_composite_reward
 
 
 def test_reward_503_error():
+    # 503/504 are transient gateway unavailability — less punitive than hard
+    # server errors so the bandit can learn provider rate-limit patterns.
     r = calculate_composite_reward(success=False, status_code=503)
-    assert r == -1.0
+    assert r == -0.8
+    assert calculate_composite_reward(success=False, status_code=504) == -0.8
+
+
+def test_reward_429_less_punitive_than_500():
+    # 429 (rate-limit) must be less punitive than 500 (server fault) so the
+    # bandit can distinguish transient capacity from a broken provider.
+    r_429 = calculate_composite_reward(success=False, status_code=429)
+    r_500 = calculate_composite_reward(success=False, status_code=500)
+    assert r_429 == -0.5
+    assert r_500 == -0.9
+    assert r_429 > r_500
 
 
 def test_reward_empty_reply():

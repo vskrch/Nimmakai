@@ -1,9 +1,10 @@
 import React, { useState } from 'react'
-import { Card, CardBody, CardHeader, StatBox, Badge } from '../components/ui'
+import { Card, CardBody, CardHeader, StatBox, Badge, Skeleton, EmptyState } from '../components/ui'
 import { Donut, HorizontalBars } from '../components/charts'
 import { useBreakdown } from '../hooks/useAnalytics'
 import { RangePicker } from '../components/RangePicker'
 import { fmtPct, fmtMs } from '../lib/format'
+import type { BreakdownItem } from '../types/analytics'
 import {
   BrainCircuit,
   PieChart,
@@ -15,9 +16,9 @@ import {
 
 export default function IntentsPage() {
   const [range, setRange] = useState('24h')
-  const { items: intents } = useBreakdown('intents', range)
-  const { items: fallbacks } = useBreakdown('fallbacks', range)
-  const { items: errors } = useBreakdown('errors', range)
+  const { items: intents, loading: intentsLoading } = useBreakdown('intents', range)
+  const { items: fallbacks, loading: fallbacksLoading } = useBreakdown('fallbacks', range)
+  const { items: errors, loading: errorsLoading } = useBreakdown('errors', range)
 
   const total = intents.reduce((a, b) => a + b.request_count, 0)
   const avgConf = intents.length
@@ -39,27 +40,31 @@ export default function IntentsPage() {
       </div>
 
       {/* Overview Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatBox
-          label="Total Classified Prompts"
-          value={total.toLocaleString()}
-          sub="Requests routed via classifier"
-          icon={BrainCircuit}
-        />
-        <StatBox
-          label="Unique Intent Types"
-          value={intents.length}
-          sub="Active category classification"
-          icon={Layers}
-        />
-        <StatBox
-          label="Average Confidence"
-          value={avgConf}
-          sub="Classifier score probability"
-          color="text-emerald-400"
-          icon={Target}
-        />
-      </div>
+      {intentsLoading && !intents.length ? (
+        <Skeleton cards={3} />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatBox
+            label="Total Classified Prompts"
+            value={total.toLocaleString()}
+            sub="Requests routed via classifier"
+            icon={BrainCircuit}
+          />
+          <StatBox
+            label="Unique Intent Types"
+            value={intents.length}
+            sub="Active category classification"
+            icon={Layers}
+          />
+          <StatBox
+            label="Average Confidence"
+            value={avgConf}
+            sub="Classifier score probability"
+            color="text-emerald-400"
+            icon={Target}
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
@@ -71,7 +76,7 @@ export default function IntentsPage() {
           </CardHeader>
           <CardBody>
             {!intents.length ? (
-              <div className="text-xs text-zinc-500 py-8 text-center">No intent metrics for this timeframe</div>
+              <EmptyState title="No intent metrics for this timeframe">Intent classifications will appear as requests flow through the classifier.</EmptyState>
             ) : (
               <Donut items={intents.map(i => ({ key: String(i.key || 'unknown'), value: i.request_count }))} />
             )}
@@ -87,24 +92,34 @@ export default function IntentsPage() {
           </CardHeader>
           <CardBody className="p-0">
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-left text-xs min-w-[520px]">
                 <thead>
                   <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
-                    <th className="px-5 py-3.5 font-semibold">Intent</th>
-                    <th className="px-5 py-3.5 font-semibold">Requests</th>
-                    <th className="px-5 py-3.5 font-semibold">Avg Conf</th>
-                    <th className="px-5 py-3.5 font-semibold">Err Rate</th>
-                    <th className="px-5 py-3.5 font-semibold">Avg Latency</th>
+                    <th className="px-4 sm:px-5 py-3.5 font-semibold">Intent</th>
+                    <th className="px-4 sm:px-5 py-3.5 font-semibold">Requests</th>
+                    <th className="px-4 sm:px-5 py-3.5 font-semibold">Avg Conf</th>
+                    <th className="px-4 sm:px-5 py-3.5 font-semibold">Err Rate</th>
+                    <th className="px-4 sm:px-5 py-3.5 font-semibold">Avg Latency</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.06]">
-                  {intents.map(i => (
-                    <tr key={String(i.key)} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="px-5 py-3.5 font-semibold text-white">{i.key || '—'}</td>
-                      <td className="px-5 py-3.5 font-mono text-zinc-300">{i.request_count.toLocaleString()}</td>
-                      <td className="px-5 py-3.5 font-mono text-emerald-400">{(i.avg_confidence ?? 0).toFixed(2)}</td>
-                      <td className="px-5 py-3.5 font-mono text-rose-400">{fmtPct(i.error_rate)}</td>
-                      <td className="px-5 py-3.5 font-mono text-zinc-200">{fmtMs(i.avg_latency_ms)}</td>
+                  {(intentsLoading && !intents.length ? Array.from({ length: 5 }).map(() => ({} as BreakdownItem)) : intents).map((i, idx) => (
+                    <tr key={i?.key ? String(i.key) : `sk-${idx}`} className="hover:bg-white/[0.02] transition-colors">
+                      <td className="px-4 sm:px-5 py-3.5 font-semibold text-white">
+                        {i ? (i.key || '—') : <Skeleton lines={1} className="w-24" />}
+                      </td>
+                      <td className="px-4 sm:px-5 py-3.5 font-mono text-zinc-300">
+                        {i ? i.request_count.toLocaleString() : <Skeleton lines={1} className="w-12" />}
+                      </td>
+                      <td className="px-4 sm:px-5 py-3.5 font-mono text-emerald-400">
+                        {i ? (i.avg_confidence ?? 0).toFixed(2) : <Skeleton lines={1} className="w-12" />}
+                      </td>
+                      <td className="px-4 sm:px-5 py-3.5 font-mono text-rose-400">
+                        {i ? fmtPct(i.error_rate) : <Skeleton lines={1} className="w-12" />}
+                      </td>
+                      <td className="px-4 sm:px-5 py-3.5 font-mono text-zinc-200">
+                        {i ? fmtMs(i.avg_latency_ms) : <Skeleton lines={1} className="w-14" />}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -121,12 +136,16 @@ export default function IntentsPage() {
             </div>
           </CardHeader>
           <CardBody>
-            <HorizontalBars
-              items={fallbacks.map(f => ({
-                key: `Chain Index [${f.key}]`,
-                request_count: f.request_count,
-              }))}
-            />
+            {fallbacksLoading && !fallbacks.length ? (
+              <Skeleton lines={6} />
+            ) : (
+              <HorizontalBars
+                items={fallbacks.map(f => ({
+                  key: `Chain Index [${f.key}]`,
+                  request_count: f.request_count,
+                }))}
+              />
+            )}
           </CardBody>
         </Card>
 
@@ -139,7 +158,7 @@ export default function IntentsPage() {
           </CardHeader>
           <CardBody>
             {!errors.length ? (
-              <div className="text-xs text-zinc-500 py-8 text-center">No error logs reported</div>
+              <EmptyState title="No error logs reported">Errors will surface here when the classifier or routing encounters failures.</EmptyState>
             ) : (
               <div className="space-y-3 text-xs">
                 {errors.slice(0, 10).map((e, i) => (

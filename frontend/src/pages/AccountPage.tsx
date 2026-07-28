@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { ap, errMsg, okBody, setAuthKey } from '../lib/api'
-import { Button, Card, CardHeader, CardBody, Badge, StatusDot, CopyButton, CodeBlock } from '../components/ui'
+import { Button, Card, CardHeader, CardBody, Badge, StatusDot, CopyButton, CodeBlock, Skeleton } from '../components/ui'
 import type { AuthSession } from '../components/AuthModal'
 import {
   User,
@@ -49,16 +49,26 @@ export default function AccountPage({ session, onRefresh }: AccountPageProps) {
 
   return (
     <div className="space-y-6 max-w-2xl animate-[fadeIn_0.25s_ease-out]">
-      {/* Header */}
-      <div>
-        <div className="flex items-center gap-2">
-          <User className="w-5 h-5 text-violet-400" />
-          <h2 className="text-lg font-bold text-white tracking-tight">User Account & API Tokens</h2>
-        </div>
-        <p className="text-zinc-400 text-xs mt-1">Manage profile parameters, authentication status, and access keys.</p>
-      </div>
+      {!user ? (
+        <>
+          <div className="flex items-center gap-2">
+            <User className="w-5 h-5 text-violet-400" />
+            <h2 className="text-lg font-bold text-white tracking-tight">User Account &amp; API Tokens</h2>
+          </div>
+          <Skeleton cards={3} />
+        </>
+      ) : (
+        <>
+          {/* Header */}
+          <div>
+            <div className="flex items-center gap-2">
+              <User className="w-5 h-5 text-violet-400" />
+              <h2 className="text-lg font-bold text-white tracking-tight">User Account &amp; API Tokens</h2>
+            </div>
+            <p className="text-zinc-400 text-xs mt-1">Manage profile parameters, authentication status, and access keys.</p>
+          </div>
 
-      {/* Account Info Card */}
+          {/* Account Info Card */}
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -167,6 +177,8 @@ export default function AccountPage({ session, onRefresh }: AccountPageProps) {
           <CodeBlock code={sampleCurl} language="bash" />
         </CardBody>
       </Card>
-    </div>
-  )
+    </>
+    )}
+  </div>
+)
 }

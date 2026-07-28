@@ -80,74 +80,89 @@ export function useAuth() {
   }
 }
 
-export function useHealth() {
-  const [data, setData] = useState<HealthResponse | null>(null)
+export function useFetch<T>(
+  fetcher: () => Promise<T>,
+  deps: unknown[] = []
+) {
+  const [data, setData] = useState<T | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
   const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const r = await fetcher()
+      setData(r)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [fetcher])
+
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps)
+
+  return { data, loading, error, reload: load }
+}
+
+export function useHealth() {
+  return useFetch<HealthResponse>(async () => {
     const r = await api<HealthResponse>('/health')
-    if (r) setData(r)
-  }, [])
-  useEffect(() => { load() }, [load])
-  return { data, reload: load }
+    if (!r) throw new Error('Failed to load health status')
+    return r
+  })
 }
 
 export function useStats() {
-  const [data, setData] = useState<StatsResponse | null>(null)
-  const load = useCallback(async () => {
+  return useFetch<StatsResponse>(async () => {
     const r = await api<StatsResponse>('/stats')
-    if (r) setData(r)
-  }, [])
-  useEffect(() => { load() }, [load])
-  return { data, reload: load }
+    if (!r) throw new Error('Failed to load stats')
+    return r
+  })
 }
 
 export function useProviders() {
-  const [data, setData] = useState<ProvidersResponse | null>(null)
-  const load = useCallback(async () => {
+  return useFetch<ProvidersResponse>(async () => {
     const r = await api<ProvidersResponse>('/admin/providers')
-    if (r) setData(r)
-  }, [])
-  useEffect(() => { load() }, [load])
-  return { data, reload: load }
+    if (!r) throw new Error('Failed to load providers')
+    return r
+  })
 }
 
 export function useCatalog() {
-  const [data, setData] = useState<CatalogResponse | null>(null)
-  const load = useCallback(async () => {
+  return useFetch<CatalogResponse>(async () => {
     const r = await api<CatalogResponse>('/catalog')
-    if (r) setData(r)
-  }, [])
-  useEffect(() => { load() }, [load])
-  return { data, reload: load }
+    if (!r) throw new Error('Failed to load catalog')
+    return r
+  })
 }
 
 export function useRankings() {
-  const [data, setData] = useState<RankingsResponse | null>(null)
-  const load = useCallback(async () => {
+  return useFetch<RankingsResponse>(async () => {
     const r = await api<RankingsResponse>('/admin/rankings')
-    if (r) setData(r)
-  }, [])
-  useEffect(() => { load() }, [load])
-  return { data, reload: load }
+    if (!r) throw new Error('Failed to load rankings')
+    return r
+  })
 }
 
 export function useProviderHealth() {
-  const [data, setData] = useState<ProviderHealthData | null>(null)
-  const load = useCallback(async () => {
+  return useFetch<ProviderHealthData>(async () => {
     const r = await api<ProviderHealthData>('/admin/health/providers')
-    if (r) setData(r)
-  }, [])
-  useEffect(() => { load() }, [load])
-  return { data, reload: load }
+    if (!r) throw new Error('Failed to load provider health')
+    return r
+  })
 }
 
 export function usePreferences() {
-  const [prefs, setPrefs] = useState<Preference[]>([])
-  const load = useCallback(async () => {
+  return useFetch<{ preferences: Preference[] }>(async () => {
     const r = await api<{ preferences: Preference[] }>('/preferences')
-    if (r) setPrefs(r.preferences)
-  }, [])
-  useEffect(() => { load() }, [load])
-  return { prefs, reload: load }
+    if (!r) throw new Error('Failed to load preferences')
+    return r
+  })
 }
 
 export function useSSE() {
@@ -157,6 +172,11 @@ export function useSSE() {
   useEffect(() => {
     let cancelled = false
     let retryTimer: ReturnType<typeof setTimeout> | null = null
+    // ponytail: capped exponential backoff with jitter. 500ms base, 30s cap.
+    // Prevents thundering-herd reconnects during a server outage.
+    const BASE_DELAY = 500
+    const MAX_DELAY = 30_000
+    let attempt = 0
 
     const connect = () => {
       if (cancelled) return
@@ -166,12 +186,17 @@ export function useSSE() {
       es.addEventListener('health', (e) => {
         try { setEvent(JSON.parse((e as MessageEvent).data)) } catch { /* ignore */ }
       })
+      es.addEventListener('open', () => { attempt = 0 })
       es.onerror = () => {
         es.close()
         if (ref.current === es) ref.current = null
-        if (!cancelled) {
-          retryTimer = setTimeout(connect, 5000)
-        }
+        if (cancelled) return
+        // Exponential backoff with jitter: delay = min(cap, base * 2^n) * (0.5..1.0)
+        attempt += 1
+        const exp = Math.min(MAX_DELAY, BASE_DELAY * 2 ** Math.min(attempt, 8))
+        const jitter = 0.5 + Math.random() * 0.5
+        const delay = Math.round(exp * jitter)
+        retryTimer = setTimeout(connect, delay)
       }
       ref.current = es
     }

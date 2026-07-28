@@ -13,7 +13,7 @@ import type {
 
 export function useAnalyticsSummary(range = '1h') {
   const [data, setData] = useState<AnalyticsSummary | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(async () => {
     setLoading(true)
@@ -50,8 +50,10 @@ export function useTimeseries(metric: string, range = '1h', interval = '5m') {
 
 export function useBreakdown(dimension: string, range = '24h') {
   const [items, setItems] = useState<BreakdownItem[]>([])
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(async () => {
+    setLoading(true)
     setError(null)
     const r = await api<{ items: BreakdownItem[] }>(
       `/analytics/breakdown/${dimension}${qs({ since: rangeSince(range), limit: 30 })}`
@@ -61,9 +63,10 @@ export function useBreakdown(dimension: string, range = '24h') {
       setError(errMsg(r) || 'Failed to load breakdown')
       setItems([])
     }
+    setLoading(false)
   }, [dimension, range])
   useEffect(() => { load() }, [load])
-  return { items, error, reload: load }
+  return { items, loading, error, reload: load }
 }
 
 /** Stable filter keys — never put wall-clock `rangeSince()` in deps (refetch loop). */
@@ -145,7 +148,7 @@ export function useTraceDetail(traceId: string | null) {
 
 export function useCostRates() {
   const [data, setData] = useState<CostRatesResponse | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const load = useCallback(async () => {
     setLoading(true)
@@ -177,37 +180,51 @@ export function useAnalyticsSSE(enabled = true) {
     if (!enabled) return
     const key = getAuthKey()
     const url = key ? `/analytics/events?token=${encodeURIComponent(key)}` : '/analytics/events'
-    const es = new EventSource(url)
-    es.onopen = () => {
-      setConnected(true)
-      setAuthError(false)
-      errorCount.current = 0
+    let es: EventSource | null = null
+    let closed = false
+    const baseDelay = 250
+    let delay = baseDelay
+
+    function connect() {
+      if (closed) return
+      es = new EventSource(url)
+      es.onopen = () => {
+        setConnected(true)
+        setAuthError(false)
+        errorCount.current = 0
+        delay = baseDelay
+      }
+      es.onmessage = (e) => {
+        try {
+          const payload = JSON.parse(e.data) as LiveTraceEvent & { ts?: number; id?: string; path?: string; error?: string }
+          // Accept immediate request-log events and analytics traces
+          if (payload.type !== 'trace' && payload.type !== 'request') return
+          // Normalize request events into the feed shape
+          if (payload.type === 'request') {
+            payload.created_at = payload.created_at ?? payload.ts
+            payload.success = payload.success ?? !(payload.status_code && payload.status_code >= 400)
+            payload.error_message = payload.error_message ?? payload.error ?? null
+          }
+          if (pausedRef.current) {
+            buffer.current = [payload, ...buffer.current].slice(0, 200)
+            return
+          }
+          setEvents(prev => [payload, ...prev].slice(0, 200))
+        } catch { /* ignore */ }
+      }
+      es.onerror = () => {
+        if (closed) return
+        setConnected(false)
+        errorCount.current += 1
+        if (errorCount.current >= 3) setAuthError(true)
+        es?.close()
+        const next = Math.min(delay * 2, 30000)
+        delay = next
+        setTimeout(connect, next)
+      }
     }
-    es.onmessage = (e) => {
-      try {
-        const payload = JSON.parse(e.data) as LiveTraceEvent & { ts?: number; id?: string; path?: string; error?: string }
-        // Accept immediate request-log events and analytics traces
-        if (payload.type !== 'trace' && payload.type !== 'request') return
-        // Normalize request events into the feed shape
-        if (payload.type === 'request') {
-          payload.created_at = payload.created_at ?? payload.ts
-          payload.success = payload.success ?? !(payload.status_code && payload.status_code >= 400)
-          payload.error_message = payload.error_message ?? payload.error ?? null
-        }
-        if (pausedRef.current) {
-          buffer.current = [payload, ...buffer.current].slice(0, 200)
-          return
-        }
-        setEvents(prev => [payload, ...prev].slice(0, 200))
-      } catch { /* ignore */ }
-    }
-    es.onerror = () => {
-      setConnected(false)
-      errorCount.current += 1
-      // EventSource auto-reconnects; only surface a warning, never kill the stream.
-      if (errorCount.current >= 3) setAuthError(true)
-    }
-    return () => { es.close(); setConnected(false) }
+    connect()
+    return () => { closed = true; es?.close(); setConnected(false) }
   }, [enabled, epoch])
 
   const reconnect = useCallback(() => {

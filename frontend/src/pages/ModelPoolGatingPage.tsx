@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Card, CardHeader, CardBody, Badge, Button, Spinner, Input } from '../components/ui'
+import { Card, CardHeader, CardBody, Badge, Button, Input, Skeleton, ErrorState, EmptyState } from '../components/ui'
 import { useCatalog } from '../hooks/useApi'
 import { api, errMsg, okBody } from '../lib/api'
 import { Filter, Lock, Unlock, Save, Trash2, Search, Shield, X } from 'lucide-react'
@@ -95,7 +95,16 @@ export default function ModelPoolGatingPage() {
     search === '' || m.toLowerCase().includes(search.toLowerCase())
   )
 
-  if (!catalog) return <Spinner />
+  if (!catalog) return (
+    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+      <div className="flex items-center gap-2">
+        <Filter className="w-5 h-5 text-violet-400" />
+        <h2 className="text-lg font-bold text-white tracking-tight">Model Pool Gating</h2>
+      </div>
+      <Skeleton lines={3} className="max-w-xl" />
+      <Skeleton cards={2} />
+    </div>
+  )
 
   return (
     <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
@@ -265,11 +274,11 @@ export default function ModelPoolGatingPage() {
         })}
 
         {filteredModels.length === 0 && (
-          <div className="text-center py-12 text-zinc-500 text-sm">
+          <EmptyState title={liveIds.length === 0 ? 'No live models in catalog' : 'No models match your filter'}>
             {liveIds.length === 0
-              ? 'No live models in catalog. Refresh the catalog first.'
-              : 'No models match your filter.'}
-          </div>
+              ? 'Refresh the catalog first to populate the pool.'
+              : 'Try adjusting your search query.'}
+          </EmptyState>
         )}
       </div>
     </div>

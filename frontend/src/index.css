@@ -8,12 +8,20 @@
   box-sizing: border-box;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
   background: #09090b;
   color: #fafafa;
   height: 100vh;
+  height: 100dvh; /* dynamic viewport height — handles mobile URL bar */
   overflow: hidden;
+  /* iOS safe-area: honor notches/home indicator */
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
 }
 
 ::selection {
@@ -21,10 +29,31 @@ body {
   color: #fff;
 }
 
-::-webkit-scrollbar { width: 6px; }
+/* Keyboard focus visibility — accessibility (WCAG 2.4.7) */
+:focus-visible {
+  outline: 2px solid #8b5cf6;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+/* Remove default outline only when focus-visible is supported */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* Scrollbars — cross-browser (webkit + Firefox) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.15); }
+
+/* Tap targets: prevent iOS double-tap zoom on buttons (a11y + UX) */
+button, [role="button"], a {
+  touch-action: manipulation;
+}
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(8px); }
@@ -34,4 +63,19 @@ body {
 @keyframes pulse-glow {
   0%, 100% { box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
   50% { box-shadow: 0 0 16px rgba(16, 185, 129, 0.6); }
+}
+
+/* Respect reduced-motion preferences (WCAG 2.3.3) */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* High-contrast preference: strengthen borders/text for legibility */
+@media (prefers-contrast: more) {
+  .border-white\/\[0\.08\] { border-color: rgba(255,255,255,0.25) !important; }
 }

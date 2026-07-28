@@ -110,25 +110,25 @@ export default function PlaygroundPage() {
   }
 
   return (
-    <div className="animate-[fadeIn_0.25s_ease-out] flex gap-6 h-[calc(100vh-140px)]">
+    <div className="animate-[fadeIn_0.25s_ease-out] flex flex-col lg:flex-row gap-4 lg:gap-6 h-[calc(100dvh-140px)] lg:h-[calc(100vh-140px)]">
       {/* Interactive Chat Window */}
-      <div className="flex-1 flex flex-col bg-zinc-900/60 backdrop-blur-xl border border-white/[0.08] rounded-2xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.36)]">
+      <div className="flex-1 flex flex-col min-h-0 bg-zinc-900/60 backdrop-blur-xl border border-white/[0.08] rounded-2xl overflow-hidden shadow-[0_8px_32px_rgba(0,0,0,0.36)]">
         {/* Chat Window Header */}
-        <div className="px-6 py-3.5 border-b border-white/[0.08] flex justify-between items-center bg-white/[0.01]">
-          <div className="flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-violet-400" />
-            <span className="text-xs font-bold text-white tracking-wide">Interactive Session</span>
+        <div className="px-4 sm:px-6 py-3.5 border-b border-white/[0.08] flex justify-between items-center bg-white/[0.01] gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Terminal className="w-4 h-4 text-violet-400 shrink-0" />
+            <span className="text-xs font-bold text-white tracking-wide truncate">Interactive Session</span>
           </div>
-          <Button size="xs" variant="default" onClick={handleReset}>
+          <Button size="xs" variant="default" onClick={handleReset} className="shrink-0">
             <RotateCcw className="w-3 h-3 text-zinc-400" />
-            <span>Reset Chat</span>
+            <span className="hidden sm:inline">Reset Chat</span>
           </Button>
         </div>
 
         {/* Message Stream */}
-        <div ref={msgsRef} className="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
+        <div ref={msgsRef} className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4 custom-scrollbar min-h-0">
           {messages.map((msg, i) => (
-            <div key={i} className={`flex gap-3 max-w-[85%] ${msg.role === 'user' ? 'ml-auto flex-row-reverse' : ''}`}>
+            <div key={i} className={`flex gap-3 max-w-[92%] sm:max-w-[85%] ${msg.role === 'user' ? 'ml-auto flex-row-reverse' : ''}`}>
               <div className={`w-8 h-8 rounded-xl shrink-0 flex items-center justify-center text-white ${
                 msg.role === 'user'
                   ? 'bg-gradient-to-br from-violet-600 to-fuchsia-600 shadow-[0_0_12px_rgba(139,92,246,0.3)]'
@@ -152,24 +152,24 @@ export default function PlaygroundPage() {
         </div>
 
         {/* Prompt Input Form */}
-        <div className="p-4 border-t border-white/[0.08] bg-zinc-950/80 flex gap-3 items-end">
+        <div className="p-3 sm:p-4 border-t border-white/[0.08] bg-zinc-950/80 flex gap-3 items-end">
           <Textarea
             rows={2}
-            placeholder="Type a test prompt... (Press Enter to send, Shift+Enter for newline)"
+            placeholder="Type a test prompt... (Enter to send, Shift+Enter for newline)"
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
-            className="flex-1 font-sans text-xs"
+            className="flex-1 font-sans text-xs min-h-[44px]"
           />
-          <Button variant="primary" onClick={sendMessage} disabled={streaming} className="h-10 px-5">
+          <Button variant="primary" onClick={sendMessage} disabled={streaming} className="h-10 px-4 sm:px-5 shrink-0">
             <Send className="w-4 h-4" />
-            <span>{streaming ? '...' : 'Send'}</span>
+            <span className="hidden sm:inline">{streaming ? '...' : 'Send'}</span>
           </Button>
         </div>
       </div>
 
       {/* Model Parameter Controls Panel */}
-      <div className="w-[300px] flex flex-col gap-4 shrink-0 overflow-y-auto custom-scrollbar">
+      <div className="w-full lg:w-[300px] flex flex-col gap-4 shrink-0 overflow-y-auto custom-scrollbar order-first lg:order-last">
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">

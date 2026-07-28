@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react'
 import { api, ap, errMsg, okBody } from '../lib/api'
-import { Button, Card, CardBody, Badge, StatusDot, Select, CopyButton } from '../components/ui'
+import { Button, Card, CardBody, Badge, StatusDot, Select, CopyButton, Skeleton, ErrorState, EmptyState } from '../components/ui'
 import {
   Users,
   CheckCircle2,
@@ -24,14 +24,23 @@ type UserRow = {
 
 export default function UsersPage() {
   const [users, setUsers] = useState<UserRow[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [filter, setFilter] = useState('pending_approval')
   const [msg, setMsg] = useState('')
   const [issued, setIssued] = useState<string | null>(null)
 
   const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
     const q = filter ? `?status=${encodeURIComponent(filter)}` : ''
     const r = await api<{ users: UserRow[] }>(`/admin/users${q}`)
     if (r?.users) setUsers(r.users)
+    else {
+      setUsers([])
+      setError(errMsg(r) || 'Failed to load users')
+    }
+    setLoading(false)
   }, [filter])
 
   useEffect(() => { load() }, [load])
@@ -113,36 +122,47 @@ export default function UsersPage() {
       <Card>
         <CardBody className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs min-w-[560px]">
               <thead>
                 <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
-                  <th className="px-6 py-3.5 font-semibold">User Email</th>
-                  <th className="px-6 py-3.5 font-semibold">Status</th>
-                  <th className="px-6 py-3.5 font-semibold">Role</th>
-                  <th className="px-6 py-3.5 font-semibold">Actions</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold">User Email</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold">Status</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold">Role</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.06]">
-                {users.length === 0 ? (
+                {loading && users.length === 0 ? (
+                  Array.from({ length: 5 }).map((_, i) => (
+                    <tr key={i}>
+                      <td className="px-4 sm:px-6 py-4"><Skeleton lines={1} className="w-40" /></td>
+                      <td className="px-4 sm:px-6 py-4"><Skeleton lines={1} className="w-20" /></td>
+                      <td className="px-4 sm:px-6 py-4"><Skeleton lines={1} className="w-16" /></td>
+                      <td className="px-4 sm:px-6 py-4"><Skeleton lines={1} className="w-24" /></td>
+                    </tr>
+                  ))
+                ) : users.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="px-6 py-12 text-center text-zinc-500 text-xs">
-                      No user accounts found matching status filter
+                    <td colSpan={4}>
+                      <EmptyState title="No user accounts found" icon={Users}>
+                        No accounts match the selected status filter.
+                      </EmptyState>
                     </td>
                   </tr>
                 ) : (
                   users.map(u => (
                     <tr key={u.id} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="px-6 py-4 font-semibold text-white">{u.email}</td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4 font-semibold text-white">{u.email}</td>
+                      <td className="px-4 sm:px-6 py-4">
                         <Badge variant={u.status === 'active' ? 'ok' : u.status === 'pending_approval' ? 'warn' : 'err'}>
                           <StatusDot ok={u.status === 'active'} />
                           {u.status}
                         </Badge>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4">
                         <Badge variant={u.role === 'admin' ? 'purple' : 'default'}>{u.role}</Badge>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4">
                         <div className="flex gap-2 flex-wrap">
                           {u.status === 'pending_approval' && (
                             <>
@@ -178,6 +198,10 @@ export default function UsersPage() {
           </div>
         </CardBody>
       </Card>
+
+      {error && !users.length && (
+        <ErrorState title="Could not load users" message={error} onRetry={load} />
+      )}
     </div>
   )
 }

@@ -182,7 +182,7 @@ export interface SSEHealthEvent {
   active_providers: number
   fallback_advances: number
   provider_health: Record<string, { enabled: boolean; runtime: boolean; available_keys: number }>
-  model_health: Record<string, { ok: boolean; tps: number; latency: number; error_rate: number }>
+  model_health: Record<string, { ok: boolean; tps: number; latency_ms: number; error_rate: number }>
 }
 
 export interface ExtensibilityResponse {

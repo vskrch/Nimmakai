@@ -148,34 +148,35 @@ export default function ModelsPage() {
     <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
       {/* Header controls */}
       <div className="flex justify-between items-start gap-4 flex-wrap">
-        <div>
+        <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <Cpu className="w-5 h-5 text-violet-400" />
-            <h2 className="text-lg font-bold text-white tracking-tight">Model Pool & Capability Catalog</h2>
+            <Cpu className="w-5 h-5 text-violet-400 shrink-0" />
+            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">Model Pool & Capability Catalog</h2>
           </div>
           <p className="text-zinc-400 text-xs mt-1 max-w-[620px]">
             Manage active models across all connected providers. Disabled models remain discovered in system metadata but are excluded from active fallback chains.
           </p>
         </div>
-        <Button variant="secondary" onClick={handleRefresh} disabled={busy === 'refresh'}>
+        <Button variant="secondary" onClick={handleRefresh} disabled={busy === 'refresh'} className="shrink-0">
           <RefreshCw className={`w-3.5 h-3.5 ${busy === 'refresh' ? 'animate-spin' : ''}`} />
-          <span>{busy === 'refresh' ? 'Probing Endpoints…' : 'Refresh Catalog'}</span>
+          <span className="hidden sm:inline">{busy === 'refresh' ? 'Probing Endpoints…' : 'Refresh Catalog'}</span>
+          <span className="sm:hidden">Refresh</span>
         </Button>
       </div>
 
       {msg && (
-        <div className={`p-4 rounded-xl text-xs flex items-center justify-between font-medium ${
+        <div className={`p-3 sm:p-4 rounded-xl text-xs flex items-start sm:items-center justify-between font-medium gap-3 ${
           msg.ok ? 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20' : 'bg-rose-500/10 text-rose-300 border border-rose-500/20'
         }`}>
-          <span>{msg.text}</span>
-          <button className="text-zinc-400 hover:text-white" onClick={() => setMsg(null)}>Dismiss</button>
+          <span className="break-words">{msg.text}</span>
+          <button className="text-zinc-400 hover:text-white shrink-0" onClick={() => setMsg(null)}>Dismiss</button>
         </div>
       )}
 
       {/* Filter toolbar */}
-      <div className="flex gap-3 flex-wrap items-center justify-between">
-        <div className="flex items-center gap-3 flex-wrap flex-1">
-          <div className="relative min-w-[240px]">
+      <div className="flex flex-col sm:flex-row gap-3 flex-wrap items-start sm:items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-1 w-full sm:w-auto">
+          <div className="relative w-full sm:min-w-[220px] sm:max-w-[320px]">
             <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <Input
               placeholder="Search model name or ID..."
@@ -187,7 +188,7 @@ export default function ModelsPage() {
           <button
             type="button"
             onClick={() => setShowDisabledOnly(v => !v)}
-            className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+            className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer whitespace-nowrap ${
               showDisabledOnly
                 ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
                 : 'bg-zinc-900 text-zinc-400 border-white/[0.08] hover:text-white'
@@ -196,7 +197,7 @@ export default function ModelsPage() {
             Disabled Only
           </button>
         </div>
-        <div className="text-xs text-zinc-400 font-mono">
+        <div className="text-xs text-zinc-400 font-mono shrink-0">
           <span>{filtered.length} visible · </span>
           <strong className="text-emerald-400">{activeCount} active</strong> ·{' '}
           <strong className="text-rose-400">{disabledCount} disabled</strong>
@@ -237,13 +238,13 @@ export default function ModelsPage() {
       </div>
 
       {filterProv && (
-        <div className="flex gap-2 p-3 rounded-xl bg-zinc-950/60 border border-white/[0.06] items-center justify-between">
+        <div className="flex flex-col sm:flex-row gap-2 p-3 rounded-xl bg-zinc-950/60 border border-white/[0.06] items-start sm:items-center justify-between">
           <span className="text-xs text-zinc-300 font-medium">Bulk operations for provider: <strong className="text-violet-400">{filterProv}</strong></span>
-          <div className="flex gap-2">
-            <Button size="xs" variant="secondary" onClick={() => bulkProvider(filterProv, true)} disabled={busy === `bulk:${filterProv}`}>
+          <div className="flex gap-2 w-full sm:w-auto">
+            <Button size="xs" variant="secondary" onClick={() => bulkProvider(filterProv, true)} disabled={busy === `bulk:${filterProv}`} className="flex-1 sm:flex-none">
               Enable All {filterProv}
             </Button>
-            <Button size="xs" variant="danger" onClick={() => bulkProvider(filterProv, false)} disabled={busy === `bulk:${filterProv}`}>
+            <Button size="xs" variant="danger" onClick={() => bulkProvider(filterProv, false)} disabled={busy === `bulk:${filterProv}`} className="flex-1 sm:flex-none">
               Disable All {filterProv}
             </Button>
           </div>
@@ -254,13 +255,13 @@ export default function ModelsPage() {
       <Card>
         <CardBody className="p-0">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs min-w-[720px]">
               <thead>
                 <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
-                  <th className="px-6 py-3.5 font-semibold w-[90px]">Pool Toggle</th>
-                  <th className="px-6 py-3.5 font-semibold">Model Name & ID</th>
-                  <th className="px-6 py-3.5 font-semibold">Provider</th>
-                  <th className="px-6 py-3.5 font-semibold w-[160px]">Quality Override (0-100)</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold w-[90px]">Pool Toggle</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold">Model Name &amp; ID</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold">Provider</th>
+                  <th className="px-4 sm:px-6 py-3.5 font-semibold w-[140px] sm:w-[160px]">Quality Override (0-100)</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/[0.06]">
@@ -276,7 +277,7 @@ export default function ModelsPage() {
                       key={m.id}
                       className={`hover:bg-white/[0.02] transition-colors ${!m.enabled ? 'opacity-50 bg-rose-500/[0.02]' : ''}`}
                     >
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4">
                         <button
                           type="button"
                           role="switch"
@@ -296,29 +297,29 @@ export default function ModelsPage() {
                           />
                         </button>
                       </td>
-                      <td className="px-6 py-4">
-                        <strong className="text-white text-xs font-semibold">{m.name}</strong>
-                        <div className="text-[11px] text-zinc-500 font-mono mt-0.5">{m.id}</div>
+                      <td className="px-4 sm:px-6 py-4 min-w-0">
+                        <strong className="text-white text-xs font-semibold block truncate">{m.name}</strong>
+                        <div className="text-[11px] text-zinc-500 font-mono mt-0.5 truncate">{m.id}</div>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4">
                         <Badge variant="accent">{m.provider}</Badge>
                         {!m.enabled && (
                           <Badge variant="err" className="ml-2">Disabled</Badge>
                         )}
                       </td>
-                      <td className="px-6 py-4">
+                      <td className="px-4 sm:px-6 py-4">
                         <div className="flex items-center gap-2">
                           <input
                             type="number"
                             min={0}
                             max={100}
                             placeholder="Score"
-                            className="bg-zinc-950 border border-white/[0.1] text-white px-2.5 py-1.5 rounded-lg text-xs w-[75px] font-mono focus:outline-none focus:border-violet-500"
+                            className="bg-zinc-950 border border-white/[0.1] text-white px-2.5 py-1.5 rounded-lg text-xs w-[70px] sm:w-[75px] font-mono focus:outline-none focus:border-violet-500"
                             onBlur={e => {
                               if (e.target.value) handleQualityOverride(m.id, e.target.value)
                             }}
                           />
-                          <span className="text-[10px] text-zinc-500 font-mono">0-100</span>
+                          <span className="text-[10px] text-zinc-500 font-mono hidden sm:inline">0-100</span>
                         </div>
                       </td>
                     </tr>

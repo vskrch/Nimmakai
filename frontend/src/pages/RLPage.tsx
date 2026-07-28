@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { Card, CardHeader, CardBody, Badge, Button, Spinner } from '../components/ui'
 import { api } from '../lib/api'
 import { Cpu, RefreshCw, RotateCcw, Zap, BarChart2, ShieldCheck } from 'lucide-react'
@@ -76,6 +76,24 @@ export default function RLPage() {
   const globalAvgReward = models.length
     ? (models.reduce((acc, m) => acc + (m.avg_reward || 0), 0) / models.length).toFixed(2)
     : '0.00'
+
+  const maxAbsTheta = useMemo(() => {
+    let max = 0
+    for (const m of models) {
+      for (const w of m.theta) max = Math.max(max, Math.abs(w))
+    }
+    return Math.max(max, 0.1)
+  }, [models])
+
+  const heatGradient = (value: number) => {
+    const ratio = value / maxAbsTheta // [-1 .. 1]
+    if (ratio > 0) {
+      const alpha = Math.min(1, Math.max(0.15, ratio))
+      return `rgba(16, 185, 129, ${alpha})`
+    }
+    const alpha = Math.min(1, Math.max(0.15, Math.abs(ratio)))
+    return `rgba(244, 63, 94, ${alpha})`
+  }
 
   return (
     <div className="space-y-6">
@@ -190,10 +208,10 @@ export default function RLPage() {
               No RL policy data recorded yet. Send client requests through the gateway to initialize model feature weights.
             </div>
           ) : (
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs min-w-[760px]">
               <thead className="bg-slate-950/60 text-slate-400 font-medium border-b border-slate-800">
                 <tr>
-                  <th className="p-3">Model ID</th>
+                  <th className="p-3 sticky left-0 bg-slate-950/60 z-10">Model ID</th>
                   <th className="p-3 text-center">Requests</th>
                   <th className="p-3 text-center">Avg Reward</th>
                   {featureNames.map((name, idx) => (
@@ -207,7 +225,7 @@ export default function RLPage() {
               <tbody className="divide-y divide-slate-800/60 text-slate-300">
                 {models.map((m) => (
                   <tr key={m.model_id} className="hover:bg-slate-800/30 transition-colors">
-                    <td className="p-3 font-mono font-medium text-slate-200">{m.model_id}</td>
+                    <td className="p-3 font-mono font-medium text-slate-200 sticky left-0 bg-inherit z-10">{m.model_id}</td>
                     <td className="p-3 text-center font-mono">{m.request_count}</td>
                     <td className="p-3 text-center font-mono">
                       <span
@@ -225,15 +243,13 @@ export default function RLPage() {
                     {m.theta.map((weight, fIdx) => (
                       <td key={fIdx} className="p-3 text-center font-mono text-[11px]">
                         <span
-                          className={`${
-                            weight > 0.1
-                              ? 'text-emerald-400 font-semibold'
-                              : weight < -0.1
-                              ? 'text-rose-400 font-semibold'
-                              : 'text-slate-500'
-                          }`}
+                          className="inline-flex items-center justify-center w-12 h-6 rounded-md"
+                          style={{ backgroundColor: heatGradient(weight) }}
+                          title={`${featureNames[fIdx]}: ${weight.toFixed(3)}`}
                         >
-                          {weight.toFixed(2)}
+                          <span className={`${Math.abs(weight) > maxAbsTheta * 0.4 ? 'text-white font-semibold' : 'text-slate-400'}`}>
+                            {weight.toFixed(2)}
+                          </span>
                         </span>
                       </td>
                     ))}

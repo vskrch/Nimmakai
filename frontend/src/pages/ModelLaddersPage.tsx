@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Card, CardHeader, CardBody, Badge, Button, Spinner, Input } from '../components/ui'
+import { Card, CardHeader, CardBody, Badge, Button, Input, Skeleton, ErrorState, EmptyState } from '../components/ui'
 import { useCatalog } from '../hooks/useApi'
 import { api, ap, ad, errMsg, okBody } from '../lib/api'
 import { GitFork, Plus, Trash2, X, ArrowRight, Save, RotateCcw, Lock } from 'lucide-react'
@@ -129,7 +129,16 @@ export default function ModelLaddersPage() {
     }
   }
 
-  if (!catalog) return <Spinner />
+  if (!catalog) return (
+    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+      <div className="flex items-center gap-2">
+        <GitFork className="w-5 h-5 text-violet-400" />
+        <h2 className="text-lg font-bold text-white tracking-tight">Custom Model Ladders</h2>
+      </div>
+      <Skeleton lines={2} className="max-w-xl" />
+      <Skeleton cards={2} />
+    </div>
+  )
 
   const selectedMeta = ROUTABLE_MODELS.find(m => m.id === selectedModel)
   const ladderForSelected = ladders.find(l => l.model_id === selectedModel)
@@ -184,7 +193,7 @@ export default function ModelLaddersPage() {
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <code className="font-mono text-xs font-semibold">{m.label}</code>
+                      <code className="font-mono text-xs font-semibold truncate">{m.label}</code>
                       {has && <Badge variant="ok">Custom</Badge>}
                     </div>
                     <p className="text-[10px] text-zinc-500 mt-0.5">{m.desc}</p>
@@ -232,8 +241,8 @@ export default function ModelLaddersPage() {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="flex items-center gap-2.5">
-                  <code className="font-mono text-sm font-bold text-violet-200">{selectedModel}</code>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <code className="font-mono text-sm font-bold text-violet-200 truncate">{selectedModel}</code>
                   <Badge variant="accent">{selectedMeta?.desc}</Badge>
                   {ladderForSelected && <Badge variant="ok">Editing saved ladder</Badge>}
                 </div>
@@ -272,11 +281,11 @@ export default function ModelLaddersPage() {
                 </div>
 
                 {chain.length === 0 ? (
-                  <div className="py-10 text-center text-xs text-zinc-500">
+                  <EmptyState title="Build a fallback chain">
                     Drag models from the pool below to build the fallback chain.
                     <br />
                     <span className="text-zinc-600">First available model wins; later entries are fallbacks.</span>
-                  </div>
+                  </EmptyState>
                 ) : (
                   <ol className="space-y-2">
                     {chain.map((m, i) => (
@@ -348,11 +357,11 @@ export default function ModelLaddersPage() {
             </CardHeader>
             <CardBody className="p-3">
               {filteredPool.length === 0 ? (
-                <p className="text-center text-xs text-zinc-500 py-6">
+                <EmptyState title={liveIds.length === 0 ? 'No live models in catalog' : 'All models already in chain'}>
                   {liveIds.length === 0
-                    ? 'No live models in catalog. Refresh the catalog first.'
+                    ? 'Refresh the catalog first to populate the pool.'
                     : 'All live models are already in the chain, or no matches for your filter.'}
-                </p>
+                </EmptyState>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 max-h-[420px] overflow-y-auto custom-scrollbar pr-1">
                   {filteredPool.slice(0, 300).map(m => (

@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { Card, CardBody, CardHeader, Button, Input, Spinner, StatBox, Badge } from '../components/ui'
+import { Card, CardBody, CardHeader, Button, Input, StatBox, Badge, Skeleton, ErrorState, EmptyState } from '../components/ui'
 import { HorizontalBars } from '../components/charts'
 import { useBreakdown, useCostRates, useAnalyticsSummary } from '../hooks/useAnalytics'
 import { RangePicker } from '../components/RangePicker'
@@ -90,27 +90,30 @@ export default function CostPage() {
         </div>
       )}
 
-      {/* Primary Financial Overview Stats */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatBox
-          label="Estimated Expenditure"
-          value={fmtUsd(summary?.estimated_cost_usd)}
-          sub={`Cost window: ${range}`}
-          icon={Coins}
-        />
-        <StatBox
-          label="Token Volume"
-          value={fmtTokens(summary?.total_tokens)}
-          sub={`${fmtTokens(summary?.total_prompt_tokens)} prompt tokens`}
-          icon={Cpu}
-        />
-        <StatBox
-          label="Total API Requests"
-          value={(summary?.total_requests ?? 0).toLocaleString()}
-          sub="Requests processed"
-          icon={DollarSign}
-        />
-      </div>
+      {!summary ? (
+        <Skeleton cards={3} />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <StatBox
+            label="Estimated Expenditure"
+            value={fmtUsd(summary?.estimated_cost_usd)}
+            sub={`Cost window: ${range}`}
+            icon={Coins}
+          />
+          <StatBox
+            label="Token Volume"
+            value={fmtTokens(summary?.total_tokens)}
+            sub={`${fmtTokens(summary?.total_prompt_tokens)} prompt tokens`}
+            icon={Cpu}
+          />
+          <StatBox
+            label="Total API Requests"
+            value={(summary?.total_requests ?? 0).toLocaleString()}
+            sub="Requests processed"
+            icon={DollarSign}
+          />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card>
@@ -121,9 +124,9 @@ export default function CostPage() {
             </div>
           </CardHeader>
           <CardBody>
-            {!costItems.length ? (
-              <div className="text-xs text-zinc-500 py-8 text-center">No spend data in selected range</div>
-            ) : (
+                {!costItems.length ? (
+                  <EmptyState title="No spend data in selected range">Costs will appear once requests are logged for this window.</EmptyState>
+                ) : (
               <div className="space-y-3 text-xs">
                 {costItems.slice(0, 12).map((it, i) => (
                   <div key={it.key + i} className="flex justify-between items-center p-3 rounded-xl bg-zinc-950/60 border border-white/[0.06]">
@@ -212,51 +215,49 @@ export default function CostPage() {
           </div>
 
           {ratesError && (
-            <div className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 p-3 rounded-xl">
-              {ratesError}
-            </div>
+            <ErrorState title="Could not load cost rates" message={ratesError} onRetry={reloadRates} />
           )}
 
           {/* Rates Table */}
           {ratesLoading && !rates ? (
-            <Spinner />
+            <Skeleton lines={6} />
           ) : !rates ? (
-            <div className="text-xs text-zinc-500 py-6 text-center">No cost rate data available</div>
+            <EmptyState title="No cost rate data available">Cost rates will appear once imported or configured.</EmptyState>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
-                    <th className="px-5 py-3.5 font-semibold">Model ID</th>
-                    <th className="px-5 py-3.5 font-semibold">Input $/1M Tokens</th>
-                    <th className="px-5 py-3.5 font-semibold">Output $/1M Tokens</th>
-                    <th className="px-5 py-3.5 font-semibold">Pricing Source</th>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs min-w-[520px]">
+              <thead>
+                <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
+                  <th className="px-4 sm:px-5 py-3.5 font-semibold">Model ID</th>
+                  <th className="px-4 sm:px-5 py-3.5 font-semibold">Input $/1M Tokens</th>
+                  <th className="px-4 sm:px-5 py-3.5 font-semibold">Output $/1M Tokens</th>
+                  <th className="px-4 sm:px-5 py-3.5 font-semibold">Pricing Source</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/[0.06]">
+                {(rates.overrides || []).map(r => (
+                  <tr key={`o-${r.model_id}`} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="px-4 sm:px-5 py-3.5 font-mono text-white font-semibold">{r.model_id}</td>
+                    <td className="px-4 sm:px-5 py-3.5 font-mono text-zinc-200">${r.input_per_m}</td>
+                    <td className="px-4 sm:px-5 py-3.5 font-mono text-zinc-200">${r.output_per_m}</td>
+                    <td className="px-4 sm:px-5 py-3.5">
+                      <Badge variant="accent">custom override</Badge>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-white/[0.06]">
-                  {(rates.overrides || []).map(r => (
-                    <tr key={`o-${r.model_id}`} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="px-5 py-3.5 font-mono text-white font-semibold">{r.model_id}</td>
-                      <td className="px-5 py-3.5 font-mono text-zinc-200">${r.input_per_m}</td>
-                      <td className="px-5 py-3.5 font-mono text-zinc-200">${r.output_per_m}</td>
-                      <td className="px-5 py-3.5">
-                        <Badge variant="accent">custom override</Badge>
-                      </td>
-                    </tr>
-                  ))}
-                  {(rates.defaults || []).slice(0, 20).map(r => (
-                    <tr key={`d-${r.model_id}`} className="hover:bg-white/[0.02] transition-colors">
-                      <td className="px-5 py-3.5 font-mono text-zinc-400">{r.model_id}</td>
-                      <td className="px-5 py-3.5 font-mono text-zinc-400">${r.input_per_m}</td>
-                      <td className="px-5 py-3.5 font-mono text-zinc-400">${r.output_per_m}</td>
-                      <td className="px-5 py-3.5">
-                        <Badge variant="default">models.dev</Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+                {(rates.defaults || []).slice(0, 20).map(r => (
+                  <tr key={`d-${r.model_id}`} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="px-4 sm:px-5 py-3.5 font-mono text-zinc-400">{r.model_id}</td>
+                    <td className="px-4 sm:px-5 py-3.5 font-mono text-zinc-400">${r.input_per_m}</td>
+                    <td className="px-4 sm:px-5 py-3.5 font-mono text-zinc-400">${r.output_per_m}</td>
+                    <td className="px-4 sm:px-5 py-3.5">
+                      <Badge variant="default">models.dev</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           )}
         </CardBody>
       </Card>

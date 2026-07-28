@@ -131,22 +131,28 @@ export default function RequestsPage() {
   }
 
   return (
-    <div className="space-y-6 animate-[fadeIn_0.25s_ease-out]">
+    <div className="space-y-4 sm:space-y-6 animate-[fadeIn_0.25s_ease-out]">
       {/* Header controls */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div className="flex items-center gap-2">
-          <ListFilter className="w-5 h-5 text-violet-400" />
-          <h2 className="text-lg font-bold text-white tracking-tight">Request Explorer</h2>
+        <div className="flex items-center gap-2 min-w-0">
+          <ListFilter className="w-5 h-5 text-violet-400 shrink-0" />
+          <h2 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">Request Explorer</h2>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap shrink-0">
           <RangePicker value={range} onChange={v => { setRange(v); setOffset(0) }} />
-          <Button size="sm" variant="secondary" onClick={reload}>
+          <Button size="sm" variant="secondary" onClick={reload} className="hidden sm:inline-flex">
             <RefreshCw className="w-3.5 h-3.5" />
             <span>Refresh</span>
           </Button>
-          <Button size="sm" variant="default" onClick={exportCsv}>
+          <Button size="sm" variant="secondary" onClick={reload} className="sm:hidden p-2">
+            <RefreshCw className="w-4 h-4" />
+          </Button>
+          <Button size="sm" variant="default" onClick={exportCsv} className="hidden sm:inline-flex">
             <Download className="w-3.5 h-3.5 text-violet-400" />
             <span>Export CSV</span>
+          </Button>
+          <Button size="sm" variant="default" onClick={exportCsv} className="sm:hidden p-2">
+            <Download className="w-4 h-4 text-violet-400" />
           </Button>
         </div>
       </div>
@@ -158,7 +164,7 @@ export default function RequestsPage() {
       )}
 
       {/* Filter toolbar */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
         <div className="relative">
           <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
           <Input
@@ -185,21 +191,21 @@ export default function RequestsPage() {
           <option value="vision">vision</option>
           <option value="embeddings">embeddings</option>
         </Select>
+        <Select
+          value={status}
+          onChange={e => { setStatus(e.target.value); setOffset(0) }}
+        >
+          <option value="">All Status Codes</option>
+          <option value="success">Success (2xx)</option>
+          <option value="error">Errors</option>
+          <option value="4xx">Client Errors (4xx)</option>
+          <option value="5xx">Upstream Errors (5xx)</option>
+        </Select>
         <div className="flex gap-2">
-          <Select
-            value={status}
-            onChange={e => { setStatus(e.target.value); setOffset(0) }}
-            className="flex-1"
-          >
-            <option value="">All Status Codes</option>
-            <option value="success">Success (2xx)</option>
-            <option value="error">Errors</option>
-            <option value="4xx">Client Errors (4xx)</option>
-            <option value="5xx">Upstream Errors (5xx)</option>
-          </Select>
           {hasActiveFilters && (
-            <Button size="sm" variant="secondary" onClick={clearFilters}>
+            <Button size="sm" variant="secondary" onClick={clearFilters} className="flex-1">
               <X className="w-3.5 h-3.5" />
+              <span>Clear</span>
             </Button>
           )}
         </div>
@@ -217,16 +223,16 @@ export default function RequestsPage() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
+              <table className="w-full text-left text-xs min-w-[760px]">
                 <thead>
                   <tr className="border-b border-white/[0.08] text-[10px] uppercase tracking-wider text-zinc-400 bg-white/[0.01]">
-                    <th className="px-6 py-3.5 font-semibold">Timestamp</th>
-                    <th className="px-6 py-3.5 font-semibold">Status</th>
-                    <th className="px-6 py-3.5 font-semibold">Routed Model</th>
-                    <th className="px-6 py-3.5 font-semibold">Intent</th>
-                    <th className="px-6 py-3.5 font-semibold">Duration</th>
-                    <th className="px-6 py-3.5 font-semibold">Tokens</th>
-                    <th className="px-6 py-3.5 font-semibold">Est. Cost</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Timestamp</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Status</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Routed Model</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Intent</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Duration</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Tokens</th>
+                    <th className="px-4 sm:px-6 py-3.5 font-semibold">Est. Cost</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-white/[0.06]">
@@ -236,18 +242,18 @@ export default function RequestsPage() {
                       onClick={() => setSelected(t.trace_id)}
                       className={`hover:bg-white/[0.03] transition-colors cursor-pointer ${selected === t.trace_id ? 'bg-violet-500/15' : ''}`}
                     >
-                      <td className="px-6 py-3.5 text-zinc-400 font-mono text-[11px] whitespace-nowrap">{fmtTime(t.created_at)}</td>
-                      <td className="px-6 py-3.5">
+                      <td className="px-4 sm:px-6 py-3.5 text-zinc-400 font-mono text-[11px] whitespace-nowrap">{fmtTime(t.created_at)}</td>
+                      <td className="px-4 sm:px-6 py-3.5">
                         <Badge variant={t.success ? 'ok' : 'err'}>
                           <StatusDot ok={!!t.success} />
                           {t.status_code ?? (t.success ? 200 : 'err')}
                         </Badge>
                       </td>
-                      <td className="px-6 py-3.5 font-mono text-white font-semibold truncate max-w-[200px]">{t.model_routed || '—'}</td>
-                      <td className="px-6 py-3.5 text-zinc-300 font-medium">{t.intent || '—'}</td>
-                      <td className="px-6 py-3.5 font-mono text-zinc-200">{fmtMs(t.duration_ms)}</td>
-                      <td className="px-6 py-3.5 font-mono text-zinc-300">{fmtTokens(t.total_tokens)}</td>
-                      <td className="px-6 py-3.5 font-mono text-violet-300 font-semibold">{fmtUsd(t.estimated_cost_usd)}</td>
+                      <td className="px-4 sm:px-6 py-3.5 font-mono text-white font-semibold truncate max-w-[160px] sm:max-w-[200px]">{t.model_routed || '—'}</td>
+                      <td className="px-4 sm:px-6 py-3.5 text-zinc-300 font-medium">{t.intent || '—'}</td>
+                      <td className="px-4 sm:px-6 py-3.5 font-mono text-zinc-200">{fmtMs(t.duration_ms)}</td>
+                      <td className="px-4 sm:px-6 py-3.5 font-mono text-zinc-300">{fmtTokens(t.total_tokens)}</td>
+                      <td className="px-4 sm:px-6 py-3.5 font-mono text-violet-300 font-semibold">{fmtUsd(t.estimated_cost_usd)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -258,14 +264,14 @@ export default function RequestsPage() {
       </Card>
 
       {/* Pagination Footer */}
-      <div className="flex justify-between items-center text-xs text-zinc-400 px-1">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center text-xs text-zinc-400 px-1 gap-3">
         <span>{data ? `Showing ${Math.min(offset + 1, data.total)}–${Math.min(offset + 40, data.total)} of ${data.total} requests` : ''}</span>
-        <div className="flex gap-2">
-          <Button size="sm" variant="default" disabled={offset <= 0} onClick={() => setOffset(Math.max(0, offset - 40))}>
+        <div className="flex gap-2 w-full sm:w-auto">
+          <Button size="sm" variant="default" disabled={offset <= 0} onClick={() => setOffset(Math.max(0, offset - 40))} className="flex-1 sm:flex-none">
             <ChevronLeft className="w-4 h-4" />
             <span>Prev</span>
           </Button>
-          <Button size="sm" variant="default" disabled={!data || offset + 40 >= data.total} onClick={() => setOffset(offset + 40)}>
+          <Button size="sm" variant="default" disabled={!data || offset + 40 >= data.total} onClick={() => setOffset(offset + 40)} className="flex-1 sm:flex-none">
             <span>Next</span>
             <ChevronRight className="w-4 h-4" />
           </Button>

@@ -22,10 +22,21 @@ def calculate_composite_reward(
 ) -> float:
     """
     Calculate normalized scalar reward R in [-1.0, +1.0].
+
+    Failure granularity (so the bandit can distinguish transient rate-limits
+    from hard upstream failures):
+      - 429 (rate-limit)        -> -0.5  (transient; provider may be fine next request)
+      - 503/504 (gateway)       -> -0.8  (upstream temporarily unavailable)
+      - 500/502 (server error)  -> -0.9  (provider-side fault)
+      - other 4xx               -> -0.7  (client-side; usually not the model's fault)
     """
     if not success or status_code >= 400:
-        if status_code in (429, 503, 504, 502, 500):
-            return -1.0
+        if status_code == 429:
+            return -0.5
+        if status_code in (503, 504):
+            return -0.8
+        if status_code in (500, 502):
+            return -0.9
         return -0.7
 
     if empty_reply:
@@ -57,3 +68,27 @@ def calculate_composite_reward(
         reward -= 0.4
 
     return max(-1.0, min(1.0, round(reward, 3)))
+
+
+def _demo() -> None:
+    """Self-check: reward invariants hold across the failure taxonomy."""
+    assert calculate_composite_reward(success=False, status_code=429) == -0.5
+    assert calculate_composite_reward(success=False, status_code=503) == -0.8
+    assert calculate_composite_reward(success=False, status_code=504) == -0.8
+    assert calculate_composite_reward(success=False, status_code=500) == -0.9
+    assert calculate_composite_reward(success=False, status_code=400) == -0.7
+    assert calculate_composite_reward(success=True, status_code=200, empty_reply=True) == -0.8
+    r_fast = calculate_composite_reward(
+        success=True, status_code=200, ttfb_seconds=0.2, target_ttfb_seconds=0.5, tool_ok=True
+    )
+    assert 0.8 < r_fast <= 1.0, r_fast
+    r_retry = calculate_composite_reward(success=True, status_code=200, is_immediate_retry=True)
+    assert r_retry < 0.5, r_retry
+    assert calculate_composite_reward(success=False, status_code=429) > calculate_composite_reward(
+        success=False, status_code=500
+    ), "429 must be less punitive than 500 so the bandit can learn provider rate-limit patterns"
+    print("rl_rewards OK")
+
+
+if __name__ == "__main__":
+    _demo()

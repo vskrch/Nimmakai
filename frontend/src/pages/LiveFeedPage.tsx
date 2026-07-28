@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Card, CardBody, CardHeader, Badge, Button, StatusDot, StatBox } from '../components/ui'
+import { Card, CardBody, CardHeader, Badge, Button, StatusDot, StatBox, Skeleton, ErrorState, EmptyState } from '../components/ui'
 import { useAnalyticsSSE, useAnalyticsSummary } from '../hooks/useAnalytics'
 import { fmtMs, fmtTokens, fmtUsd, fmtTime, fmtPct } from '../lib/format'
 import { api, okBody, errMsg } from '../lib/api'
@@ -109,12 +109,16 @@ export default function LiveFeedPage() {
       )}
 
       {/* Summary Banner */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <StatBox label="Live RPM" value={(summary?.requests_per_minute ?? 0).toFixed(1)} icon={Zap} />
-        <StatBox label="Error Rate" value={fmtPct(summary?.error_rate)} color="text-rose-400" icon={AlertTriangle} />
-        <StatBox label="Avg TTFT" value={fmtMs(summary?.avg_ttft_ms)} icon={Clock} />
-        <StatBox label="Active Models" value={summary?.unique_models ?? 0} icon={Cpu} />
-      </div>
+      {!summary ? (
+        <Skeleton cards={4} />
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <StatBox label="Live RPM" value={(summary?.requests_per_minute ?? 0).toFixed(1)} icon={Zap} />
+          <StatBox label="Error Rate" value={fmtPct(summary?.error_rate)} color="text-rose-400" icon={AlertTriangle} />
+          <StatBox label="Avg TTFT" value={fmtMs(summary?.avg_ttft_ms)} icon={Clock} />
+          <StatBox label="Active Models" value={summary?.unique_models ?? 0} icon={Cpu} />
+        </div>
+      )}
 
       {/* Live Event Stream */}
       <Card>
@@ -128,60 +132,60 @@ export default function LiveFeedPage() {
           </Badge>
         </CardHeader>
         <CardBody className="p-0 max-h-[65vh] overflow-y-auto custom-scrollbar">
-          {!events.length && (
-            <div className="p-16 text-center text-zinc-500 text-xs flex flex-col items-center gap-2">
-              <Zap className="w-8 h-8 text-zinc-600 stroke-1" />
-              <span>Waiting for live requests... Send a chat completion request to stream live telemetry events.</span>
+          {!events.length ? (
+            <EmptyState title="Waiting for live requests" icon={Zap}>
+              Send a chat completion request to stream live telemetry events.
               {logEnabled && (
                 <div className="mt-2 text-[11px] text-zinc-400 font-mono">
                   File logging enabled — storing rotating log files (50 MB/file) under DB storage directory.
                 </div>
               )}
-            </div>
-          )}
-          {events.map((e, i) => {
-            const isReq = e.type === 'request'
-            const ok = e.success !== false && !(e.status_code && e.status_code >= 400)
-            const model = (e.model_routed || e.model_requested || '—')
-            const ts = e.created_at || e.ts
+            </EmptyState>
+          ) : (
+            events.map((e, i) => {
+              const isReq = e.type === 'request'
+              const ok = e.success !== false && !(e.status_code && e.status_code >= 400)
+              const model = (e.model_routed || e.model_requested || '—')
+              const ts = e.created_at || e.ts
 
-            return (
-              <div
-                key={(e.trace_id || e.id || '') + String(i)}
-                className={`p-4 border-b border-white/[0.06] hover:bg-white/[0.02] transition-colors text-xs space-y-2 animate-[fadeIn_0.2s_ease-out] ${
-                  !ok ? 'bg-rose-500/5' : ''
-                }`}
-              >
-                <div className="flex items-center gap-3 flex-wrap">
-                  <span className="text-zinc-500 font-mono text-[11px] shrink-0">
-                    {fmtTime(typeof ts === 'number' ? ts : undefined)}
-                  </span>
-                  <StatusDot ok={ok} />
-                  {isReq && <Badge variant="accent">req</Badge>}
-                  <span className="text-zinc-200 font-semibold">{e.intent || e.path || '—'}</span>
-                  <span className="text-zinc-500">→</span>
-                  <span className="font-mono text-violet-300 font-semibold">
-                    {typeof model === 'string' ? model.split('/').pop() : '—'}
-                  </span>
-                  {(e.fallback_index ?? 0) > 0 && (
-                    <Badge variant="warn">fallback[{e.fallback_index}]</Badge>
-                  )}
-                  {e.status_code != null && (
-                    <Badge variant={ok ? 'ok' : 'err'}>
-                      {e.status_code}
-                    </Badge>
-                  )}
+              return (
+                <div
+                  key={(e.trace_id || e.id || '') + String(i)}
+                  className={`p-4 border-b border-white/[0.06] hover:bg-white/[0.02] transition-colors text-xs space-y-2 animate-[fadeIn_0.2s_ease-out] ${
+                    !ok ? 'bg-rose-500/5' : ''
+                  }`}
+                >
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span className="text-zinc-500 font-mono text-[11px] shrink-0">
+                      {fmtTime(typeof ts === 'number' ? ts : undefined)}
+                    </span>
+                    <StatusDot ok={ok} />
+                    {isReq && <Badge variant="accent">req</Badge>}
+                    <span className="text-zinc-200 font-semibold">{e.intent || e.path || '—'}</span>
+                    <span className="text-zinc-500">→</span>
+                    <span className="font-mono text-violet-300 font-semibold">
+                      {typeof model === 'string' ? model.split('/').pop() : '—'}
+                    </span>
+                    {(e.fallback_index ?? 0) > 0 && (
+                      <Badge variant="warn">fallback[{e.fallback_index}]</Badge>
+                    )}
+                    {e.status_code != null && (
+                      <Badge variant={ok ? 'ok' : 'err'}>
+                        {e.status_code}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="ml-[4.5rem] text-[11px] text-zinc-400 flex gap-4 flex-wrap font-mono">
+                    <span>Latency: {fmtMs(e.duration_ms)}</span>
+                    {e.total_tokens != null && <span>Tokens: {fmtTokens(e.total_tokens)}</span>}
+                    {e.estimated_cost_usd != null && <span>Cost: {fmtUsd(e.estimated_cost_usd)}</span>}
+                    {e.error_message && <span className="text-rose-400 font-sans">{e.error_message}</span>}
+                    {e.error && !e.error_message && <span className="text-rose-400 font-sans">{e.error}</span>}
+                  </div>
                 </div>
-                <div className="ml-[4.5rem] text-[11px] text-zinc-400 flex gap-4 flex-wrap font-mono">
-                  <span>Latency: {fmtMs(e.duration_ms)}</span>
-                  {e.total_tokens != null && <span>Tokens: {fmtTokens(e.total_tokens)}</span>}
-                  {e.estimated_cost_usd != null && <span>Cost: {fmtUsd(e.estimated_cost_usd)}</span>}
-                  {e.error_message && <span className="text-rose-400 font-sans">{e.error_message}</span>}
-                  {e.error && !e.error_message && <span className="text-rose-400 font-sans">{e.error}</span>}
-                </div>
-              </div>
-            )
-          })}
+              )
+            })
+          )}
         </CardBody>
       </Card>
     </div>

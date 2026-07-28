@@ -1,10 +1,12 @@
-import React, { useState, useCallback, useEffect } from 'react'
+import React, { useState, useCallback, useEffect, Suspense } from 'react'
 import Sidebar from './components/Sidebar'
 import AuthModal, { type AuthSession } from './components/AuthModal'
-import { Toast, Button } from './components/ui'
+import ErrorBoundary from './components/ErrorBoundary'
+import { Toast, Button, OfflineBanner } from './components/ui'
 import { useAuth, useSSE } from './hooks/useApi'
+import { useToastQueue } from './hooks/useToast'
 import { api, ap } from './lib/api'
-import { RefreshCw, Radio, ShieldAlert } from 'lucide-react'
+import { RefreshCw, Radio, ShieldAlert, Menu } from 'lucide-react'
 
 import DashboardPage from './pages/DashboardPage'
 import AnalyticsOverviewPage from './pages/AnalyticsOverviewPage'
@@ -49,18 +51,21 @@ export default function App() {
     ready, authed, showAuth, session, applySession, logout, isAdmin, status, email,
   } = useAuth()
   const [page, setPage] = useState('dashboard')
-  const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const sse = useSSE()
+  const { toasts, show: showToast, dismiss } = useToastQueue()
 
   // ponytail: /chat path → full-screen chat (no sidebar). Dashboard nav sets page='chat'.
   useEffect(() => {
     if (window.location.pathname === '/chat') setPage('chat')
   }, [])
 
-  function showToast(msg: string, type: 'ok' | 'err' = 'ok') {
-    setToast({ msg, type })
-  }
+  // Close the mobile drawer whenever the page changes
+  const handlePageChange = useCallback((p: string) => {
+    setPage(p)
+    setMobileNavOpen(false)
+  }, [])
 
   async function handleRefreshAll() {
     if (!isAdmin) return
@@ -74,8 +79,6 @@ export default function App() {
       showToast('Catalog refresh finished with warnings', 'err')
     }
   }
-
-  const handlePageChange = useCallback((p: string) => setPage(p), [])
 
   const refreshSession = useCallback(async () => {
     const me = await api<AuthSession>('/auth/me')
@@ -94,13 +97,37 @@ export default function App() {
     )
   }
 
+  const pageContent = (
+    <Suspense fallback={<div className="p-12 text-center text-zinc-500 text-xs">Loading view…</div>}>
+      {page === 'dashboard' && <DashboardPage onRefresh={handleRefreshAll} />}
+      {page === 'analytics' && <AnalyticsOverviewPage />}
+      {page === 'requests' && <RequestsPage />}
+      {page === 'live' && <LiveFeedPage />}
+      {page === 'intents' && <IntentsPage />}
+      {page === 'cost' && <CostPage />}
+      {page === 'account' && <AccountPage session={session} onRefresh={refreshSession} />}
+      {page === 'users' && isAdmin && <UsersPage />}
+      {page === 'providers' && isAdmin && <ProvidersPage />}
+      {page === 'health' && isAdmin && <HealthPage />}
+      {page === 'models' && isAdmin && <ModelsPage />}
+      {page === 'routing' && isAdmin && <RoutingPage />}
+      {page === 'ladders' && isAdmin && <ModelLaddersPage />}
+      {page === 'pools' && isAdmin && <ModelPoolGatingPage />}
+      {page === 'rl' && isAdmin && <RLPage />}
+      {page === 'playground' && <PlaygroundPage />}
+    </Suspense>
+  )
+
   // Full-screen chat mode — no sidebar, no header. Claude-style standalone app.
   if (page === 'chat') {
     return (
       <>
+        <OfflineBanner />
         <ChatPage />
         {showAuth && !authed && <AuthModal onSession={applySession} />}
-        {toast && <Toast message={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />}
+        {toasts.map(t => (
+          <Toast key={t.id} message={t.message} type={t.type} onDismiss={() => dismiss(t.id)} duration={t.duration} />
+        ))}
       </>
     )
   }
@@ -114,28 +141,44 @@ export default function App() {
         isAdmin={isAdmin}
         email={email}
         onLogout={logout}
+        mobileOpen={mobileNavOpen}
+        onMobileClose={() => setMobileNavOpen(false)}
       />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 bg-zinc-950 relative overflow-hidden">
         {/* Top Navigation Header */}
-        <header className="h-16 border-b border-white/[0.08] flex items-center justify-between px-8 bg-zinc-950/80 backdrop-blur-xl z-10 shrink-0">
-          <div>
-            <h2 className="text-base font-bold text-white tracking-tight">{pageMeta.title}</h2>
-            <p className="text-[11px] text-zinc-400 font-medium">{pageMeta.subtitle}</p>
+        <header className="h-16 border-b border-white/[0.08] flex items-center justify-between px-4 sm:px-6 lg:px-8 bg-zinc-950/80 backdrop-blur-xl z-20 shrink-0 gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            {/* Mobile nav toggle */}
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(true)}
+              className="lg:hidden p-2 -ml-1 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.06] transition-colors shrink-0"
+              aria-label="Open navigation menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <div className="min-w-0">
+              <h2 className="text-sm sm:text-base font-bold text-white tracking-tight truncate">{pageMeta.title}</h2>
+              <p className="text-[11px] text-zinc-400 font-medium truncate hidden sm:block">{pageMeta.subtitle}</p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 sm:gap-4 shrink-0">
             {/* Live Connection Status Badge */}
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-zinc-900 border border-white/[0.08] text-xs">
-              <span className={`w-2 h-2 rounded-full ${sse ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse' : 'bg-zinc-500'}`} />
-              <span className="text-zinc-300 font-mono text-[11px]">
+            <div className="flex items-center gap-2 px-2.5 sm:px-3 py-1.5 rounded-full bg-zinc-900 border border-white/[0.08] text-xs">
+              <span className={`w-2 h-2 rounded-full shrink-0 ${sse ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse' : 'bg-zinc-500'}`} />
+              <span className="text-zinc-300 font-mono text-[11px] hidden sm:inline">
                 {sse ? (
                   <span className="flex items-center gap-1">
                     <Radio className="w-3 h-3 text-emerald-400" />
                     <strong className="text-white">{sse.live_models}</strong> models · <strong className="text-white">{sse.active_providers}</strong> providers
                   </span>
                 ) : authed ? 'Connecting SSE…' : 'Disconnected'}
+              </span>
+              <span className="text-zinc-300 font-mono text-[11px] sm:hidden">
+                {sse ? <strong className="text-white">{sse.live_models}</strong> : '—'}
               </span>
             </div>
 
@@ -147,18 +190,30 @@ export default function App() {
                 onClick={handleRefreshAll}
                 disabled={refreshing}
                 title="Trigger catalog & ladder re-ranking"
+                className="hidden sm:inline-flex"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin text-violet-400' : ''}`} />
                 <span>Refresh Catalog</span>
               </Button>
+            )}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={handleRefreshAll}
+                disabled={refreshing}
+                className="sm:hidden p-2 rounded-lg bg-zinc-800/80 border border-white/[0.1] text-zinc-200 active:scale-[0.98] disabled:opacity-50"
+                aria-label="Refresh catalog"
+              >
+                <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin text-violet-400' : ''}`} />
+              </button>
             )}
           </div>
         </header>
 
         {/* Warning Banner for Unapproved / Unverified Accounts */}
         {pending && (
-          <div className="mx-8 mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200 flex items-center gap-3">
-            <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
+          <div className="mx-4 sm:mx-6 lg:mx-8 mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-200 flex items-start gap-3">
+            <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
             <div>
               <strong className="font-semibold text-amber-100">Account Action Needed: </strong>
               {status === 'unverified'
@@ -169,34 +224,21 @@ export default function App() {
         )}
 
         {/* Dynamic Page Container */}
-        <main className="flex-1 overflow-y-auto p-8 custom-scrollbar">
-          {page === 'dashboard' && <DashboardPage onRefresh={handleRefreshAll} />}
-          {page === 'analytics' && <AnalyticsOverviewPage />}
-          {page === 'requests' && <RequestsPage />}
-          {page === 'live' && <LiveFeedPage />}
-          {page === 'intents' && <IntentsPage />}
-          {page === 'cost' && <CostPage />}
-          {page === 'account' && <AccountPage session={session} onRefresh={refreshSession} />}
-          {page === 'users' && isAdmin && <UsersPage />}
-          {page === 'providers' && isAdmin && <ProvidersPage />}
-          {page === 'health' && isAdmin && <HealthPage />}
-          {page === 'models' && isAdmin && <ModelsPage />}
-          {page === 'routing' && isAdmin && <RoutingPage />}
-          {page === 'ladders' && isAdmin && <ModelLaddersPage />}
-          {page === 'pools' && isAdmin && <ModelPoolGatingPage />}
-          {page === 'rl' && isAdmin && <RLPage />}
-          {page === 'playground' && <PlaygroundPage />}
-        </main>
+        <ErrorBoundary onReset={() => window.location.reload()}>
+          <main className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 custom-scrollbar">
+            {pageContent}
+          </main>
+        </ErrorBoundary>
       </div>
 
-      {/* Modals & Toasts */}
-      {showAuth && !authed && (
-        <AuthModal onSession={applySession} />
-      )}
+      <OfflineBanner />
 
-      {toast && (
-        <Toast message={toast.msg} type={toast.type} onDismiss={() => setToast(null)} />
-      )}
+      {/* Modals & Toasts */}
+      {showAuth && !authed && <AuthModal onSession={applySession} />}
+
+      {toasts.map(t => (
+        <Toast key={t.id} message={t.message} type={t.type} onDismiss={() => dismiss(t.id)} duration={t.duration} />
+      ))}
     </div>
   )
 }

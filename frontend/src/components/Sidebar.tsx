@@ -29,6 +29,9 @@ interface SidebarProps {
   isAdmin?: boolean
   email?: string | null
   onLogout?: () => void
+  // Mobile drawer control
+  mobileOpen?: boolean
+  onMobileClose?: () => void
 }
 
 interface NavItem {
@@ -63,7 +66,7 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'rl', label: 'Adaptive RL', icon: Zap },
 ]
 
-export default function Sidebar({ page, onNavigate, isAdmin, email, onLogout }: SidebarProps) {
+export default function Sidebar({ page, onNavigate, isAdmin, email, onLogout, mobileOpen, onMobileClose }: SidebarProps) {
   const renderNavGroup = (title: string, items: NavItem[]) => (
     <div className="mb-6">
       <div className="px-3 mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
@@ -76,7 +79,11 @@ export default function Sidebar({ page, onNavigate, isAdmin, email, onLogout }: 
           return (
             <button
               key={item.id}
-              onClick={() => onNavigate(item.id)}
+              onClick={() => {
+                onNavigate(item.id)
+                onMobileClose?.()
+              }}
+              aria-current={isActive ? 'page' : undefined}
               className={clsx(
                 'w-full flex items-center gap-3 px-3 py-2 rounded-xl text-[13px] font-medium transition-all duration-150 text-left group',
                 isActive
@@ -94,7 +101,26 @@ export default function Sidebar({ page, onNavigate, isAdmin, email, onLogout }: 
   )
 
   return (
-    <aside className="w-64 bg-zinc-950/90 border-r border-white/[0.08] flex flex-col z-20 shrink-0 select-none">
+    <>
+      {/* Mobile backdrop */}
+      {mobileOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 lg:hidden"
+          onClick={onMobileClose}
+          aria-hidden="true"
+        />
+      )}
+      <aside
+        className={clsx(
+          'bg-zinc-950/90 border-r border-white/[0.08] flex flex-col z-40 select-none',
+          // Desktop: fixed-width column
+          'w-64 shrink-0',
+          // Mobile: slide-in drawer
+          'fixed inset-y-0 left-0 transition-transform duration-300 ease-out',
+          mobileOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0 lg:static lg:translate-x-0'
+        )}
+        aria-label="Primary navigation"
+      >
       {/* Brand Header */}
       <div className="px-6 py-5 flex items-center gap-3 border-b border-white/[0.06]">
         <div className="w-9 h-9 bg-gradient-to-br from-violet-600 to-fuchsia-600 rounded-xl flex items-center justify-center shadow-[0_0_20px_rgba(139,92,246,0.5)] border border-white/20">
@@ -142,12 +168,14 @@ export default function Sidebar({ page, onNavigate, isAdmin, email, onLogout }: 
               onClick={onLogout}
               className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors shrink-0"
               title="Sign Out"
+              aria-label="Sign Out"
             >
               <LogOut className="w-4 h-4" />
             </button>
           )}
         </div>
       </div>
-    </aside>
+      </aside>
+    </>
   )
 }
