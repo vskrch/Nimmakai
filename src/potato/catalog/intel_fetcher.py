@@ -26,6 +26,8 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
+PARAM_RE = re.compile(r"(?:^|[^a-z0-9])(\d{1,4})b(?:[^a-z0-9]|$)", re.I)
+
 
 @dataclass
 class IntelBundle:
