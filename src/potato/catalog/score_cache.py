@@ -305,6 +305,16 @@ def _compute_intent_affinity(
             elif param_b > 100:
                 base += float((deltas.get("frontier_param") or {}).get(intent, 0.0))
 
+        # Primary family preference from YAML policy
+        fam_policy = yaml_cfg.get("families") or {}
+        chat_prim = str(fam_policy.get("chat_primary") or "").lower()
+        coding_prim = str(fam_policy.get("coding_primary") or "").lower()
+        mid_lower = model_id.lower()
+        if intent == "chat_fast" and chat_prim and chat_prim in mid_lower:
+            base += 0.25
+        if intent == "coding_agentic" and coding_prim and coding_prim in mid_lower:
+            base += 0.25
+
         # Quality tier boost for hard intents
         if (intent in ("coding_agentic", "reasoning") and quality >= 90) or (
             intent == "chat_fast" and quality < 70
