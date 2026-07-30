@@ -25,6 +25,8 @@ ENV/
 *.pem
 nimmakai-droplet-userdata.sh
 *-droplet-userdata.sh
+POTATO-READY.txt
+potato-droplet-userdata.sh
 
 # IDE / OS
 .idea/

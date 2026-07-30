@@ -32,7 +32,7 @@ from potato.routing.auto_router import (
     parse_auto_router_options,
     strip_router_client_fields,
 )
-from potato.safety import AccountGuard
+from potato.safety import AccountGuard, RateLimitedError
 from potato.upstream import UpstreamClient
 
 logger = logging.getLogger(__name__)
@@ -364,7 +364,10 @@ async def _prepare_routed(
         )
     )
 
-    ctx = await guard.before_request(headers=request.headers, proxy_token=proxy_token, body=body)
+    try:
+        ctx = await guard.before_request(headers=request.headers, proxy_token=proxy_token, body=body)
+    except RateLimitedError as exc:
+        return JSONResponse(content=exc.response, status_code=429)
     # Auto-router session model pin (OpenRouter sticky model selection)
     preferred_model = getattr(ctx, "preferred_model", None)
 
@@ -687,6 +690,9 @@ async def _chat_like(
         auth = getattr(request.state, "auth", None)
         if auth is not None and getattr(auth, "user_id", None):
             entry.user_id = auth.user_id
+    except RateLimitedError as exc:
+        _finish_log(entry, status=429, t0=t0, error="user_rate_limited")
+        return JSONResponse(content=exc.response, status_code=429)
     except Exception as exc:
         # Auth HTTPException propagates via FastAPI — re-raise
         from fastapi import HTTPException
@@ -1192,6 +1198,8 @@ async def embeddings(request: Request) -> JSONResponse:
         body, decision, ctx, proxy_token, timing = await _prepare_routed(
             request, body, path="/embeddings"
         )
+    except RateLimitedError as exc:
+        return JSONResponse(content=exc.response, status_code=429)
     except RuntimeError as exc:
         if "potato_pool_exhausted" in str(exc):
             return JSONResponse(

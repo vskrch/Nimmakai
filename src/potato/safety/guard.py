@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import logging
+import time
+from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -12,6 +15,11 @@ from potato.safety.sticky import StickySessionStore
 if TYPE_CHECKING:
     from potato.balancer import KeyPool
     from potato.config import Settings
+
+logger = logging.getLogger(__name__)
+
+_RPM_WINDOW = 60.0
+_RPD_WINDOW = 86400.0
 
 
 @dataclass
@@ -42,6 +50,12 @@ class AccountGuard:
         self.sticky = StickySessionStore(
             ttl_seconds=settings.sticky_session_ttl_seconds,
         )
+        # Per-user rate limiters (in-memory, single-process).
+        # Only populated when the corresponding limit is > 0.
+        self._user_rpm: dict[str, deque[float]] = defaultdict(deque)
+        self._user_rpd: dict[str, deque[float]] = defaultdict(deque)
+        self.user_rpm_limit: int = int(getattr(settings, "user_rpm_limit", 0) or 0)
+        self.user_rpd_limit: int = int(getattr(settings, "user_rpd_limit", 0) or 0)
 
     def resize_gate(self, capacity: int) -> None:
         """Recompute global concurrency from sum of active provider pools."""
@@ -50,6 +64,49 @@ class AccountGuard:
         if capacity > 0:
             self.gate.max_in_flight = capacity
 
+    def _check_user_rate_limit(self, proxy_token: str) -> dict | None:
+        """Check per-user RPM/RPD limits. Returns error body dict if exceeded, None if OK.
+
+        No-op when both limits are 0 (backward-compatible unlimited default).
+        """
+        if not proxy_token:
+            return None
+        if self.user_rpm_limit <= 0 and self.user_rpd_limit <= 0:
+            return None
+
+        now = time.time()
+        # RPM check
+        if self.user_rpm_limit > 0:
+            q = self._user_rpm[proxy_token]
+            while q and now - q[0] > _RPM_WINDOW:
+                q.popleft()
+            if len(q) >= self.user_rpm_limit:
+                from potato.compat import openai_error
+
+                logger.info("user rpm limit hit: token=%s rpm=%d", proxy_token[:8], len(q))
+                return openai_error(
+                    f"Rate limit exceeded ({self.user_rpm_limit} req/min). Retry later.",
+                    code="user_rate_limited",
+                    type_="rate_limit_error",
+                )
+            q.append(now)
+        # RPD check
+        if self.user_rpd_limit > 0:
+            q = self._user_rpd[proxy_token]
+            while q and now - q[0] > _RPD_WINDOW:
+                q.popleft()
+            if len(q) >= self.user_rpd_limit:
+                from potato.compat import openai_error
+
+                logger.info("user rpd limit hit: token=%s rpd=%d", proxy_token[:8], len(q))
+                return openai_error(
+                    f"Daily rate limit exceeded ({self.user_rpd_limit} req/day). Retry tomorrow.",
+                    code="user_daily_limited",
+                    type_="rate_limit_error",
+                )
+            q.append(now)
+        return None
+
     async def before_request(
         self,
         *,
@@ -57,6 +114,12 @@ class AccountGuard:
         proxy_token: str | None = None,
         body: dict | None = None,
     ) -> GuardContext:
+        # Per-user rate limit check (no-op when limits are 0)
+        if proxy_token:
+            rate_err = self._check_user_rate_limit(proxy_token)
+            if rate_err is not None:
+                raise RateLimitedError(rate_err)
+
         session_id = None
         preferred = None
         preferred_model = None
@@ -109,3 +172,10 @@ class AccountGuard:
                 "code": "potato_pool_exhausted",
             }
         }
+
+
+class RateLimitedError(Exception):
+    """Raised by before_request when per-user rate limit is hit."""
+
+    def __init__(self, response: Any) -> None:
+        self.response = response

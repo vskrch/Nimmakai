@@ -280,19 +280,46 @@ fi
   echo
   echo "Dashboard:  http://\${IP}/dashboard"
   echo "API base:   http://\${IP}/v1"
+  echo "OpenAI:     http://\${IP}/v1"
+  echo "Anthropic:  http://\${IP}/v1"
   echo "Readiness:  http://\${IP}/ready"
+  echo "Health:     http://\${IP}/health"
+  echo
+  PROXY_KEY=\$(grep -E '^PROXY_API_KEYS=' "\$INSTALL_DIR/.env" | head -1 | cut -d= -f2- || true)
+  ADMIN_PASS=\$(grep -E '^ADMIN_PASSWORD=' "\$INSTALL_DIR/.env" | head -1 | cut -d= -f2- || true)
+  ADMIN_EMAIL=\$(grep -E '^ADMIN_EMAIL=' "\$INSTALL_DIR/.env" | head -1 | cut -d= -f2- || true)
+  ADMIN_EMAIL=\${ADMIN_EMAIL:-admin@localhost}
+  echo "Dashboard login (Sign In tab):"
+  echo "  Email:     \${ADMIN_EMAIL}"
+  if [[ -n "\$ADMIN_PASS" ]]; then
+    echo "  Password:  \${ADMIN_PASS}"
+  else
+    echo "  Password:  (see ADMIN_PASSWORD in \$INSTALL_DIR/.env)"
+  fi
+  echo
+  echo "API Key Direct (Bearer / API Key tab):"
+  echo "  API Key:   \${PROXY_KEY}"
   echo
   echo "Cursor / OpenAI-compatible clients:"
   echo "  Base URL:  http://\${IP}/v1"
-  echo "  API Key:   use the PROXY_API_KEYS value saved during generation"
+  echo "  API Key:   \${PROXY_KEY}"
   echo "  Model:     potato/auto"
+  echo
+  echo "Claude Code CLI:"
+  echo "  export ANTHROPIC_BASE_URL=\"http://\${IP}/v1\""
+  echo "  export ANTHROPIC_API_KEY=\"\${PROXY_KEY}\""
+  echo "  claude"
   echo
   echo "Logs:        /var/log/potato-bootstrap.log"
   echo "App dir:     \$INSTALL_DIR"
+  echo "Env file:    \$INSTALL_DIR/.env"
+  echo "This file:   \$READY_FILE"
   echo "Update later:"
   echo "  cd \$INSTALL_DIR && git pull && docker compose -f docker-compose.do.yml up -d --build"
 } | tee "\$READY_FILE"
-chmod 600 "\$READY_FILE"
+# Also keep a copy under the app dir for operators who are not root
+cp -f "\$READY_FILE" "\$INSTALL_DIR/POTATO-READY.txt" 2>/dev/null || true
+chmod 600 "\$READY_FILE" "\$INSTALL_DIR/POTATO-READY.txt" 2>/dev/null || true
 
 echo "==> bootstrap done"
 EOF

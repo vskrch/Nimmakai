@@ -637,9 +637,16 @@ class FallbackExecutor:
             )
         return last
 
-    def _make_deadline(self) -> float:
-        """Shared request deadline — both execute_json and execute_stream use this."""
+    def _make_deadline(self, intent: str | None = None) -> float:
+        """Shared request deadline — both execute_json and execute_stream use this.
+
+        Per-intent overrides via ``intent_deadline_seconds`` config let
+        long_horizon / reasoning run far longer than chat_fast.
+        """
         base = float(getattr(self.settings, "request_deadline_seconds", 120.0) or 120.0)
+        if intent:
+            overrides = getattr(self.settings, "intent_deadline_seconds", {}) or {}
+            base = float(overrides.get(intent, base))
         return time.monotonic() + base
 
     def _max_n_for_intent(self, intent: str) -> int:
@@ -1066,7 +1073,7 @@ class FallbackExecutor:
 
         from potato.compat import openai_error
 
-        deadline = self._make_deadline()
+        deadline = self._make_deadline(decision.intent.value)
 
         for idx, model in enumerate(chain):
             remaining = deadline - time.monotonic()
@@ -1728,7 +1735,7 @@ class FallbackExecutor:
         last_pid: str | None = None
         saw_ttft_stall = False
         saw_deadline = False
-        deadline = self._make_deadline()
+        deadline = self._make_deadline(decision.intent.value)
 
         def _error_bytes(
             message: str,
@@ -1920,7 +1927,7 @@ class FallbackExecutor:
                 if h is not None and h.ewma_latency > 0:
                     base_ttft = h.ewma_latency * 2.0 + 3.0
                     ttft = min(ttft, max(3.0, base_ttft))
-                idle = float(getattr(self.settings, "stream_idle_timeout_seconds", 180.0) or 180.0)
+                idle = float(getattr(self.settings, "stream_idle_timeout_seconds", 300.0) or 300.0)
                 t_stream0 = time.monotonic()
                 try:
                     first_chunk = await asyncio.wait_for(anext(byte_iter), timeout=ttft)
@@ -2467,7 +2474,7 @@ class FallbackExecutor:
                             getattr(self.settings, "stream_ttft_timeout_seconds", 12.0) or 12.0
                         )
                         idle2 = float(
-                            getattr(self.settings, "stream_idle_timeout_seconds", 180.0) or 180.0
+                            getattr(self.settings, "stream_idle_timeout_seconds", 300.0) or 300.0
                         )
                         t_stream2 = time.monotonic()
                         try:

@@ -43,12 +43,12 @@ class Settings(BaseSettings):
     # INVARIANT: upstream_timeout >= per_attempt_budget_seconds
     # INVARIANT: request_deadline_seconds >= upstream_timeout
     # Violating these guarantees a 504 cascade
-    upstream_timeout: float = 120.0
+    upstream_timeout: float = 300.0
     default_model: str | None = None
     # Streaming: short TTFT = fail-fast to next model if not responding;
     # long idle once first token arrives (Cursor/agent safe).
     stream_ttft_timeout_seconds: float = 15.0
-    stream_idle_timeout_seconds: float = 60.0
+    stream_idle_timeout_seconds: float = 300.0
     request_log_size: int = 20000  # in-memory ring for Live Feed /admin/logs
     request_file_logging: bool = True
     request_log_max_bytes: int = 50 * 1024 * 1024  # 50 MiB per rotated file
@@ -92,6 +92,16 @@ class Settings(BaseSettings):
     # re-evaluated per-model in the fallback chain so a reasoning head failing
     # over to a non-reasoning model strips the field instead of 400ing.
     default_reasoning_effort: str = "medium"
+    # Per-intent request deadline overrides (seconds). Absent intent falls back
+    # to request_deadline_seconds. Empty dict = no overrides (backward-compatible).
+    # Example for long-horizon support:
+    #   intent_deadline_seconds: dict = {"long_horizon": 600.0, "reasoning": 480.0}
+    intent_deadline_seconds: dict = Field(default_factory=dict)
+    # Per-user rate limits for authenticated proxy-key clients (RPM, RPD).
+    # 0 = unlimited (backward-compatible default). Applied in the guard before
+    # the upstream call so a single user cannot monopolize the shared pool.
+    user_rpm_limit: int = 0
+    user_rpd_limit: int = 0
     # Self-heal catalog/providers every N seconds (0 = only with catalog refresh)
     self_heal_seconds: int = 120
     catalog_refresh_seconds: int = 300
@@ -207,7 +217,7 @@ class Settings(BaseSettings):
     sticky_session_ttl_seconds: float = 1800.0
     sticky_boost: float = 3.0
     allow_insecure_auth: bool = False  # must be true to accept any Bearer when PROXY empty
-    request_deadline_seconds: float = 120.0  # total request deadline (must >= upstream_timeout)
+    request_deadline_seconds: float = 300.0  # total request deadline (must >= upstream_timeout)
     probe_every_n_refreshes: int = 6
     # Backoff only for 429 / transport / 5xx — not for model-not-found ladder steps
     retry_backoff_base_seconds: float = 0.2

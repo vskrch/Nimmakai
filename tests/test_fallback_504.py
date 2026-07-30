@@ -64,10 +64,10 @@ def test_deadline_config():
     from potato.config import Settings
 
     s = Settings()
-    assert s.request_deadline_seconds == 120.0
-    assert s.upstream_timeout == 120.0
+    assert s.request_deadline_seconds == 300.0
+    assert s.upstream_timeout == 300.0
     assert s.stream_ttft_timeout_seconds == 15.0
-    assert s.stream_idle_timeout_seconds == 60.0
+    assert s.stream_idle_timeout_seconds == 300.0
 
 
 def test_intent_budget_config():

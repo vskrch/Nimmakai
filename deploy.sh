@@ -563,7 +563,53 @@ else
     fi
 fi
 
-# 10. Completion Summary Display
+# 10. Completion Summary Display (+ persist for admin later)
+# Plain-text admin reference (no ANSI) — readable later via: cat $READY_FILE
+READY_FILE="${INSTALL_DIR}/POTATO-READY.txt"
+STATUS_LINE="HEALTHY"
+if [[ ${READY} -ne 1 ]]; then
+    STATUS_LINE="DEGRADED (no upstream provider keys — add them in Dashboard → Providers)"
+fi
+
+{
+    echo "Potato is live (deploy finished: $(date -u +%Y-%m-%dT%H:%MZ))"
+    echo "Status:      ${STATUS_LINE}"
+    echo
+    echo "Dashboard:   ${PUBLIC_URL}/dashboard"
+    echo "OpenAI API:  ${PUBLIC_URL}/v1"
+    echo "Anthropic:   ${PUBLIC_URL}/v1"
+    echo "Health:      ${PUBLIC_URL}/health"
+    echo "Ready:       ${PUBLIC_URL}/ready"
+    echo
+    echo "Dashboard login (Sign In tab):"
+    echo "  Email:     ${ADMIN_EMAIL_ADDR}"
+    echo "  Password:  ${ADMIN_PASS}"
+    echo
+    echo "API Key Direct (Bearer / API Key tab):"
+    echo "  API Key:   ${PROXY_KEY}"
+    echo
+    echo "Default model: potato/auto"
+    echo
+    echo "Cursor / OpenAI-compatible:"
+    echo "  Base URL:  ${PUBLIC_URL}/v1"
+    echo "  API Key:   ${PROXY_KEY}"
+    echo "  Model:     potato/auto"
+    echo
+    echo "Claude Code CLI:"
+    echo "  export ANTHROPIC_BASE_URL=\"${PUBLIC_URL}/v1\""
+    echo "  export ANTHROPIC_API_KEY=\"${PROXY_KEY}\""
+    echo "  claude"
+    echo
+    echo "App dir:     ${INSTALL_DIR}"
+    echo "Env file:    ${INSTALL_DIR}/.env"
+    echo "This file:   ${READY_FILE}"
+    echo
+    echo "Update later:"
+    echo "  cd ${INSTALL_DIR} && git pull && docker compose -f docker-compose.do.yml up -d --build"
+} > "${READY_FILE}"
+chmod 600 "${READY_FILE}" 2>/dev/null || true
+
+# Colored console banner (same content, human-friendly)
 if [[ ${READY} -eq 1 ]]; then
     echo -e "\n${GREEN}${BOLD}"
     echo "=============================================================================="
@@ -606,4 +652,6 @@ echo "2. Claude Code CLI:"
 echo "   export ANTHROPIC_BASE_URL=\"${PUBLIC_URL}/v1\""
 echo "   export ANTHROPIC_API_KEY=\"${PROXY_KEY}\""
 echo "   claude"
+echo "=============================================================================="
+echo -e "📄 ${BOLD}Admin reference saved:${NC} ${READY_FILE}  (chmod 600 — cat this later for keys/endpoints)"
 echo "=============================================================================="
