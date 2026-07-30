@@ -782,7 +782,8 @@ async def _chat_like(
                     )
                     route_h["X-Request-Id"] = req_id
                     media = result.headers.get("content-type", "text/event-stream")
-                    # Cursor-compat: map reasoning_content → content, fix model field
+                    # Normalize SSE: canonicalize reasoning field to reasoning_content,
+                    # phase-segregate thinking vs answer, fix model field
                     upstream_iter = normalize_sse_stream(
                         result.byte_iter, routed_model=result.model or None
                     )

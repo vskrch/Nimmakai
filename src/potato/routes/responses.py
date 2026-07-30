@@ -92,8 +92,9 @@ def transform_responses_to_chat(body: dict[str, Any]) -> dict[str, Any]:
       - ``temperature``, ``top_p``, ``stream``, ``stop`` → passthrough
       - ``tools`` (internally-tagged) → ``tools`` (externally-tagged)
       - ``text.format`` (json_schema) → ``response_format``
-      - ``reasoning`` / ``reasoning_effort`` → dropped (no Chat equivalent;
-        upstream reasoning models decide on their own)
+      - ``reasoning.effort`` / ``reasoning_effort`` → ``reasoning_effort``
+        (carried through so reasoning-capable upstreams honor client intent;
+        the Chat path's inject_default_reasoning_effort won't override it)
     """
     out: dict[str, Any] = {}
 
@@ -117,6 +118,15 @@ def transform_responses_to_chat(body: dict[str, Any]) -> dict[str, Any]:
         out["max_tokens"] = body["max_output_tokens"]
     elif "max_tokens" in body:
         out["max_tokens"] = body["max_tokens"]
+
+    # reasoning_effort: carry through to the Chat body so reasoning-capable
+    # upstreams honor client intent. Accept both the top-level OpenAI field
+    # and the nested ``reasoning: {effort: ...}`` Responses shape.
+    reasoning_effort = body.get("reasoning_effort")
+    if reasoning_effort is None and isinstance(body.get("reasoning"), dict):
+        reasoning_effort = body["reasoning"].get("effort")
+    if reasoning_effort is not None:
+        out["reasoning_effort"] = reasoning_effort
 
     # Build messages from instructions + input.
     messages: list[dict[str, Any]] = []

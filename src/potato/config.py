@@ -87,6 +87,11 @@ class Settings(BaseSettings):
     deadline_guard_seconds: float = 3.0
     # Minimum quality ratio (0-1): models below this × top model quality are excluded
     min_quality_ratio: float = 0.6
+    # Default reasoning effort injected for reasoning-capable models when the
+    # client didn't set one. Empty string = no default injection. The value is
+    # re-evaluated per-model in the fallback chain so a reasoning head failing
+    # over to a non-reasoning model strips the field instead of 400ing.
+    default_reasoning_effort: str = "medium"
     # Self-heal catalog/providers every N seconds (0 = only with catalog refresh)
     self_heal_seconds: int = 120
     catalog_refresh_seconds: int = 300

@@ -53,6 +53,29 @@ def _base_url(request: Request, settings) -> str:
     return str(request.base_url).rstrip("/")
 
 
+def _connection_info(request: Request, settings) -> dict[str, Any]:
+    """Public connection details: gateway base URL + endpoint paths the user
+    can call with their API key. Returned by `/auth/me` so the user/keys page
+    renders real URLs (and the cURL example uses them) instead of hardcoding.
+    """
+    base = _base_url(request, settings)
+    return {
+        "base_url": base,
+        "endpoints": {
+            "openai_base": f"{base}/v1",
+            "openai_chat_completions": f"{base}/v1/chat/completions",
+            "openai_completions": f"{base}/v1/completions",
+            "openai_embeddings": f"{base}/v1/embeddings",
+            "openai_models": f"{base}/v1/models",
+            "anthropic_messages": f"{base}/v1/messages",
+            "anthropic_chat": f"{base}/chat",
+            "analytics_traces": f"{base}/analytics/traces",
+            "dashboard": f"{base}/dashboard",
+            "health": f"{base}/health",
+        },
+    }
+
+
 @router.post("/auth/signup")
 async def signup(request: Request) -> JSONResponse:
     store = _store(request)
@@ -354,6 +377,7 @@ async def me(request: Request) -> JSONResponse:
                     "is_admin": True,
                     "via": ctx.via,
                     "keys": [],
+                    "connection": _connection_info(request, settings),
                 }
             )
         return JSONResponse({"authenticated": False})
@@ -384,6 +408,7 @@ async def me(request: Request) -> JSONResponse:
                 }
                 for k in keys
             ],
+            "connection": _connection_info(request, settings),
         }
     )
 

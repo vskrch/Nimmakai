@@ -359,6 +359,27 @@ class AccountStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_api_keys(self, user_id: str) -> list[dict[str, Any]]:
+        """Admin-facing alias for list_keys_for_user (same columns)."""
+        return self.list_keys_for_user(user_id)
+
+    def revoke_api_key(self, user_id: str, key_id: str) -> bool:
+        """Revoke a single API key by id, scoped to the owning user.
+
+        Returns True when a row was updated, False if the key was missing,
+        already revoked, or owned by a different user.
+        """
+        now = time.time()
+        with self._db._lock:
+            cur = self._db._conn.execute(
+                """
+                UPDATE api_keys SET revoked_at = ?
+                WHERE id = ? AND user_id = ? AND revoked_at IS NULL
+                """,
+                (now, key_id, user_id),
+            )
+            return cur.rowcount == 1
+
     def approve_and_issue_key(
         self,
         user_id: str,

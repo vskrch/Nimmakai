@@ -9,7 +9,9 @@ import {
   ShieldCheck,
   CheckCircle2,
   AlertCircle,
-  Terminal
+  Terminal,
+  Link as LinkIcon,
+  Globe
 } from 'lucide-react'
 
 interface AccountPageProps {
@@ -22,6 +24,9 @@ export default function AccountPage({ session, onRefresh }: AccountPageProps) {
   const [newKey, setNewKey] = useState<string | null>(null)
   const user = session?.user
   const keys = session?.keys || []
+  const conn = session?.connection
+  const baseUrl = conn?.base_url || ''
+  const eps = conn?.endpoints || {}
 
   async function rotate() {
     setMsg('')
@@ -49,13 +54,27 @@ export default function AccountPage({ session, onRefresh }: AccountPageProps) {
     setMsg(r?.message || 'Verification link sent. Check your email.')
   }
 
-  const sampleCurl = `curl -X POST https://api.potato.ai/v1/chat/completions \\
+  const chatUrl = eps.openai_chat_completions || (baseUrl ? `${baseUrl}/v1/chat/completions` : '/v1/chat/completions')
+  const sampleCurl = `curl -X POST ${chatUrl} \\
   -H "Authorization: Bearer ${newKey || 'YOUR_POTATO_API_KEY'}" \\
   -H "Content-Type: application/json" \\
   -d '{
     "model": "auto",
     "messages": [{"role": "user", "content": "Explain quantum computing simply"}]
   }'`
+
+  const endpointRows: Array<{ label: string; value: string; hint?: string }> = baseUrl
+    ? [
+        { label: 'Gateway Base URL', value: baseUrl, hint: 'OpenAI-compatible root' },
+        { label: 'Chat Completions', value: eps.openai_chat_completions || `${baseUrl}/v1/chat/completions`, hint: 'POST' },
+        { label: 'Completions', value: eps.openai_completions || `${baseUrl}/v1/completions`, hint: 'POST' },
+        { label: 'Embeddings', value: eps.openai_embeddings || `${baseUrl}/v1/embeddings`, hint: 'POST' },
+        { label: 'List Models', value: eps.openai_models || `${baseUrl}/v1/models`, hint: 'GET' },
+        { label: 'Anthropic Messages', value: eps.anthropic_messages || `${baseUrl}/v1/messages`, hint: 'POST' },
+        { label: 'Analytics Traces', value: eps.analytics_traces || `${baseUrl}/analytics/traces`, hint: 'GET' },
+        { label: 'Health', value: eps.health || `${baseUrl}/health`, hint: 'GET' }
+      ]
+    : []
 
   return (
     <div className="space-y-6 max-w-2xl animate-[fadeIn_0.25s_ease-out]">
@@ -190,6 +209,52 @@ export default function AccountPage({ session, onRefresh }: AccountPageProps) {
         </CardHeader>
         <CardBody>
           <CodeBlock code={sampleCurl} language="bash" />
+        </CardBody>
+      </Card>
+
+      {/* Connection Endpoints */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Globe className="w-4 h-4 text-violet-400" />
+            <h3 className="text-sm font-semibold text-white">Connection Endpoints</h3>
+          </div>
+          <Badge variant="default">{baseUrl || '—'}</Badge>
+        </CardHeader>
+        <CardBody className="space-y-2 text-xs">
+          {endpointRows.length === 0 ? (
+            <p className="text-zinc-500 py-2 text-center">Connection details unavailable until signed in.</p>
+          ) : (
+            <div className="space-y-1.5">
+              {endpointRows.map(row => (
+                <div
+                  key={row.label}
+                  className="flex items-center justify-between gap-3 p-2.5 rounded-xl bg-zinc-950/60 border border-white/[0.06]"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <LinkIcon className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="text-zinc-300 font-semibold flex items-center gap-1.5">
+                        {row.label}
+                        {row.hint && (
+                          <span className="text-[9px] uppercase tracking-wider text-zinc-500 bg-white/[0.04] px-1.5 py-0.5 rounded">
+                            {row.hint}
+                          </span>
+                        )}
+                      </div>
+                      <code className="block font-mono text-[11px] text-emerald-400/90 truncate">{row.value}</code>
+                    </div>
+                  </div>
+                  <CopyButton text={row.value} />
+                </div>
+              ))}
+              <p className="text-[10px] text-zinc-500 pt-1">
+                Use <code className="font-mono text-zinc-400">Authorization: Bearer &lt;your-api-key&gt;</code> for all
+                endpoints. The OpenAI SDK can be pointed at <code className="font-mono text-zinc-400">{baseUrl}/v1</code> as
+                the <code className="font-mono text-zinc-400">base_url</code>.
+              </p>
+            </div>
+          )}
         </CardBody>
       </Card>
     </>

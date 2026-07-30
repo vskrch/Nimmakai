@@ -13,7 +13,18 @@ export type AuthSession = {
     role: string
     status: string
   }
-  keys?: Array<{ key_prefix: string; revoked_at: number | null }>
+  keys?: Array<{
+    id?: string
+    key_prefix: string
+    name?: string
+    created_at?: number
+    revoked_at: number | null
+    last_used_at?: number | null
+  }>
+  connection?: {
+    base_url: string
+    endpoints: Record<string, string>
+  }
 }
 
 interface AuthModalProps {

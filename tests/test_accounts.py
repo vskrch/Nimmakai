@@ -384,3 +384,136 @@ def test_concurrent_approve_issues_one_key():
     assert len(keys) == 1
     user = store.get_user(u["id"])
     assert user and user["status"] == "active"
+
+
+@pytest.mark.asyncio
+async def test_admin_list_and_revoke_user_keys():
+    """Admin 'Keys & Info' modal + per-key revoke must work end-to-end.
+
+    Regression: routes called store.list_api_keys()/revoke_api_key() which did
+    not exist, causing 500s on GET /admin/users/{id}/keys and the revoke POST.
+    """
+    app, _ = _make_app()
+    store: AccountStore = app.state.accounts
+    store.create_user("admin@ex.com", "password123", role="admin", status="active")
+    target = store.create_user("target@ex.com", "password123", role="user", status="active")
+    issued = store.issue_api_key(target["id"])
+    kid = issued["id"]
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post(
+            "/auth/login", json={"email": "admin@ex.com", "password": "password123"}
+        )
+
+        # List keys for the target user
+        r = await client.get(f"/admin/users/{target['id']}/keys")
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["user_id"] == target["id"]
+        assert len(body["keys"]) == 1
+        assert body["keys"][0]["id"] == kid
+        assert body["keys"][0]["key_prefix"] == issued["key_prefix"]
+
+        # Revoke the key
+        rev = await client.post(
+            f"/admin/users/{target['id']}/keys/{kid}/revoke"
+        )
+        assert rev.status_code == 200, rev.text
+        assert rev.json()["ok"] is True
+
+        # Second revoke is idempotent-not-found (already revoked)
+        rev2 = await client.post(
+            f"/admin/users/{target['id']}/keys/{kid}/revoke"
+        )
+        assert rev2.status_code == 404
+
+        # Key now shows revoked in the list
+        r2 = await client.get(f"/admin/users/{target['id']}/keys")
+        assert r2.json()["keys"][0]["revoked_at"] is not None
+
+
+def test_revoke_api_key_scoped_to_owner():
+    """revoke_api_key must not touch keys owned by a different user."""
+    td = tempfile.TemporaryDirectory()
+    _temp_dirs.append(td)
+    db = get_db(Path(td.name) / "revoke.db")
+    store = AccountStore(db)
+    a = store.create_user("a@ex.com", "password123", status="active")
+    b = store.create_user("b@ex.com", "password123", status="active")
+    ka = store.issue_api_key(a["id"])
+    store.issue_api_key(b["id"])
+
+    # Try to revoke A's key using B's user_id → must fail (no row updated)
+    assert store.revoke_api_key(b["id"], ka["id"]) is False
+    # A's key is still active
+    a_keys = store.list_keys_for_user(a["id"])
+    assert a_keys[0]["revoked_at"] is None
+    # Revoking with the correct owner works
+    assert store.revoke_api_key(a["id"], ka["id"]) is True
+    a_keys = store.list_keys_for_user(a["id"])
+    assert a_keys[0]["revoked_at"] is not None
+    # B's key untouched
+    b_keys = store.list_keys_for_user(b["id"])
+    assert b_keys[0]["revoked_at"] is None
+
+
+@pytest.mark.asyncio
+async def test_auth_me_includes_connection_endpoints():
+    """/auth/me returns connection.base_url + endpoint paths so the user/keys
+    page can render real URLs instead of a hardcoded host."""
+    app, settings = _make_app()
+    store: AccountStore = app.state.accounts
+    store.create_user("conn@ex.com", "password123", role="user", status="active")
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post(
+            "/auth/login", json={"email": "conn@ex.com", "password": "password123"}
+        )
+        me = await client.get("/auth/me")
+        assert me.status_code == 200
+        body = me.json()
+        assert body["authenticated"] is True
+        conn = body.get("connection")
+        assert conn is not None, "connection block missing from /auth/me"
+        assert conn["base_url"] == settings.public_base_url
+        eps = conn["endpoints"]
+        assert eps["openai_chat_completions"].endswith("/v1/chat/completions")
+        assert eps["openai_models"].endswith("/v1/models")
+        assert eps["anthropic_messages"].endswith("/v1/messages")
+        assert eps["health"].endswith("/health")
+        assert eps["dashboard"].endswith("/dashboard")
+
+
+def test_keys_are_never_hard_deleted_only_revoked():
+    """Invariant: we never DELETE api_keys rows — we only set revoked_at.
+
+    Covers rotation (issue_api_key revokes prior keys), explicit revoke, and
+    admin approve_and_issue_key. After all operations every key ever issued
+    must still be present as a row, with revoked_at set on the inactive ones.
+    Protects against accidental hard-deletes and admin-key deletion.
+    """
+    td = tempfile.TemporaryDirectory()
+    _temp_dirs.append(td)
+    db = get_db(Path(td.name) / "invariant.db")
+    store = AccountStore(db)
+    u = store.create_user("inv@ex.com", "password123", role="user", status="active")
+
+    k1 = store.issue_api_key(u["id"])
+    k2 = store.issue_api_key(u["id"])  # rotation: revokes k1, inserts k2
+    assert store.revoke_api_key(u["id"], k2["id"]) is True
+
+    # approve_and_issue_key on a re-approved user also revokes + inserts
+    store.set_status(u["id"], "suspended")
+    store.approve_and_issue_key(u["id"], approved_by="admin")
+
+    rows = store.list_keys_for_user(u["id"])
+    # Every key ever issued is still a row — none were hard-deleted
+    ids = {r["id"] for r in rows}
+    assert {k1["id"], k2["id"]}.issubset(ids), ids
+    # k1 and k2 are revoked (inactive), the approve-issued key is active
+    active = [r for r in rows if r["revoked_at"] is None]
+    assert len(active) == 1
+    # No row has been physically removed
+    assert len(rows) == 3

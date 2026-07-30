@@ -257,6 +257,27 @@ def test_transform_responses_function_call_output_item_becomes_tool_message() ->
     assert out["messages"][2]["content"] == "sunny"
 
 
+def test_transform_responses_carries_through_reasoning_effort_top_level() -> None:
+    """Top-level reasoning_effort must survive the Responses→Chat translation."""
+    body = {"model": "potato/coding", "input": "hi", "reasoning_effort": "high"}
+    out = transform_responses_to_chat(body)
+    assert out["reasoning_effort"] == "high"
+
+
+def test_transform_responses_carries_through_reasoning_effort_nested() -> None:
+    """Nested reasoning.effort (OpenAI Responses shape) must map to reasoning_effort."""
+    body = {"model": "potato/coding", "input": "hi", "reasoning": {"effort": "high"}}
+    out = transform_responses_to_chat(body)
+    assert out["reasoning_effort"] == "high"
+
+
+def test_transform_responses_no_reasoning_effort_when_absent() -> None:
+    """No reasoning_effort key when the client didn't send one."""
+    body = {"model": "potato/coding", "input": "hi"}
+    out = transform_responses_to_chat(body)
+    assert "reasoning_effort" not in out
+
+
 # ── End-to-end HTTP tests (proves no upstream 405) ──────────────────
 
 

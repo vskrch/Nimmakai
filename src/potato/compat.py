@@ -1,9 +1,14 @@
 """OpenAI / Cursor client compatibility helpers.
 
-Cursor and many OpenAI SDKs only read ``delta.content`` / ``message.content``.
-NVIDIA Nemotron-style models often stream text in ``reasoning_content`` first
-(or only), which makes Cursor look broken or hang. We normalize payloads so
-clients always see standard OpenAI fields.
+Normalize upstream SSE and JSON payloads so clients always see standard
+OpenAI fields. Reasoning (thinking) is kept in ``reasoning_content`` and
+**never** mirrored into ``content`` — the thinking phase emits
+``content: null`` with ``reasoning_content`` populated, and the answer
+phase emits ``content`` with ``reasoning_content: null``. This keeps
+AI SDK / Kilo from double-rendering private thinking as both reasoning
+blocks and visible assistant text. The reasoning field is canonicalized
+to ``reasoning_content`` regardless of which upstream field name was used
+(``reasoning`` vs ``reasoning_content``).
 """
 
 from __future__ import annotations
@@ -92,6 +97,51 @@ def inject_system_prompt(body: dict[str, Any], prompt: str | None) -> dict[str, 
     return body
 
 
+def normalize_reasoning_effort(
+    body: dict[str, Any],
+    *,
+    routed_model: str | None,
+    registry: Any | None,
+    default_effort: str = "",
+) -> dict[str, Any]:
+    """Normalize ``reasoning_effort`` for one routed model.
+
+    Called per-model in the fallback chain so a reasoning head failing over to
+    a non-reasoning model strips the field instead of 400ing the upstream.
+
+    - Client set an explicit value: honor it for reasoning-capable models;
+      strip it for non-reasoning models (most upstreams 400 on an unknown
+      field, and a non-reasoning model has no thinking to tune).
+    - Client did not set one: inject ``default_effort`` for reasoning-capable
+      models when ``default_effort`` is non-empty; leave non-reasoning models
+      untouched.
+    - Unknown model (not in capabilities): pass through unchanged — we don't
+      guess, preserving forward-compatibility with newly-added models.
+
+    Capability is read from the ladder ``capabilities`` dict
+    (``supports_reasoning``). No registry / no model → pass through.
+    """
+    if routed_model is None or registry is None:
+        return body
+    caps = getattr(getattr(registry, "ladder", None), "capabilities", None)
+    if not caps:
+        return body
+    flags = caps.get(routed_model)
+    if flags is None:
+        return body  # unknown model — forward-compatible passthrough
+    supports_reasoning = flags.get("supports_reasoning") is True
+    has_explicit = "reasoning_effort" in body
+    if supports_reasoning:
+        if not has_explicit and default_effort:
+            return {**body, "reasoning_effort": default_effort}
+        return body  # honor client's explicit value as-is
+    # Non-reasoning model: strip any reasoning_effort so the upstream doesn't
+    # 400 on a field it doesn't understand.
+    if has_explicit:
+        body = {k: v for k, v in body.items() if k != "reasoning_effort"}
+    return body
+
+
 def sanitize_chat_body(body: dict[str, Any]) -> dict[str, Any]:
     """Normalize client request for OpenAI-compatible upstreams (Cursor-safe).
 
@@ -127,20 +177,35 @@ def sanitize_chat_body(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def normalize_message_dict(msg: dict[str, Any]) -> dict[str, Any]:
-    """Ensure assistant message has ``content`` when only reasoning was returned.
+    """Normalize a non-streaming assistant message for OpenAI clients.
 
-    Skip mirroring when the message already carries tool_calls / function_call
-    so agent clients see a clean tool delta instead of reasoning text mixed in.
+    RC-1/RC-2 fixes:
+    - Never mirror ``reasoning_content`` into ``content``. The answer lives
+      in ``content``; private thinking lives in ``reasoning_content``. Mixing
+      them causes AI SDK / Kilo to render thinking as visible assistant text.
+    - Canonicalize the reasoning field to ``reasoning_content`` regardless of
+      which upstream field name was used.
     """
     if not isinstance(msg, dict):
         return msg
-    content = msg.get("content")
-    reasoning = msg.get("reasoning_content") or msg.get("reasoning")
-    empty_content = content in (None, "", [])
-    has_tools = msg.get("tool_calls") or msg.get("function_call")
-    if empty_content and not has_tools and isinstance(reasoning, str) and reasoning:
-        msg = {**msg, "content": reasoning}
-    # Keep reasoning_content for advanced clients; Cursor ignores it
+    msg = dict(msg)
+    # RC-2: canonicalize reasoning field name → always reasoning_content
+    reasoning_alt = msg.pop("reasoning", None)
+    if reasoning_alt and not msg.get("reasoning_content"):
+        msg["reasoning_content"] = reasoning_alt
+    # RC-1: some upstreams (nvidia/nemotron) mirror thinking into both
+    # content and reasoning_content. Drop the duplicate from content so
+    # clients never see thinking as visible assistant text (RCA §5: the
+    # two fields must never be equal). Tools, if present, are preserved.
+    rc = msg.get("reasoning_content")
+    if (
+        isinstance(rc, str)
+        and rc
+        and not (msg.get("tool_calls") or msg.get("function_call"))
+        and msg.get("content") == rc
+    ):
+        msg["content"] = ""
+    # RC-1: do not mirror reasoning into content. Keep them separated.
     return msg
 
 
@@ -171,16 +236,44 @@ def normalize_completion_json(body: Any, *, routed_model: str | None = None) -> 
 
 
 def _normalize_delta(delta: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one SSE delta for OpenAI-compatible clients.
+
+    RC-1/RC-2/RC-3 fixes:
+    - Never mirror reasoning into ``content``. The thinking phase emits
+      ``content: null`` with ``reasoning_content`` populated; the answer
+      phase emits ``content`` with ``reasoning_content: null``. This keeps
+      the two phases cleanly segregated so AI SDK / Kilo does not double-
+      render thinking as both reasoning blocks and visible content.
+    - Canonicalize the reasoning field to ``reasoning_content`` regardless
+      of which upstream field name was used (``reasoning`` vs
+      ``reasoning_content``).
+    """
     d = dict(delta)
-    content = d.get("content")
-    reasoning = d.get("reasoning_content") or d.get("reasoning")
-    empty = content in (None, "")
-    has_tools = d.get("tool_calls") or d.get("function_call")
-    if empty and not has_tools and isinstance(reasoning, str) and reasoning:
-        # Cursor only renders content — mirror reasoning into content
-        d["content"] = reasoning
+    # RC-2: canonicalize reasoning field name → always reasoning_content
+    reasoning_alt = d.pop("reasoning", None)
+    if reasoning_alt and not d.get("reasoning_content"):
+        d["reasoning_content"] = reasoning_alt
+    # RC-1: some upstreams (nvidia/nemotron) stream thinking into both
+    # content and reasoning_content with identical text. Drop the
+    # duplicate from content so clients don't double-render thinking
+    # as visible assistant text (RCA §5: the two fields must never be
+    # equal). Tools, if present, are preserved.
+    rc = d.get("reasoning_content")
+    if (
+        isinstance(rc, str)
+        and rc
+        and not (d.get("tool_calls") or d.get("function_call"))
+        and d.get("content") == rc
+    ):
+        d["content"] = None
+    # RC-1/RC-3: do NOT mirror reasoning into content. Keep phases segregated.
     # Ensure role on first useful delta (Cursor OpenAI client)
-    if (d.get("content") or d.get("tool_calls") or d.get("function_call")) and "role" not in d:
+    if (
+        d.get("content")
+        or d.get("tool_calls")
+        or d.get("function_call")
+        or d.get("reasoning_content")
+    ) and "role" not in d:
         d["role"] = "assistant"
     # tool_calls must stay intact (Cursor agent mode)
     return d
@@ -321,6 +414,10 @@ def json_body_to_sse(body: Any, *, routed_model: str | None = None) -> bytes:
         if isinstance(msg, dict):
             if msg.get("content") is not None:
                 delta["content"] = msg.get("content")
+            # RC-2: forward reasoning_content (canonicalized) in JSON→SSE path
+            reasoning = msg.get("reasoning_content") or msg.get("reasoning")
+            if reasoning:
+                delta["reasoning_content"] = reasoning
             if msg.get("tool_calls") is not None:
                 delta["tool_calls"] = msg.get("tool_calls")
             if msg.get("role"):

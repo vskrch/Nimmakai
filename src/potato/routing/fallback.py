@@ -528,6 +528,16 @@ class FallbackExecutor:
             except RuntimeError:
                 continue
             attempt_body = {**body, "model": upstream_mid}
+            # Per-model reasoning_effort normalization (resilience: a reasoning
+            # head failing over to a non-reasoning model strips the field).
+            from potato.compat import normalize_reasoning_effort as _nre
+
+            attempt_body = _nre(
+                attempt_body,
+                routed_model=model,
+                registry=self.registry,
+                default_effort=getattr(self.settings, "default_reasoning_effort", ""),
+            )
             if hasattr(self.registry, "ladder"):
                 rec = self.registry.ladder.model_recommendations(model)
                 if rec:
@@ -1097,6 +1107,16 @@ class FallbackExecutor:
                     decision=decision,
                 )
             attempt_body = {**body, "model": upstream_mid}
+            # Per-model reasoning_effort normalization (resilience: a reasoning
+            # head failing over to a non-reasoning model strips the field).
+            from potato.compat import normalize_reasoning_effort as _nre
+
+            attempt_body = _nre(
+                attempt_body,
+                routed_model=model,
+                registry=self.registry,
+                default_effort=getattr(self.settings, "default_reasoning_effort", ""),
+            )
             t_attempt = time.perf_counter()
             pid = self._provider_id_for(model)
             # Apply per-model recommendations (temperature, max_tokens)
@@ -1757,6 +1777,16 @@ class FallbackExecutor:
                     provider_id=pid,
                 )
             attempt_body = {**body, "model": upstream_mid}
+            # Per-model reasoning_effort normalization (resilience: a reasoning
+            # head failing over to a non-reasoning model strips the field).
+            from potato.compat import normalize_reasoning_effort as _nre
+
+            attempt_body = _nre(
+                attempt_body,
+                routed_model=model,
+                registry=self.registry,
+                default_effort=getattr(self.settings, "default_reasoning_effort", ""),
+            )
             t_attempt = time.perf_counter()
             try:
                 import asyncio as _aio
