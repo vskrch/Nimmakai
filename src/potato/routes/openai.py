@@ -511,6 +511,11 @@ async def get_model(model_id: str, request: Request) -> JSONResponse:
     if registry is not None:
         from potato.routing.auto_router import is_auto_router_id
 
+        # Future-proof: accept ANY claude-* model name (including ones not yet
+        # in the alias list) so Claude Code CLI's pre-flight /v1/models check
+        # always passes regardless of future Anthropic model releases.
+        _is_claude = model_id.startswith("claude-")
+
         if is_auto_router_id(model_id) or model_id in {
             "auto",
             "potato/auto",
@@ -524,12 +529,21 @@ async def get_model(model_id: str, request: Request) -> JSONResponse:
             "kilo-auto/balanced",
             "kilo-auto/efficient",
             "kilo-auto/free",
-        } or registry.is_alias(model_id):
+        } or registry.is_alias(model_id) or _is_claude:
             for m in registry.synthetic_auto_models():
                 if m["id"] == model_id or (
                     model_id == "auto" and m["id"] in {"auto", "potato/auto"}
                 ):
                     return JSONResponse(content=m)
+            # Unknown claude-* model not in aliases — synthesize a valid entry
+            # so the CLI's client-side validation passes.
+            if _is_claude:
+                return JSONResponse(content={
+                    **registry.synthetic_auto_model(),
+                    "id": model_id,
+                    "owned_by": "anthropic",
+                    "root": model_id,
+                })
             return JSONResponse(content=registry.synthetic_auto_model())
     if registry is not None:
         resolved = registry.resolve_live_id(model_id) or model_id

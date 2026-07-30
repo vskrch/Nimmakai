@@ -127,10 +127,12 @@ def transform_anthropic_to_openai(body: dict[str, Any]) -> dict[str, Any]:
     if "max_tokens" in body:
         openai_body["max_tokens"] = body["max_tokens"]
 
-    # Model default
+    # Model default — Claude Code requests always route through the
+    # coding intent chain (potato/auto-coding) which selects the best
+    # available coding model from the live catalog.
     raw_model = str(body.get("model") or "").strip()
     if not raw_model or raw_model.startswith("claude") or raw_model == "auto":
-        openai_body["model"] = "potato/auto"
+        openai_body["model"] = "potato/auto-coding"
     else:
         openai_body["model"] = raw_model
 
@@ -537,7 +539,7 @@ async def _handle_claude_or_chat(request: Request) -> JSONResponse | StreamingRe
     else:
         openai_payload = body
         if not openai_payload.get("model"):
-            openai_payload["model"] = "potato/auto"
+            openai_payload["model"] = "potato/auto-coding"
 
     async def _custom_receive():
         return {

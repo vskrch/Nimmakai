@@ -1233,15 +1233,23 @@ class ModelRegistry:
             **base,
             "owned_by": "anthropic",
         }
+        seen_ids: set[str] = set()
         for alias_name in self.catalog.aliases:
             if alias_name.startswith("claude-"):
-                out.append(
-                    {
-                        **anthropic_base,
-                        "id": alias_name,
-                        "root": alias_name,
-                    }
-                )
+                entry = {
+                    **anthropic_base,
+                    "id": alias_name,
+                    "root": alias_name,
+                }
+                out.append(entry)
+                seen_ids.add(alias_name)
+                # Claude Code CLI appends context-window suffixes like [1m]
+                # for long-context models.  Emit suffixed variants so the
+                # CLI's client-side exact-match validation always passes.
+                suffixed = f"{alias_name}[1m]"
+                if suffixed not in seen_ids:
+                    out.append({**entry, "id": suffixed, "root": alias_name})
+                    seen_ids.add(suffixed)
 
         return out
 
