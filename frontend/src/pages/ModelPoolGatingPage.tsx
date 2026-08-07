@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Card, CardHeader, CardBody, Badge, Button, Input, Skeleton, ErrorState, EmptyState } from '../components/ui'
+import { Card, CardHeader, CardBody, Badge, Button, Input, Skeleton, ErrorState, EmptyState, Switch } from '../components/ui'
 import { useCatalog } from '../hooks/useApi'
 import { api, errMsg, okBody } from '../lib/api'
 import { Filter, Lock, Unlock, Save, Trash2, Search, Shield, X } from 'lucide-react'
@@ -210,17 +210,11 @@ export default function ModelPoolGatingPage() {
                       </p>
                     </div>
                   </div>
-                  <button
-                    onClick={() => updateConfig(modelId, { allow_auto_router: !(cfg?.allow_auto_router ?? true) })}
+                  <Switch
+                    checked={cfg?.allow_auto_router ?? true}
+                    onCheckedChange={(v) => updateConfig(modelId, { allow_auto_router: v })}
                     disabled={saving === modelId}
-                    className={`relative w-10 h-6 rounded-full transition-colors ${
-                      cfg?.allow_auto_router ?? true ? 'bg-emerald-500' : 'bg-zinc-700'
-                    }`}
-                  >
-                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform ${
-                      cfg?.allow_auto_router ?? true ? 'translate-x-[18px]' : 'translate-x-0.5'
-                    }`} />
-                  </button>
+                  />
                 </div>
 
                 {/* Intent gating */}

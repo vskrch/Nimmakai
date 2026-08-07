@@ -2,6 +2,59 @@
 @tailwind components;
 @tailwind utilities;
 
+/* shadcn semantic tokens — dark-first (the app is dark-only, html.dark is set
+   in index.html and never toggled). Values map to the existing Potato aesthetic:
+   zinc-950 bg, violet accent, white/8% borders. Light values are mirrored so
+   components never fall back to white-on-white if .dark is absent. */
+@layer base {
+  :root {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 258 90% 66%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 4% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 4% 16%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 240 4% 16%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 100%;
+    --input: 0 0% 100%;
+    --ring: 258 90% 66%;
+    --radius: 0.75rem;
+    /* Alpha overlays — applied via hsl() with / <alpha> in components */
+    --border-alpha: 0.08;
+    --input-alpha: 0.1;
+  }
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --primary: 258 90% 66%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 4% 16%;
+    --secondary-foreground: 0 0% 98%;
+    --muted: 240 4% 16%;
+    --muted-foreground: 240 5% 65%;
+    --accent: 240 4% 16%;
+    --accent-foreground: 0 0% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 100%;
+    --input: 0 0% 100%;
+    --ring: 258 90% 66%;
+  }
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -55,16 +108,6 @@ button, [role="button"], a {
   touch-action: manipulation;
 }
 
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes pulse-glow {
-  0%, 100% { box-shadow: 0 0 8px rgba(16, 185, 129, 0.4); }
-  50% { box-shadow: 0 0 16px rgba(16, 185, 129, 0.6); }
-}
-
 /* Respect reduced-motion preferences (WCAG 2.3.3) */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -78,4 +121,10 @@ button, [role="button"], a {
 /* High-contrast preference: strengthen borders/text for legibility */
 @media (prefers-contrast: more) {
   .border-white\/\[0\.08\] { border-color: rgba(255,255,255,0.25) !important; }
+}
+
+/* custom-scrollbar helper used across pages — keep as a utility class */
+.custom-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
 }

@@ -8,6 +8,11 @@ import { clsx } from 'clsx'
 import { Markdown } from '../lib/markdown'
 import { getAuthKey, setAuthKey } from '../lib/api'
 import { webSearch, looksLikeSearchQuery, type SearchResult } from '../lib/webSearch'
+import {
+  Popover, PopoverTrigger, PopoverContent, PopoverAnchor,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose,
+  Switch, Slider, Input as ShadInput, Select as ShadSelect, Textarea as ShadTextarea, Button as ShadButton,
+} from '../components/ui'
 
 // ponytail: localStorage-only history. No server persistence. No retention when toggle off.
 
@@ -1653,11 +1658,10 @@ function AdvancedPopover({
             <label className="text-zinc-300 font-medium">Temperature</label>
             <span className="font-mono text-violet-300 font-bold">{settings.temperature}</span>
           </div>
-          <input
-            type="range" min={0} max={2} step={0.05}
-            value={settings.temperature}
-            onChange={e => onChange({ ...settings, temperature: parseFloat(e.target.value) })}
-            className="w-full accent-violet-500 cursor-pointer"
+          <Slider
+            value={[settings.temperature]}
+            onValueChange={([v]) => onChange({ ...settings, temperature: v })}
+            min={0} max={2} step={0.05}
           />
           <p className="text-[10px] text-zinc-500 mt-0.5">Lower = focused. Higher = creative.</p>
         </div>
@@ -1668,11 +1672,10 @@ function AdvancedPopover({
             <label className="text-zinc-300 font-medium">Max output tokens</label>
             <span className="font-mono text-violet-300 font-bold">{settings.maxTokens}</span>
           </div>
-          <input
-            type="range" min={256} max={64000} step={256}
-            value={settings.maxTokens}
-            onChange={e => onChange({ ...settings, maxTokens: parseInt(e.target.value) })}
-            className="w-full accent-violet-500 cursor-pointer"
+          <Slider
+            value={[settings.maxTokens]}
+            onValueChange={([v]) => onChange({ ...settings, maxTokens: v })}
+            min={256} max={64000} step={256}
           />
         </div>
 
@@ -1682,11 +1685,10 @@ function AdvancedPopover({
             <label className="text-zinc-300 font-medium">Top P (nucleus)</label>
             <span className="font-mono text-violet-300 font-bold">{settings.topP}</span>
           </div>
-          <input
-            type="range" min={0} max={1} step={0.05}
-            value={settings.topP}
-            onChange={e => onChange({ ...settings, topP: parseFloat(e.target.value) })}
-            className="w-full accent-violet-500 cursor-pointer"
+          <Slider
+            value={[settings.topP]}
+            onValueChange={([v]) => onChange({ ...settings, topP: v })}
+            min={0} max={1} step={0.05}
           />
         </div>
 
@@ -1696,11 +1698,10 @@ function AdvancedPopover({
             <label className="text-zinc-300 font-medium">Frequency penalty</label>
             <span className="font-mono text-violet-300 font-bold">{settings.frequencyPenalty}</span>
           </div>
-          <input
-            type="range" min={-2} max={2} step={0.1}
-            value={settings.frequencyPenalty}
-            onChange={e => onChange({ ...settings, frequencyPenalty: parseFloat(e.target.value) })}
-            className="w-full accent-violet-500 cursor-pointer"
+          <Slider
+            value={[settings.frequencyPenalty]}
+            onValueChange={([v]) => onChange({ ...settings, frequencyPenalty: v })}
+            min={-2} max={2} step={0.1}
           />
           <p className="text-[10px] text-zinc-500 mt-0.5">Reduces repetition of tokens.</p>
         </div>
@@ -1711,11 +1712,10 @@ function AdvancedPopover({
             <label className="text-zinc-300 font-medium">Presence penalty</label>
             <span className="font-mono text-violet-300 font-bold">{settings.presencePenalty}</span>
           </div>
-          <input
-            type="range" min={-2} max={2} step={0.1}
-            value={settings.presencePenalty}
-            onChange={e => onChange({ ...settings, presencePenalty: parseFloat(e.target.value) })}
-            className="w-full accent-violet-500 cursor-pointer"
+          <Slider
+            value={[settings.presencePenalty]}
+            onValueChange={([v]) => onChange({ ...settings, presencePenalty: v })}
+            min={-2} max={2} step={0.1}
           />
           <p className="text-[10px] text-zinc-500 mt-0.5">Encourages new topics.</p>
         </div>
@@ -1723,34 +1723,26 @@ function AdvancedPopover({
         {/* Stop sequences */}
         <div>
           <label className="block text-zinc-300 font-medium mb-1">Stop sequences</label>
-          <input
+          <ShadInput
             type="text"
             value={settings.stop}
             onChange={e => onChange({ ...settings, stop: e.target.value })}
             placeholder="e.g. \n, END, ###"
-            className="w-full bg-zinc-950/80 border border-white/[0.1] text-zinc-100 px-2.5 py-1.5 rounded-lg text-[11px] focus:outline-none focus:border-violet-500 font-mono"
+            className="font-mono text-[11px] px-2.5 py-1.5"
           />
           <p className="text-[10px] text-zinc-500 mt-0.5">Comma-separated. Stops generation at any match.</p>
         </div>
 
-        {/* Stream toggle */}
+        {/* Stream toggle — shadcn Switch */}
         <div className="flex items-center justify-between p-2 rounded-lg bg-zinc-950/60 border border-white/[0.06]">
           <div>
             <p className="text-[11px] font-medium text-zinc-200">Stream response</p>
             <p className="text-[10px] text-zinc-500">Token-by-token (SSE) vs full response</p>
           </div>
-          <button
-            onClick={() => onChange({ ...settings, stream: !settings.stream })}
-            className={clsx(
-              'relative w-10 h-6 rounded-full transition-colors',
-              settings.stream ? 'bg-violet-500' : 'bg-zinc-700',
-            )}
-          >
-            <span className={clsx(
-              'absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform',
-              settings.stream ? 'translate-x-[18px]' : 'translate-x-0.5',
-            )} />
-          </button>
+          <Switch
+            checked={settings.stream}
+            onCheckedChange={(v) => onChange({ ...settings, stream: v })}
+          />
         </div>
       </div>
     </div>
@@ -1770,42 +1762,39 @@ function SettingsModal({
   const ctx = model?.context_length || model?.max_model_len || DEFAULT_CONTEXT
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/70 backdrop-blur-md" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-zinc-900 border border-white/[0.12] rounded-2xl shadow-[0_32px_80px_rgba(0,0,0,0.8)] z-10 animate-[fadeIn_0.2s_ease-out]">
-        <div className="px-6 py-4 border-b border-white/[0.08] flex items-center justify-between">
-          <h3 className="text-base font-semibold text-white">Chat settings</h3>
-          <button onClick={onClose} className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.06]">
-            <X className="w-5 h-5" />
-          </button>
-        </div>
+    <Dialog open onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Chat settings</DialogTitle>
+        </DialogHeader>
         <div className="p-6 space-y-5 max-h-[80vh] overflow-y-auto custom-scrollbar">
           <div>
             <label className="block text-[11px] font-semibold text-zinc-300 uppercase tracking-wider mb-1.5">API key</label>
-            <input
+            <ShadInput
               type="password"
               value={keyInput}
               onChange={e => setKeyInput(e.target.value)}
               placeholder="sk-nk-… or PROXY_API_KEYS"
-              className="w-full bg-zinc-950/80 border border-white/[0.1] text-zinc-100 px-3.5 py-2.5 rounded-xl text-[13px] focus:outline-none focus:border-violet-500 font-mono"
+              className="font-mono"
             />
             <p className="text-[11px] text-zinc-500 mt-1.5">
               Your key is stored only in this browser's localStorage. Clears on logout.
             </p>
-            <button
+            <ShadButton
+              variant="secondary"
+              size="sm"
+              className="mt-2"
               onClick={() => { setAuthKey(keyInput.trim()); onClose(); window.location.reload() }}
-              className="mt-2 px-3 py-1.5 rounded-lg bg-violet-500/15 border border-violet-500/25 text-violet-300 text-[12px] font-medium hover:bg-violet-500/20"
             >
               Save key
-            </button>
+            </ShadButton>
           </div>
 
           <div>
             <label className="block text-[11px] font-semibold text-zinc-300 uppercase tracking-wider mb-1.5">Model</label>
-            <select
+            <ShadSelect
               value={settings.model}
               onChange={e => onChange({ ...settings, model: e.target.value })}
-              className="w-full bg-zinc-950/80 border border-white/[0.1] text-zinc-100 px-3.5 py-2.5 rounded-xl text-[13px] focus:outline-none focus:border-violet-500 font-mono cursor-pointer"
             >
               {models.length === 0 && <option value={settings.model}>{settings.model} (no models loaded)</option>}
               {models.filter(m => {
@@ -1813,7 +1802,7 @@ function SettingsModal({
                   || m.id.startsWith('openrouter/') || m.id.startsWith('kilo')
                 return isVirtual || settings.showAllModels
               }).map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
-            </select>
+            </ShadSelect>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <span className="text-[11px] text-zinc-500">
                 Context: <span className="font-mono text-zinc-300 font-semibold">{Math.round(ctx / 1000)}k</span>
@@ -1830,7 +1819,7 @@ function SettingsModal({
             </div>
           </div>
 
-          {/* Show all models toggle */}
+          {/* Show all models toggle — shadcn Switch */}
           <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-950/60 border border-white/[0.08]">
             <div>
               <p className="text-[13px] font-medium text-zinc-200">Show all models in picker</p>
@@ -1840,18 +1829,10 @@ function SettingsModal({
                   : 'Only potato/* router models are shown.'}
               </p>
             </div>
-            <button
-              onClick={() => onChange({ ...settings, showAllModels: !settings.showAllModels })}
-              className={clsx(
-                'relative w-10 h-6 rounded-full transition-colors',
-                settings.showAllModels ? 'bg-violet-500' : 'bg-zinc-700',
-              )}
-            >
-              <span className={clsx(
-                'absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform',
-                settings.showAllModels ? 'translate-x-[18px]' : 'translate-x-0.5',
-              )} />
-            </button>
+            <Switch
+              checked={settings.showAllModels}
+              onCheckedChange={(v) => onChange({ ...settings, showAllModels: v })}
+            />
           </div>
 
           <div>
@@ -1859,21 +1840,20 @@ function SettingsModal({
               <label className="text-[11px] font-semibold text-zinc-300 uppercase tracking-wider">Temperature</label>
               <span className="font-mono text-[12px] text-violet-300 font-bold">{settings.temperature}</span>
             </div>
-            <input
-              type="range" min={0} max={2} step={0.1}
-              value={settings.temperature}
-              onChange={e => onChange({ ...settings, temperature: parseFloat(e.target.value) })}
-              className="w-full accent-violet-500 cursor-pointer"
+            <Slider
+              value={[settings.temperature]}
+              onValueChange={([v]) => onChange({ ...settings, temperature: v })}
+              min={0} max={2} step={0.1}
             />
           </div>
 
           <div>
             <label className="block text-[11px] font-semibold text-zinc-300 uppercase tracking-wider mb-1.5">Max tokens</label>
-            <input
+            <ShadInput
               type="number" min={1} max={64000}
               value={settings.maxTokens}
               onChange={e => onChange({ ...settings, maxTokens: parseInt(e.target.value) || 4096 })}
-              className="w-full bg-zinc-950/80 border border-white/[0.1] text-zinc-100 px-3.5 py-2.5 rounded-xl text-[13px] focus:outline-none focus:border-violet-500 font-mono"
+              className="font-mono"
             />
           </div>
 
@@ -1881,12 +1861,12 @@ function SettingsModal({
             <label className="block text-[11px] font-semibold text-zinc-300 uppercase tracking-wider mb-1.5">
               System prompt (optional)
             </label>
-            <textarea
+            <ShadTextarea
               value={settings.systemPrompt}
               onChange={e => onChange({ ...settings, systemPrompt: e.target.value })}
               rows={3}
               placeholder="e.g. Be concise. Answer in the user's language."
-              className="w-full bg-zinc-950/80 border border-white/[0.1] text-zinc-100 px-3.5 py-2.5 rounded-xl text-[13px] focus:outline-none focus:border-violet-500 resize-y"
+              className="resize-y"
             />
           </div>
 
@@ -1905,29 +1885,18 @@ function SettingsModal({
                 </p>
               </div>
             </div>
-            <button
-              onClick={() => onChange({ ...settings, keepHistory: !settings.keepHistory })}
-              className={clsx(
-                'relative w-10 h-6 rounded-full transition-colors',
-                settings.keepHistory ? 'bg-emerald-500' : 'bg-zinc-700',
-              )}
-            >
-              <span className={clsx(
-                'absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform',
-                settings.keepHistory ? 'translate-x-[18px]' : 'translate-x-0.5',
-              )} />
-            </button>
+            <Switch
+              checked={settings.keepHistory}
+              onCheckedChange={(v) => onChange({ ...settings, keepHistory: v })}
+            />
           </div>
         </div>
         <div className="px-6 py-4 border-t border-white/[0.08] flex justify-end">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-violet-600 text-white text-[13px] font-medium hover:bg-violet-500"
-          >
+          <ShadButton variant="primary" onClick={onClose}>
             Done
-          </button>
+          </ShadButton>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }

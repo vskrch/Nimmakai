@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
-import { Button, Input } from './ui'
+import { Button, Input, Tabs, TabsList, TabsTrigger, TabsContent } from './ui'
 import { api, ap, errMsg, setAuthKey } from '../lib/api'
-import { Zap, Key, Lock, Mail, ArrowRight, ShieldCheck } from 'lucide-react'
+import { Zap, ArrowRight } from 'lucide-react'
 
 export type AuthSession = {
   authenticated: boolean
@@ -42,6 +42,8 @@ export default function AuthModal({ onSession }: AuthModalProps) {
   const [info, setInfo] = useState('')
   const [loading, setLoading] = useState(false)
 
+  const resetMsgs = () => { setError(''); setInfo('') }
+
   async function refreshMe() {
     const me = await api<AuthSession>('/auth/me')
     if (me?.authenticated) onSession(me)
@@ -50,8 +52,7 @@ export default function AuthModal({ onSession }: AuthModalProps) {
 
   async function handleSignIn() {
     setLoading(true)
-    setError('')
-    setInfo('')
+    resetMsgs()
     const r = await ap<{ ok?: boolean; error?: { message?: string } }>('/auth/login', {
       email,
       password,
@@ -66,8 +67,7 @@ export default function AuthModal({ onSession }: AuthModalProps) {
 
   async function handleSignUp() {
     setLoading(true)
-    setError('')
-    setInfo('')
+    resetMsgs()
     const r = await ap<{
       ok?: boolean
       verify_url?: string
@@ -93,7 +93,7 @@ export default function AuthModal({ onSession }: AuthModalProps) {
       return
     }
     setLoading(true)
-    setError('')
+    resetMsgs()
     setAuthKey(key.trim())
     const r = await api('/stats')
     setLoading(false)
@@ -125,83 +125,51 @@ export default function AuthModal({ onSession }: AuthModalProps) {
           <p className="text-xs text-zinc-400 mt-1">Authenticate to access the multi-provider LLM dashboard</p>
         </div>
 
-        {/* Tabs */}
-        <div className="px-6 pt-5 flex gap-1.5 border-b border-white/[0.06] bg-zinc-950/20">
-          {([
-            ['signin', 'Sign In'],
-            ['signup', 'Create Account'],
-            ['key', 'API Key Direct'],
-          ] as const).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => { setTab(id); setError(''); setInfo('') }}
-              className={`flex-1 text-xs py-2.5 font-semibold rounded-t-xl transition-all border-b-2 ${
-                tab === id
-                  ? 'border-violet-500 text-violet-300 bg-violet-500/10'
-                  : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.02]'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {/* shadcn Tabs (Radix) — replaces custom tab buttons */}
+        <Tabs value={tab} onValueChange={(v) => { setTab(v as Tab); resetMsgs() }} className="px-6 pt-5">
+          <TabsList className="w-full grid grid-cols-3 bg-zinc-950/20">
+            <TabsTrigger value="signin">Sign In</TabsTrigger>
+            <TabsTrigger value="signup">Create Account</TabsTrigger>
+            <TabsTrigger value="key">API Key Direct</TabsTrigger>
+          </TabsList>
 
-        {/* Form Body */}
-        <div className="p-6 space-y-4">
-          {tab !== 'key' && (
-            <>
+          <div className="pt-5 space-y-4">
+            <TabsContent value="signin" className="mt-0 space-y-4">
+              <EmailPasswordFields email={email} password={password} setEmail={setEmail} setPassword={setPassword}
+                onSubmit={handleSignIn} />
+            </TabsContent>
+            <TabsContent value="signup" className="mt-0 space-y-4">
+              <EmailPasswordFields email={email} password={password} setEmail={setEmail} setPassword={setPassword}
+                onSubmit={handleSignUp} />
+            </TabsContent>
+            <TabsContent value="key" className="mt-0 space-y-4">
               <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Email Address</label>
-                <Input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  placeholder="you@example.com"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Password</label>
+                <label className="block text-xs font-semibold text-zinc-300 mb-1.5">API Key or Admin Bearer Token</label>
                 <Input
                   type="password"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') tab === 'signin' ? handleSignIn() : handleSignUp()
-                  }}
-                  placeholder="••••••••"
+                  placeholder="sk-nk-… or PROXY_API_KEYS"
+                  value={key}
+                  onChange={e => setKey(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleKey() }}
                 />
+                <p className="text-[11px] text-zinc-400 mt-2 font-mono">
+                  Provide an active user API key starting with <code className="text-violet-300">sk-nk-</code> or environment bearer token.
+                </p>
               </div>
-            </>
-          )}
-
-          {tab === 'key' && (
-            <div>
-              <label className="block text-xs font-semibold text-zinc-300 mb-1.5">API Key or Admin Bearer Token</label>
-              <Input
-                type="password"
-                placeholder="sk-nk-… or PROXY_API_KEYS"
-                value={key}
-                onChange={e => setKey(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') handleKey() }}
-              />
-              <p className="text-[11px] text-zinc-400 mt-2 font-mono">
-                Provide an active user API key starting with <code className="text-violet-300">sk-nk-</code> or environment bearer token.
-              </p>
-            </div>
-          )}
+            </TabsContent>
+          </div>
 
           {error && (
-            <div className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 p-3 rounded-xl">
+            <div className="text-xs text-rose-300 bg-rose-500/10 border border-rose-500/20 p-3 rounded-xl mt-4">
               {error}
             </div>
           )}
           {info && (
-            <div className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl font-mono break-all">
+            <div className="text-xs text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 p-3 rounded-xl font-mono break-all mt-4">
               {info}
             </div>
           )}
-        </div>
+        </Tabs>
 
         {/* Footer */}
         <div className="px-6 py-4 border-t border-white/[0.08] flex justify-end bg-zinc-950/60">
@@ -221,5 +189,38 @@ export default function AuthModal({ onSession }: AuthModalProps) {
         </div>
       </div>
     </div>
+  )
+}
+
+/** Shared email/password fields for signin + signup tabs. */
+function EmailPasswordFields({
+  email, password, setEmail, setPassword, onSubmit,
+}: {
+  email: string; password: string
+  setEmail: (v: string) => void; setPassword: (v: string) => void
+  onSubmit: () => void
+}) {
+  return (
+    <>
+      <div>
+        <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Email Address</label>
+        <Input
+          type="email"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          placeholder="you@example.com"
+        />
+      </div>
+      <div>
+        <label className="block text-xs font-semibold text-zinc-300 mb-1.5">Password</label>
+        <Input
+          type="password"
+          value={password}
+          onChange={e => setPassword(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') onSubmit() }}
+          placeholder="••••••••"
+        />
+      </div>
+    </>
   )
 }

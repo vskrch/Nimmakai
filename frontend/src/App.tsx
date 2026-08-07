@@ -2,7 +2,7 @@ import React, { useState, useCallback, useEffect, Suspense } from 'react'
 import Sidebar from './components/Sidebar'
 import AuthModal, { type AuthSession } from './components/AuthModal'
 import ErrorBoundary from './components/ErrorBoundary'
-import { Toast, Button, OfflineBanner } from './components/ui'
+import { Toast, Button, OfflineBanner, Toaster } from './components/ui'
 import { useAuth, useSSE } from './hooks/useApi'
 import { useToastQueue } from './hooks/useToast'
 import { api, ap } from './lib/api'
@@ -239,6 +239,9 @@ export default function App() {
       {toasts.map(t => (
         <Toast key={t.id} message={t.message} type={t.type} onDismiss={() => dismiss(t.id)} duration={t.duration} />
       ))}
+
+      {/* shadcn Sonner toaster — available app-wide via toast.success/error */}
+      <Toaster />
     </div>
   )
 }

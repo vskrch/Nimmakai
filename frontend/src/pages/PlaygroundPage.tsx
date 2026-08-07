@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react'
-import { Card, CardHeader, CardBody, Button, Input, Select, Textarea } from '../components/ui'
+import { Card, CardHeader, CardBody, Button, Input, Select, Textarea, Slider } from '../components/ui'
 import { useCatalog } from '../hooks/useApi'
 import { getAuthKey } from '../lib/api'
 import {
@@ -199,14 +199,12 @@ export default function PlaygroundPage() {
                 <label className="text-xs font-semibold text-zinc-300">Temperature</label>
                 <span className="font-mono text-violet-300 font-bold">{params.temperature}</span>
               </div>
-              <input
-                type="range"
+              <Slider
+                value={[params.temperature]}
+                onValueChange={([v]) => setParams(p => ({ ...p, temperature: v }))}
                 min={0}
                 max={2}
                 step={0.1}
-                value={params.temperature}
-                onChange={e => setParams(p => ({ ...p, temperature: parseFloat(e.target.value) }))}
-                className="w-full accent-violet-500 cursor-pointer"
               />
             </div>
             <div>

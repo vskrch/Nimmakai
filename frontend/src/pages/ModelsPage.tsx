@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react'
-import { Card, CardBody, Badge, Button, Input, Spinner } from '../components/ui'
+import { Card, CardBody, Badge, Button, Input, Spinner, Switch } from '../components/ui'
 import { useCatalog } from '../hooks/useApi'
 import { ap, errMsg } from '../lib/api'
 import {
@@ -278,24 +278,11 @@ export default function ModelsPage() {
                       className={`hover:bg-white/[0.02] transition-colors ${!m.enabled ? 'opacity-50 bg-rose-500/[0.02]' : ''}`}
                     >
                       <td className="px-4 sm:px-6 py-4">
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={m.enabled}
+                        <Switch
+                          checked={m.enabled}
                           disabled={busy === m.id}
-                          onClick={() => toggleModel(m.id, !m.enabled)}
-                          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors duration-200 ease-in-out border ${
-                            m.enabled
-                              ? 'bg-emerald-500 border-emerald-400'
-                              : 'bg-zinc-800 border-zinc-700'
-                          } ${busy === m.id ? 'opacity-50' : ''}`}
-                        >
-                          <span
-                            className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out ${
-                              m.enabled ? 'translate-x-4' : 'translate-x-0.5'
-                            } mt-0.5`}
-                          />
-                        </button>
+                          onCheckedChange={(v) => toggleModel(m.id, v)}
+                        />
                       </td>
                       <td className="px-4 sm:px-6 py-4 min-w-0">
                         <strong className="text-white text-xs font-semibold block truncate">{m.name}</strong>
