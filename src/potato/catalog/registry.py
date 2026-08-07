@@ -1172,7 +1172,27 @@ class ModelRegistry:
             "health": self.health.snapshot(),
         }
 
+    def max_advertised_context(self) -> int:
+        """Honest context ceiling for synthetic potato/* model cards.
+
+        Returns the largest known context window across the active live pool,
+        so the advertised number never exceeds what the best available upstream
+        can actually handle — clients won't oversend and 400 upstream.
+        Falls back to 131072 (128K) when no live context is known yet.
+        """
+        try:
+            active = self.active_live_ids()
+            known = [
+                v
+                for mid, v in self.context_by_model.items()
+                if mid in active and isinstance(v, int) and v > 0
+            ]
+        except Exception:
+            known = []
+        return max(known) if known else 131072
+
     def synthetic_auto_model(self) -> dict[str, Any]:
+        ctx = self.max_advertised_context()
         return {
             "id": "potato/auto",
             "object": "model",
@@ -1181,6 +1201,9 @@ class ModelRegistry:
             "permission": [],
             "root": "potato/auto",
             "parent": None,
+            "context_length": ctx,
+            "max_model_len": ctx,
+            "supports_cache": True,
         }
 
     def synthetic_auto_models(self) -> list[dict[str, Any]]:
@@ -1201,11 +1224,11 @@ class ModelRegistry:
             "owned_by": "potato",
             "permission": [],
             "parent": None,
-            "context_length": 131072,
-            "max_model_len": 131072,
-            "max_output_tokens": 8192,
+            "context_length": self.max_advertised_context(),
+            "max_model_len": self.max_advertised_context(),
             "supports_tools": True,
             "supports_vision": True,
+            "supports_cache": True,
         }
         owned = {
             "openrouter/auto": "openrouter",
