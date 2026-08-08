@@ -207,7 +207,9 @@ def _analyze_success_body(
     embeddings (data[].embedding).
     """
     if not isinstance(body, dict):
-        return False, None if not had_tools else False
+        # Non-dict 2xx bodies (HTML error pages, text) are unusable — treat
+        # as an empty reply so the chain advances instead of serving garbage.
+        return True, False if had_tools else None
 
     path_l = (path or "").lower()
     is_completions = path_l.endswith("/completions") and "chat" not in path_l
@@ -474,18 +476,35 @@ class FallbackExecutor:
             logger.exception("provider availability check failed for model %s", model)
             return False
 
-    def _any_available_live_models(self, *, had_tools: bool = False) -> list[str]:
+    def _any_available_live_models(
+        self,
+        *,
+        had_tools: bool = False,
+        intent: str | None = None,
+        allowed_models: list[str] | None = None,
+        free_only: bool = False,
+    ) -> list[str]:
         """Every live model whose provider has a runtime — widest possible net.
 
         Used by the graceful fallback when the intent-aware chain is exhausted.
         Prefers models that support tools when tools were requested, but falls
         back to all live models rather than returning empty (serving > 503).
+        Hard routing constraints (``allowed_models`` / free-only) are
+        preserved so fallback never serves models the caller excluded, and the
+        result is quality + health ranked so fallback still prefers the
+        strongest responding models instead of arbitrary set order.
         """
         registry = self.registry
         active = list(getattr(registry, "active_live_ids", lambda: set())() or set())
         if not active:
             active = list(getattr(registry, "live_ids", set()) or set())
         available = [m for m in active if self._provider_available(m)]
+        if allowed_models or free_only:
+            from potato.routing.auto_router import filter_chain
+
+            available = filter_chain(
+                available, allowed_models=allowed_models or None, free_only=free_only
+            )
         if not available:
             return []
         if had_tools and hasattr(registry, "ladder"):
@@ -494,7 +513,18 @@ class FallbackExecutor:
                 m for m in available if (caps.get(m) or {}).get("supports_tools") is not False
             ]
             non_ok = [m for m in available if m not in set(tool_ok)]
-            return tool_ok + non_ok
+            available = tool_ok + non_ok
+        # Quality + health ranking: graceful fallback must still prefer the
+        # strongest responding models, not insertion/set order.
+        try:
+            ranked = registry.health_reorder(available, intent=intent or "chat_fast")
+            if ranked:
+                return ranked
+        except Exception:
+            logger.debug(
+                "graceful fallback quality ranking failed — using insertion order",
+                exc_info=True,
+            )
         return available
 
     async def _try_models(
@@ -511,6 +541,7 @@ class FallbackExecutor:
         chain_len: int,
         start_idx: int,
         last: UpstreamResult,
+        max_attempts: int,
     ) -> UpstreamResult:
         """Try a list of models sequentially; return first success or last failure."""
         import asyncio as _aio
@@ -519,7 +550,10 @@ class FallbackExecutor:
 
         from potato.compat import wrap_upstream_error as _wue
 
+        attempts = 0
         for offset, model in enumerate(models):
+            if attempts >= max_attempts:
+                break
             remaining = deadline - time.monotonic()
             if remaining < 3.0:
                 break
@@ -562,6 +596,7 @@ class FallbackExecutor:
                     timeout=budget,
                 )
             except (TimeoutError, RuntimeError, httpx.HTTPError, OSError):
+                attempts += 1
                 self._circuit_fail(pid)
                 self._record_outcome(
                     decision,
@@ -573,10 +608,42 @@ class FallbackExecutor:
                 )
                 continue
 
+            attempts += 1
             lat = (time.perf_counter() - t_attempt) * 1000
             success = 200 <= status < 300
             if success:
                 self._circuit_succeed(pid)
+                empty_reply, tool_ok = _analyze_success_body(
+                    resp_body, had_tools=had_tools, path=path
+                )
+                if empty_reply or (had_tools and tool_ok is False):
+                    # Soft-fail: 2xx with an unusable body (HTML/empty, or no
+                    # tool call when tools were requested) must not be served.
+                    self._circuit_fail(pid)
+                    self._record_outcome(
+                        decision,
+                        model,
+                        key.key_id if key else None,
+                        success=False,
+                        latency=(time.perf_counter() - t_attempt) / 1000,
+                        status_code=status,
+                        intent=decision.intent.value,
+                        empty_reply=empty_reply,
+                        had_tools=had_tools,
+                        tool_ok=tool_ok,
+                    )
+                    last = UpstreamResult(
+                        status_code=status,
+                        body=_wue(resp_body, status=status),
+                        headers=headers,
+                        key=key,
+                        model=model,
+                        fallback_index=start_idx + offset,
+                        decision=decision,
+                        upstream_ms=lat,
+                        provider_id=pid,
+                    )
+                    continue
                 pt = ct = cached = 0
                 if isinstance(resp_body, dict):
                     usage = resp_body.get("usage") or {}
@@ -650,10 +717,17 @@ class FallbackExecutor:
         return time.monotonic() + base
 
     def _max_n_for_intent(self, intent: str) -> int:
-        """Per-intent fallback cap from config (replaces coding_max_fallbacks)."""
+        """Per-intent fallback cap from config (replaces coding_max_fallbacks).
+
+        The universal ``max_model_fallbacks`` remains the hard ceiling: the
+        effective budget is min(per-intent cap, universal cap) so operators
+        can lower MAX_MODEL_FALLBACKS below a per-intent default and every
+        fallback phase (chain, fresh retries, graceful any-live) stays
+        within it.
+        """
         limits = getattr(self.settings, "intent_max_fallbacks", {}) or {}
         default = int(getattr(self.settings, "max_model_fallbacks", 10) or 10)
-        return int(limits.get(intent, default))
+        return max(1, min(int(limits.get(intent, default)), default))
 
     def _attempt_budget_for(self, intent: str, remaining: float) -> float:
         """Per-intent attempt budget (replaces hardcoded 45.0)."""
@@ -732,9 +806,6 @@ class FallbackExecutor:
     def _chain(self, decision: RouteDecision, *, had_tools: bool = False) -> list[str]:
         max_n = self._max_n_for_intent(decision.intent.value)
         is_auto = self._is_auto_decision(decision)
-        # Auto gets a longer attempt budget so intent can always be served
-        if is_auto:
-            max_n = max(max_n, 12)
 
         raw = list(decision.chain)
         # For auto: widen with related-intent models before execution so
@@ -1001,6 +1072,15 @@ class FallbackExecutor:
             elif is_auto and overflow:
                 # Only overflow known — still try rather than 503
                 available = overflow
+        # Hard routing constraints (allowed_models / free-only) must hold for
+        # every model that reaches execution — auto expansion, escalation
+        # tails, and healing can add models outside the caller's allowlist.
+        allowed = list(getattr(decision, "allowed_models", None) or [])
+        free_only = str(getattr(decision, "auto_tier", "") or "").lower() == "free"
+        if allowed or free_only:
+            from potato.routing.auto_router import filter_chain
+
+            available = filter_chain(available, allowed_models=allowed or None, free_only=free_only)
         chain = available[: max(1, max_n)]
         # Final auto guarantee
         if not chain and is_auto:
@@ -1091,6 +1171,8 @@ class FallbackExecutor:
         from potato.compat import openai_error
 
         deadline = self._make_deadline(decision.intent.value)
+        max_attempts = max(1, self._max_n_for_intent(decision.intent.value))
+        attempts = 0
 
         for idx, model in enumerate(chain):
             remaining = deadline - time.monotonic()
@@ -1194,6 +1276,7 @@ class FallbackExecutor:
                     timeout=attempt_budget,
                 )
             except TimeoutError:
+                attempts += 1
                 self._circuit_fail(pid)
                 self._emit_span(
                     self._make_upstream_span(
@@ -1232,6 +1315,7 @@ class FallbackExecutor:
                 )
                 break
             except (RuntimeError, httpx.HTTPError, OSError) as exc:
+                attempts += 1
                 msg = str(exc).lower()
                 retryable_pool = (
                     isinstance(exc, (httpx.HTTPError, OSError))
@@ -1242,6 +1326,7 @@ class FallbackExecutor:
                     or "not available" in msg
                     or "provider" in msg
                     or "circuit" in msg
+                    or "invalid json" in msg
                 )
                 self._circuit_fail(pid)
                 self._emit_span(
@@ -1293,6 +1378,7 @@ class FallbackExecutor:
                     break
                 raise
 
+            attempts += 1
             key_id = key.key_id if key else None
             unavailable = _is_model_not_found(status, resp_body)
             success = 200 <= status < 300
@@ -1472,7 +1558,7 @@ class FallbackExecutor:
         if last.status_code >= 400:
             # ── Last-resort: clear cooldowns, force-allow providers, retry fresh models ──
             remaining = deadline - time.monotonic()
-            if remaining >= 5.0:
+            if remaining >= 5.0 and attempts < max_attempts:
                 if hasattr(self.registry, "health"):
                     for h in self.registry.health._by_model.values():
                         h.cooldown_until = 0.0
@@ -1512,6 +1598,8 @@ class FallbackExecutor:
                         rem2 = deadline - time.monotonic()
                         if rem2 < 3.0:
                             break
+                        if attempts >= max_attempts:
+                            break
                         try:
                             client2, upstream_mid2 = self._client_for(model2)
                         except RuntimeError:
@@ -1543,6 +1631,7 @@ class FallbackExecutor:
                                 timeout=budget2,
                             )
                         except TimeoutError:
+                            attempts += 1
                             self._circuit_fail(pid2)
                             self._record_outcome(
                                 decision,
@@ -1554,6 +1643,7 @@ class FallbackExecutor:
                             )
                             continue
                         except (RuntimeError, httpx.HTTPError, OSError):
+                            attempts += 1
                             self._circuit_fail(pid2)
                             self._record_outcome(
                                 decision,
@@ -1565,6 +1655,7 @@ class FallbackExecutor:
                             )
                             continue
 
+                        attempts += 1
                         lat2 = (time.perf_counter() - t2) * 1000
                         if 200 <= s2 < 300:
                             self._circuit_succeed(pid2)
@@ -1664,11 +1755,18 @@ class FallbackExecutor:
             # When the intent-aware chain and fresh retries are exhausted,
             # cast the widest net: every live model whose provider has a
             # runtime. Better to serve with a "wrong-intent" model than 503.
-            if last.status_code >= 400:
+            if last.status_code >= 400 and self._is_auto_decision(decision):
                 remaining = deadline - time.monotonic()
-                if remaining >= 3.0:
+                if remaining >= 3.0 and attempts < max_attempts:
                     try:
-                        any_live = self._any_available_live_models(had_tools=had_tools)
+                        any_live = self._any_available_live_models(
+                            had_tools=had_tools,
+                            intent=decision.intent.value,
+                            allowed_models=list(getattr(decision, "allowed_models", None) or []),
+                            free_only=(
+                                str(getattr(decision, "auto_tier", "") or "").lower() == "free"
+                            ),
+                        )
                         already = {m.lower() for m in chain} | {m.lower() for m in fresh}
                         untried_any = [m for m in any_live if m.lower() not in already]
                         if untried_any:
@@ -1690,6 +1788,7 @@ class FallbackExecutor:
                                 chain_len=len(chain),
                                 start_idx=len(chain),
                                 last=last,
+                                max_attempts=max(0, max_attempts - attempts),
                             )
                     except Exception:
                         logger.exception("graceful fallback failed")
@@ -1774,6 +1873,8 @@ class FallbackExecutor:
         saw_ttft_stall = False
         saw_deadline = False
         deadline = self._make_deadline(decision.intent.value)
+        max_attempts = max(1, self._max_n_for_intent(decision.intent.value))
+        attempts = 0
 
         def _error_bytes(
             message: str,
@@ -1844,6 +1945,7 @@ class FallbackExecutor:
                     timeout=attempt_budget,
                 )
             except TimeoutError:
+                attempts += 1
                 self._circuit_fail(pid)
                 self._emit_span(
                     self._make_upstream_span(
@@ -1868,6 +1970,7 @@ class FallbackExecutor:
                 saw_deadline = True
                 break
             except (RuntimeError, httpx.HTTPError, OSError) as exc:
+                attempts += 1
                 self._circuit_fail(pid)
                 self._emit_span(
                     self._make_upstream_span(
@@ -1900,6 +2003,7 @@ class FallbackExecutor:
                 model,
                 pid,
             )
+            attempts += 1
 
             if 200 <= status < 300:
                 import asyncio
@@ -2379,7 +2483,7 @@ class FallbackExecutor:
 
         # ── Last-resort: clear cooldowns, force-allow providers, retry fresh models ──
         remaining = deadline - time.monotonic()
-        if remaining >= 5.0 and last_status >= 400:
+        if remaining >= 5.0 and last_status >= 400 and attempts < max_attempts:
             if hasattr(self.registry, "health"):
                 for h in self.registry.health._by_model.values():
                     h.cooldown_until = 0.0
@@ -2418,6 +2522,8 @@ class FallbackExecutor:
                     if rem2 < 3.0:
                         saw_deadline = True
                         break
+                    if attempts >= max_attempts:
+                        break
                     pid2 = self._provider_id_for(model2)
                     try:
                         client2, upstream_mid2 = self._client_for(model2)
@@ -2425,6 +2531,24 @@ class FallbackExecutor:
                         self._circuit_fail(pid2)
                         continue
                     attempt_body2 = {**body, "model": upstream_mid2}
+                    from potato.compat import normalize_reasoning_effort as _nre2
+
+                    attempt_body2 = _nre2(
+                        attempt_body2,
+                        routed_model=model2,
+                        registry=self.registry,
+                        default_effort=getattr(self.settings, "default_reasoning_effort", ""),
+                    )
+                    if hasattr(self.registry, "ladder"):
+                        rec2 = self.registry.ladder.model_recommendations(model2)
+                        if rec2:
+                            ml2 = rec2.get("max_tokens_limit")
+                            if ml2 and not attempt_body2.get("max_tokens"):
+                                attempt_body2["max_tokens"] = ml2
+                            elif ml2 and attempt_body2.get("max_tokens"):
+                                attempt_body2["max_tokens"] = min(
+                                    attempt_body2["max_tokens"], ml2
+                                )
                     time.perf_counter()
                     try:
                         budget2 = max(1.0, min(rem2, 45.0))
@@ -2440,6 +2564,7 @@ class FallbackExecutor:
                             timeout=budget2,
                         )
                     except (TimeoutError, RuntimeError, httpx.HTTPError, OSError):
+                        attempts += 1
                         self._circuit_fail(pid2)
                         self._record_outcome(
                             decision,
@@ -2451,6 +2576,7 @@ class FallbackExecutor:
                         )
                         continue
 
+                    attempts += 1
                     if 200 <= s2 < 300:
                         ct2 = (hd2.get("content-type") or hd2.get("Content-Type") or "").lower()
                         if "application/json" in ct2 and "text/event-stream" not in ct2:
@@ -2743,13 +2869,27 @@ class FallbackExecutor:
         # When the intent-aware chain and fresh retries are exhausted,
         # cast the widest net: every live model whose provider has a
         # runtime. Better to serve with a "wrong-intent" model than 503.
-        if last_status >= 400 and not saw_deadline:
+        # Auto decisions only — explicit model requests are never served by
+        # a different model — and hard constraints (allowed/free) preserved.
+        if (
+            last_status >= 400
+            and not saw_deadline
+            and self._is_auto_decision(decision)
+        ):
             remaining = deadline - time.monotonic()
-            if remaining >= 3.0:
+            if remaining >= 3.0 and attempts < max_attempts:
                 try:
-                    any_live = self._any_available_live_models(had_tools=had_tools)
+                    any_live = self._any_available_live_models(
+                        had_tools=had_tools,
+                        intent=decision.intent.value,
+                        allowed_models=list(getattr(decision, "allowed_models", None) or []),
+                        free_only=(
+                            str(getattr(decision, "auto_tier", "") or "").lower() == "free"
+                        ),
+                    )
                     already = {m.lower() for m in chain} | {m.lower() for m in (fresh if 'fresh' in dir() else [])}
                     untried_any = [m for m in any_live if m.lower() not in already]
+                    untried_any = untried_any[: max(0, max_attempts - attempts)]
                     if untried_any:
                         logger.warning(
                             "stream graceful fallback: trying %s any-provider "
@@ -2761,6 +2901,8 @@ class FallbackExecutor:
                             rem_g = deadline - time.monotonic()
                             if rem_g < 3.0:
                                 break
+                            if attempts >= max_attempts:
+                                break
                             pid_g = self._provider_id_for(model_g)
                             try:
                                 client_g, upstream_mid_g = self._client_for(model_g)
@@ -2768,6 +2910,26 @@ class FallbackExecutor:
                                 self._circuit_fail(pid_g)
                                 continue
                             attempt_body_g = {**body, "model": upstream_mid_g}
+                            from potato.compat import normalize_reasoning_effort as _nre_g
+
+                            attempt_body_g = _nre_g(
+                                attempt_body_g,
+                                routed_model=model_g,
+                                registry=self.registry,
+                                default_effort=getattr(
+                                    self.settings, "default_reasoning_effort", ""
+                                ),
+                            )
+                            if hasattr(self.registry, "ladder"):
+                                rec_g = self.registry.ladder.model_recommendations(model_g)
+                                if rec_g:
+                                    ml_g = rec_g.get("max_tokens_limit")
+                                    if ml_g and not attempt_body_g.get("max_tokens"):
+                                        attempt_body_g["max_tokens"] = ml_g
+                                    elif ml_g and attempt_body_g.get("max_tokens"):
+                                        attempt_body_g["max_tokens"] = min(
+                                            attempt_body_g["max_tokens"], ml_g
+                                        )
                             try:
                                 budget_g = max(1.0, min(rem_g, 45.0))
                                 s_g, byte_iter_g, hd_g, k_g = await _aio_s.wait_for(
@@ -2782,6 +2944,7 @@ class FallbackExecutor:
                                     timeout=budget_g,
                                 )
                             except (TimeoutError, RuntimeError, httpx.HTTPError, OSError):
+                                attempts += 1
                                 self._circuit_fail(pid_g)
                                 self._record_outcome(
                                     decision,
@@ -2793,6 +2956,7 @@ class FallbackExecutor:
                                 )
                                 continue
 
+                            attempts += 1
                             if 200 <= s_g < 300:
                                 ct_g = (hd_g.get("content-type") or hd_g.get("Content-Type") or "").lower()
                                 if "application/json" in ct_g and "text/event-stream" not in ct_g:

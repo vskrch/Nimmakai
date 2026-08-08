@@ -81,6 +81,25 @@ def test_analyze_responses_output_not_empty() -> None:
     assert empty is False
 
 
+def test_analyze_non_dict_success_body_is_soft_fail() -> None:
+    """Non-dict 2xx bodies (HTML/text error pages) must count as empty replies
+    so the fallback chain advances instead of serving garbage."""
+    empty, tool_ok = _analyze_success_body(
+        "<html>upstream gateway error</html>",
+        had_tools=False,
+        path="/chat/completions",
+    )
+    assert empty is True
+    assert tool_ok is None
+    empty, tool_ok = _analyze_success_body(
+        "plain text",
+        had_tools=True,
+        path="/chat/completions",
+    )
+    assert empty is True
+    assert tool_ok is False
+
+
 def test_analyze_chat_empty_still_empty() -> None:
     empty, tool_ok = _analyze_success_body(
         {"choices": [{"message": {"content": ""}}]},

@@ -700,7 +700,13 @@ async def test_graceful_fallback_tries_any_live_model(
 ) -> None:
     """When the entire intent chain fails, graceful fallback casts the
     widest net: any live model whose provider has a runtime."""
-    settings = Settings(nim_api_keys=["k"], max_model_fallbacks=2, request_deadline_seconds=10.0)
+    settings = Settings(
+        nim_api_keys=["k"],
+        max_model_fallbacks=5,
+        request_deadline_seconds=10.0,
+        retry_backoff_base_seconds=0.0,
+        retry_backoff_cap_seconds=0.0,
+    )
     reg = ModelRegistry.from_yaml(YAML)
     reg.live_ids = {"model-a", "model-b", "model-c"}
 
@@ -732,3 +738,265 @@ async def test_graceful_fallback_tries_any_live_model(
     result = await ex.execute_json("/chat/completions", {"messages": []}, decision)
     assert result.status_code == 200
     assert result.model == "model-c"
+
+
+# ── Resiliency hardening: bounded attempts + constraint-preserving fallback ──
+
+
+@pytest.mark.asyncio
+async def test_fallback_honors_universal_attempt_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MAX_MODEL_FALLBACKS is the hard ceiling across chain + last-resort +
+    graceful phases — the escape paths must not silently bypass the cap."""
+    settings = Settings(
+        nim_api_keys=["k"],
+        max_model_fallbacks=1,
+        intent_max_fallbacks={"chat_fast": 1},
+        request_deadline_seconds=10.0,
+        retry_backoff_base_seconds=0.0,
+        retry_backoff_cap_seconds=0.0,
+    )
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b", "model-c"}
+    calls: list[str] = []
+
+    async def fake_json(method, path, **kwargs):
+        model = (kwargs.get("json_body") or {}).get("model", "")
+        calls.append(model)
+        return 503, {"error": {"message": "down"}}, {}, _key()
+
+    upstream = AsyncMock()
+    upstream.request_json = fake_json
+    decision = RouteDecision(
+        chain=["model-a"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    monkeypatch.setattr(ex, "_provider_available", lambda _m: True)
+    result = await ex.execute_json("/chat/completions", {"messages": []}, decision)
+    assert result.status_code == 503
+    assert calls == ["model-a"]
+
+
+@pytest.mark.asyncio
+async def test_graceful_fallback_respects_allowed_models(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Graceful any-live fallback must preserve allowed_models constraints —
+    models the caller excluded are never attempted, even on total failure."""
+    settings = Settings(
+        nim_api_keys=["k"],
+        max_model_fallbacks=5,
+        request_deadline_seconds=10.0,
+        retry_backoff_base_seconds=0.0,
+        retry_backoff_cap_seconds=0.0,
+    )
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b", "model-c"}
+    calls: list[str] = []
+
+    async def fake_json(method, path, **kwargs):
+        model = (kwargs.get("json_body") or {}).get("model", "")
+        calls.append(model)
+        return 503, {"error": {"message": "down"}}, {}, _key()
+
+    upstream = AsyncMock()
+    upstream.request_json = fake_json
+    decision = RouteDecision(
+        chain=["model-a"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+        allowed_models=["model-a"],
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    monkeypatch.setattr(ex, "_provider_available", lambda _m: True)
+    result = await ex.execute_json("/chat/completions", {"messages": []}, decision)
+    assert result.status_code == 503
+    assert calls == ["model-a"]
+
+
+@pytest.mark.asyncio
+async def test_graceful_fallback_skipped_for_explicit_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicit model request must never be served by a different model:
+    graceful any-live fallback runs only for auto-router decisions."""
+    settings = Settings(
+        nim_api_keys=["k"],
+        max_model_fallbacks=5,
+        request_deadline_seconds=10.0,
+        retry_backoff_base_seconds=0.0,
+        retry_backoff_cap_seconds=0.0,
+    )
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b"}
+    calls: list[str] = []
+
+    async def fake_json(method, path, **kwargs):
+        model = (kwargs.get("json_body") or {}).get("model", "")
+        calls.append(model)
+        if model == "model-b":
+            return 200, {"choices": [{"message": {"content": "b"}}]}, {}, _key(1)
+        return 503, {"error": {"message": "down"}}, {}, _key()
+
+    upstream = AsyncMock()
+    upstream.request_json = fake_json
+    decision = RouteDecision(
+        chain=["model-a"],
+        mode="passthrough_with_fallback",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="model-a",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    monkeypatch.setattr(ex, "_provider_available", lambda _m: True)
+    result = await ex.execute_json("/chat/completions", {"messages": []}, decision)
+    assert result.status_code == 503
+    assert calls == ["model-a"]
+
+
+@pytest.mark.asyncio
+async def test_stream_graceful_fallback_tries_any_live_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Streaming path: chain models fail to open, an any-live model serves."""
+    settings = Settings(
+        nim_api_keys=["k"],
+        max_model_fallbacks=5,
+        request_deadline_seconds=10.0,
+        retry_backoff_base_seconds=0.0,
+        retry_backoff_cap_seconds=0.0,
+    )
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b", "model-c"}
+
+    async def fake_stream(method, path, **kwargs):
+        model = (kwargs.get("json_body") or {}).get("model", "")
+        if model in ("model-a", "model-b"):
+
+            async def err():
+                yield b'data: {"error": {"message": "down"}}\n\n'
+
+            return 503, err(), {}, _key()
+        if model == "model-c":
+
+            async def ok():
+                yield b'data: {"choices": [{"delta": {"content": "ok"}}]}\n\n'
+
+            return 200, ok(), {"content-type": "text/event-stream"}, _key(2)
+        raise AssertionError(f"unexpected model {model}")
+
+    upstream = AsyncMock()
+    upstream.stream = fake_stream
+    decision = RouteDecision(
+        chain=["model-a", "model-b"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    monkeypatch.setattr(ex, "_provider_available", lambda _m: True)
+    result = await ex.execute_stream("/chat/completions", {"messages": []}, decision)
+    assert result.status_code == 200
+    assert result.model == "model-c"
+    chunks = b"".join([c async for c in result.byte_iter])
+    assert b"ok" in chunks
+
+
+@pytest.mark.asyncio
+async def test_malformed_success_body_advances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 2xx with an unusable body (HTML/text) is a soft-fail: the chain must
+    advance instead of serving garbage to the client."""
+    settings = Settings(
+        nim_api_keys=["k"],
+        max_model_fallbacks=5,
+        request_deadline_seconds=10.0,
+        retry_backoff_base_seconds=0.0,
+        retry_backoff_cap_seconds=0.0,
+    )
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b"}
+    calls: list[str] = []
+
+    async def fake_json(method, path, **kwargs):
+        model = (kwargs.get("json_body") or {}).get("model", "")
+        calls.append(model)
+        if model == "model-a":
+            return 200, "<html>upstream gateway error</html>", {}, _key()
+        return (
+            200,
+            {"id": "ok", "model": model, "choices": [{"message": {"content": "ok"}}]},
+            {},
+            _key(1),
+        )
+
+    upstream = AsyncMock()
+    upstream.request_json = fake_json
+    decision = RouteDecision(
+        chain=["model-a", "model-b"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    monkeypatch.setattr(ex, "_provider_available", lambda _m: True)
+    result = await ex.execute_json("/chat/completions", {"messages": []}, decision)
+    assert result.status_code == 200
+    assert result.model == "model-b"
+    assert calls == ["model-a", "model-b"]
+
+
+@pytest.mark.asyncio
+async def test_upstream_invalid_json_advances(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transport-class failures (malformed JSON body) must advance the chain
+    instead of raising out of the request path."""
+    settings = Settings(
+        nim_api_keys=["k"],
+        max_model_fallbacks=5,
+        request_deadline_seconds=10.0,
+        retry_backoff_base_seconds=0.0,
+        retry_backoff_cap_seconds=0.0,
+    )
+    reg = ModelRegistry.from_yaml(YAML)
+    reg.live_ids = {"model-a", "model-b"}
+    calls: list[str] = []
+
+    async def fake_json(method, path, **kwargs):
+        model = (kwargs.get("json_body") or {}).get("model", "")
+        calls.append(model)
+        if model == "model-a":
+            raise RuntimeError("upstream returned invalid JSON body (HTTP 200)")
+        return (
+            200,
+            {"id": "ok", "model": model, "choices": [{"message": {"content": "ok"}}]},
+            {},
+            _key(1),
+        )
+
+    upstream = AsyncMock()
+    upstream.request_json = fake_json
+    decision = RouteDecision(
+        chain=["model-a", "model-b"],
+        mode="auto",
+        intent=Intent.CHAT_FAST,
+        rule_id="test",
+        requested_model="auto",
+    )
+    ex = FallbackExecutor(upstream, reg, settings)
+    monkeypatch.setattr(ex, "_provider_available", lambda _m: True)
+    result = await ex.execute_json("/chat/completions", {"messages": []}, decision)
+    assert result.status_code == 200
+    assert result.model == "model-b"
+    assert calls == ["model-a", "model-b"]

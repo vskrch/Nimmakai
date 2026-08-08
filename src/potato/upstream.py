@@ -174,7 +174,14 @@ class UpstreamClient:
 
                 content_type = resp.headers.get("content-type", "")
                 if "application/json" in content_type:
-                    body: Any = resp.json()
+                    try:
+                        body = resp.json()
+                    except Exception as exc:
+                        # Malformed upstream JSON is a transport-class failure:
+                        # raise so the fallback executor advances the chain.
+                        raise RuntimeError(
+                            f"upstream returned invalid JSON body (HTTP {resp.status_code})"
+                        ) from exc
                 else:
                     body = resp.text
 
