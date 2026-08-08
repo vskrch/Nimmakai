@@ -59,15 +59,32 @@ class ProviderCircuitBreaker:
             return True
         return False
 
+    def blocked(self, provider_id: str) -> bool:
+        """True when requests to this provider are hard-skipped (open + cooldown pending).
+
+        Non-mutating: safe for chain building / availability checks, unlike
+        ``allow()`` which consumes probe slots and transitions state.
+        """
+        pid = (provider_id or "").lower()
+        if self._state.get(pid, BreakerState.CLOSED) != BreakerState.OPEN:
+            return False
+        return time.monotonic() < self._open_until.get(pid, 0.0)
+
     def any_closed(self, provider_ids: set[str] | list[str]) -> bool:
-        """True if at least one provider is NOT in open state."""
-        return any(self.allow(pid) for pid in provider_ids)
+        """True if at least one provider is NOT hard-skipped (may serve now)."""
+        return any(not self.blocked(pid) for pid in provider_ids)
 
     def force_allow(self, provider_id: str) -> None:
-        """Last-resort: force a provider to half-open so it can be tried."""
+        """Last-resort: let a probe through immediately.
+
+        Resets failure count so the next probe gets a clean backoff baseline
+        (without this, accumulated failures cause exponentially growing backoff
+        that makes recovery take hours after many consecutive failures).
+        """
         pid = provider_id.lower()
         self._state[pid] = BreakerState.HALF_OPEN
-        self._last_probe[pid] = time.monotonic()
+        self._failures[pid] = 0
+        self._open_until.pop(pid, None)
 
     def fail(self, provider_id: str) -> None:
         """Record a failure from this provider."""

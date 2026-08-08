@@ -824,6 +824,23 @@ class FallbackExecutor:
                 )
         # Drop models whose provider has no active keys/runtime (production safety)
         available = [m for m in raw if self._provider_available(m)]
+        # Resilience: drop models whose provider circuit is hard-open so the
+        # next-best provider actually gets picked instead of burning attempts
+        # on a dead provider. Keep at least one candidate when every provider
+        # is down — client_for_model force-allows the last resort then.
+        if self.hub is not None and len(available) > 1:
+            cb = getattr(self.hub, "circuit_breaker", None)
+            if cb is not None:
+                circuit_open = [m for m in available if cb.blocked(self._provider_id_for(m))]
+                if circuit_open and len(circuit_open) < len(available):
+                    dropped = set(circuit_open)
+                    available = [m for m in available if m not in dropped]
+                    logger.info(
+                        "circuit filter: dropped %s model(s) on open provider circuit "
+                        "(intent=%s)",
+                        len(circuit_open),
+                        decision.intent.value,
+                    )
         if not available:
             # Self-heal: intent-aware multi-ladder rebuild, then emergency
             try:
@@ -1098,7 +1115,19 @@ class FallbackExecutor:
                     self.stats.fallback_advances += 1
                     logger.info("client_for_model failed on %s: %s; advancing", model, exc)
                     continue
-                return UpstreamResult(
+                # Last model's provider unavailable — do NOT fail cold; fall
+                # through to the last-resort force-allow + fresh-model retry.
+                pid_fail = self._provider_id_for(model)
+                self._record_outcome(
+                    decision,
+                    model,
+                    None,
+                    success=False,
+                    status_code=503,
+                    unavailable=True,
+                    intent=decision.intent.value,
+                )
+                last = UpstreamResult(
                     status_code=503,
                     body={
                         "error": {
@@ -1112,7 +1141,9 @@ class FallbackExecutor:
                     model=model,
                     fallback_index=idx,
                     decision=decision,
+                    provider_id=pid_fail,
                 )
+                break
             attempt_body = {**body, "model": upstream_mid}
             # Per-model reasoning_effort normalization (resilience: a reasoning
             # head failing over to a non-reasoning model strips the field).
@@ -1183,7 +1214,9 @@ class FallbackExecutor:
                     )
                     logger.info("json attempt deadline on %s; falling back", model)
                     continue
-                return UpstreamResult(
+                # Last model timeout — do NOT return cold; fall through to
+                # last-resort force-allow + fresh-model retry.
+                last = UpstreamResult(
                     status_code=504,
                     body=openai_error(
                         "Upstream attempt exceeded request deadline.",
@@ -1197,6 +1230,7 @@ class FallbackExecutor:
                     decision=decision,
                     provider_id=pid,
                 )
+                break
             except (RuntimeError, httpx.HTTPError, OSError) as exc:
                 msg = str(exc).lower()
                 retryable_pool = (
@@ -1237,7 +1271,9 @@ class FallbackExecutor:
                     )
                     continue
                 if retryable_pool:
-                    return UpstreamResult(
+                    # Last model pool-exhausted — do NOT return cold; fall
+                    # through to last-resort force-allow + fresh-model retry.
+                    last = UpstreamResult(
                         status_code=503,
                         body={
                             "error": {
@@ -1254,6 +1290,7 @@ class FallbackExecutor:
                         upstream_ms=(time.perf_counter() - t_attempt) * 1000,
                         provider_id=pid,
                     )
+                    break
                 raise
 
             key_id = key.key_id if key else None
@@ -1725,6 +1762,7 @@ class FallbackExecutor:
                 decision=decision,
             )
 
+        import asyncio as _aio_s
         import json as _json
 
         import httpx
@@ -1766,23 +1804,18 @@ class FallbackExecutor:
                     self.stats.fallback_advances += 1
                     logger.info("stream client_for failed on %s: %s; advancing", model, exc)
                     continue
-                last_status, last_model, last_pid = 503, model, pid
-
-                async def fail_client(
-                    msg: str = str(exc),
-                ) -> AsyncIterator[bytes]:
-                    yield _error_bytes(msg, code="potato_provider_unavailable", status=503)
-
-                return StreamResult(
+                # Last model's provider unavailable — do NOT fail cold; fall
+                # through to the last-resort force-allow + fresh-model retry.
+                self._record_outcome(
+                    decision,
+                    model,
+                    None,
+                    success=False,
                     status_code=503,
-                    byte_iter=fail_client(),
-                    headers={"content-type": "text/event-stream"},
-                    key=None,
-                    model=model,
-                    fallback_index=idx,
-                    decision=decision,
-                    provider_id=pid,
+                    intent=decision.intent.value,
                 )
+                last_status, last_model, last_pid = 503, model, pid
+                break
             attempt_body = {**body, "model": upstream_mid}
             # Per-model reasoning_effort normalization (resilience: a reasoning
             # head failing over to a non-reasoning model strips the field).
@@ -1855,23 +1888,10 @@ class FallbackExecutor:
                     )
                     logger.info("stream pool/transport on %s: %s; advancing", model, exc)
                     continue
+                # Last model transport error — do NOT return cold; fall
+                # through to the last-resort force-allow + fresh-model retry.
                 last_status, last_model, last_pid = 503, model, pid
-
-                async def fail_transport(
-                    msg: str = str(exc),
-                ) -> AsyncIterator[bytes]:
-                    yield _error_bytes(msg, code="potato_pool_exhausted", status=503)
-
-                return StreamResult(
-                    status_code=503,
-                    byte_iter=fail_transport(),
-                    headers={"content-type": "text/event-stream"},
-                    key=None,
-                    model=model,
-                    fallback_index=idx,
-                    decision=decision,
-                    provider_id=pid,
-                )
+                break
 
             last_status, _last_headers, last_key, last_model, last_pid = (
                 status,
@@ -2718,6 +2738,291 @@ class FallbackExecutor:
                         intent=decision.intent.value,
                     )
                     last_status, last_model, last_pid = s2, model2, pid2
+
+        # ── Graceful fallback: try ANY live model from ANY provider ──
+        # When the intent-aware chain and fresh retries are exhausted,
+        # cast the widest net: every live model whose provider has a
+        # runtime. Better to serve with a "wrong-intent" model than 503.
+        if last_status >= 400 and not saw_deadline:
+            remaining = deadline - time.monotonic()
+            if remaining >= 3.0:
+                try:
+                    any_live = self._any_available_live_models(had_tools=had_tools)
+                    already = {m.lower() for m in chain} | {m.lower() for m in (fresh if 'fresh' in dir() else [])}
+                    untried_any = [m for m in any_live if m.lower() not in already]
+                    if untried_any:
+                        logger.warning(
+                            "stream graceful fallback: trying %s any-provider "
+                            "live models (intent=%s, chain exhausted)",
+                            len(untried_any),
+                            decision.intent.value,
+                        )
+                        for offset, model_g in enumerate(untried_any):
+                            rem_g = deadline - time.monotonic()
+                            if rem_g < 3.0:
+                                break
+                            pid_g = self._provider_id_for(model_g)
+                            try:
+                                client_g, upstream_mid_g = self._client_for(model_g)
+                            except RuntimeError:
+                                self._circuit_fail(pid_g)
+                                continue
+                            attempt_body_g = {**body, "model": upstream_mid_g}
+                            try:
+                                budget_g = max(1.0, min(rem_g, 45.0))
+                                s_g, byte_iter_g, hd_g, k_g = await _aio_s.wait_for(
+                                    client_g.stream(
+                                        "POST",
+                                        path,
+                                        json_body=attempt_body_g,
+                                        forward_headers=forward_headers,
+                                        preferred_key_id=preferred_key_id,
+                                        max_retries=2,
+                                    ),
+                                    timeout=budget_g,
+                                )
+                            except (TimeoutError, RuntimeError, httpx.HTTPError, OSError):
+                                self._circuit_fail(pid_g)
+                                self._record_outcome(
+                                    decision,
+                                    model_g,
+                                    None,
+                                    success=False,
+                                    status_code=503,
+                                    intent=decision.intent.value,
+                                )
+                                continue
+
+                            if 200 <= s_g < 300:
+                                ct_g = (hd_g.get("content-type") or hd_g.get("Content-Type") or "").lower()
+                                if "application/json" in ct_g and "text/event-stream" not in ct_g:
+                                    raw_parts_g: list[bytes] = []
+                                    try:
+                                        async for chunk in byte_iter_g:
+                                            raw_parts_g.append(chunk)
+                                            if sum(len(c) for c in raw_parts_g) > 2_000_000:
+                                                break
+                                    except Exception:
+                                        pass
+                                    if hasattr(byte_iter_g, "aclose"):
+                                        with suppress(Exception):
+                                            await byte_iter_g.aclose()
+                                    raw_g = b"".join(raw_parts_g)
+                                    try:
+                                        parsed_g = _json.loads(raw_g.decode("utf-8", errors="replace"))
+                                    except Exception:
+                                        parsed_g = raw_g.decode("utf-8", errors="replace")
+                                    sse_payload_g = json_body_to_sse(parsed_g, routed_model=model_g)
+                                    self._circuit_succeed(pid_g)
+                                    self.stats.record(decision.intent.value, model_g, advanced=True)
+
+                                    async def json_as_sse_g(p: bytes = sse_payload_g) -> AsyncIterator[bytes]:
+                                        yield p
+
+                                    return StreamResult(
+                                        status_code=200,
+                                        byte_iter=json_as_sse_g(),
+                                        headers={**hd_g, "content-type": "text/event-stream"},
+                                        key=k_g,
+                                        model=model_g,
+                                        fallback_index=len(chain) + offset,
+                                        decision=decision,
+                                        provider_id=pid_g,
+                                    )
+
+                                ttft_g = float(
+                                    getattr(self.settings, "stream_ttft_timeout_seconds", 12.0) or 12.0
+                                )
+                                t_stream_g = time.monotonic()
+                                try:
+                                    first_chunk_g = await _aio_s.wait_for(anext(byte_iter_g), timeout=ttft_g)
+                                except (StopAsyncIteration, TimeoutError, Exception):
+                                    self._circuit_fail(pid_g)
+                                    if hasattr(byte_iter_g, "aclose"):
+                                        with suppress(Exception):
+                                            await byte_iter_g.aclose()
+                                    self._record_outcome(
+                                        decision,
+                                        model_g,
+                                        k_g.key_id if k_g else None,
+                                        success=False,
+                                        status_code=504,
+                                        intent=decision.intent.value,
+                                    )
+                                    continue
+
+                                self._circuit_succeed(pid_g)
+                                ttft_lat_g = max(0.01, time.monotonic() - t_stream_g)
+                                self._record_outcome(
+                                    decision,
+                                    model_g,
+                                    k_g.key_id if k_g else None,
+                                    success=True,
+                                    latency=ttft_lat_g,
+                                    status_code=s_g,
+                                    intent=decision.intent.value,
+                                    had_tools=had_tools,
+                                )
+                                self.stats.record(decision.intent.value, model_g, advanced=True)
+                                bound_model_g = model_g
+                                bound_key_id_g = k_g.key_id if k_g else None
+                                bound_idle_g = float(
+                                    getattr(self.settings, "stream_idle_timeout_seconds", 300.0) or 300.0
+                                )
+                                bound_t0_g = t_stream_g
+                                bound_ttft_ms_g = ttft_lat_g * 1000
+                                usage_bag_g: dict[str, int] = {
+                                    "prompt_tokens": 0,
+                                    "completion_tokens": 0,
+                                    "cached_tokens": 0,
+                                }
+                                result_holder_g: dict[str, StreamResult | None] = {"r": None}
+
+                                async def robust_iter_g(
+                                    first: bytes,
+                                    rest: AsyncIterator[bytes],
+                                    *,
+                                    mid: str = bound_model_g,
+                                    kid: str | None = bound_key_id_g,
+                                    idle_s: float = bound_idle_g,
+                                    t0: float = bound_t0_g,
+                                    usage: dict[str, int] = usage_bag_g,
+                                ) -> AsyncIterator[bytes]:
+                                    total_tokens = 0
+                                    _BP_G = 32
+                                    _bpq_g: _aio_s.Queue[bytes | None] = _aio_s.Queue(maxsize=_BP_G)
+                                    _up_done_g = False
+                                    _up_err_g: Exception | None = None
+
+                                    async def _prod_g() -> None:
+                                        nonlocal _up_done_g, _up_err_g, total_tokens
+                                        try:
+                                            async for c in rest:
+                                                _scan_g(c)
+                                                await _bpq_g.put(c)
+                                        except Exception as e:
+                                            _up_err_g = e
+                                        finally:
+                                            _up_done_g = True
+                                            with suppress(Exception):
+                                                await _bpq_g.put(None)
+
+                                    def _scan_g(c: bytes) -> None:
+                                        nonlocal total_tokens
+                                        if b'"usage"' in c or b"completion_tokens" in c:
+                                            import re
+                                            p = re.search(rb'"prompt_tokens"\s*:\s*(\d+)', c)
+                                            ct = re.search(rb'"completion_tokens"\s*:\s*(\d+)', c)
+                                            if p and ct:
+                                                pt_i, ct_i = int(p.group(1)), int(ct.group(1))
+                                                total_tokens = pt_i + ct_i
+                                                usage["prompt_tokens"] = pt_i
+                                                usage["completion_tokens"] = ct_i
+                                                self.stats.record_tokens(mid, kid, pt_i, ct_i)
+
+                                    prod_task_g = _aio_s.create_task(_prod_g())
+                                    try:
+                                        if first:
+                                            _scan_g(first)
+                                            yield first
+                                        while True:
+                                            try:
+                                                chunk = await _aio_s.wait_for(_bpq_g.get(), timeout=idle_s)
+                                            except TimeoutError:
+                                                prod_task_g.cancel()
+                                                with suppress(Exception):
+                                                    await prod_task_g
+                                                if hasattr(rest, "aclose"):
+                                                    with suppress(Exception):
+                                                        await rest.aclose()
+                                                elapsed = max(0.01, time.monotonic() - t0)
+                                                self._record_outcome(
+                                                    decision, mid, kid, success=False,
+                                                    latency=elapsed, tokens=total_tokens or None,
+                                                    status_code=504,
+                                                )
+                                                held = result_holder_g["r"]
+                                                if held is not None:
+                                                    held.stream_failed = True
+                                                self._circuit_fail(pid_g)
+                                                finish = {"id": "potato-stream-error", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}, "finish_reason": "error"}]}
+                                                err_evt = openai_error(f"Stream idle timeout after {idle_s:.0f}s", code="upstream_stream_idle", type_="server_error")
+                                                yield b"data: " + _json.dumps(finish).encode("utf-8") + b"\n\n"
+                                                yield b"data: " + _json.dumps(err_evt).encode("utf-8") + b"\n\n"
+                                                yield b"data: [DONE]\n\n"
+                                                return
+                                            if chunk is None:
+                                                break
+                                            yield chunk
+                                        if _up_err_g and not isinstance(_up_err_g, StopAsyncIteration):
+                                            raise _up_err_g
+                                        elapsed = max(0.01, time.monotonic() - t0)
+                                        if total_tokens > 0:
+                                            self._record_outcome(
+                                                decision, mid, kid, success=True,
+                                                latency=elapsed, tokens=total_tokens,
+                                                status_code=200,
+                                            )
+                                        return
+                                    except (_aio_s.CancelledError, GeneratorExit):
+                                        prod_task_g.cancel()
+                                        with suppress(Exception):
+                                            await prod_task_g
+                                        raise
+                                    except Exception as e:
+                                        prod_task_g.cancel()
+                                        with suppress(Exception):
+                                            await prod_task_g
+                                        held = result_holder_g["r"]
+                                        if held is not None:
+                                            held.stream_failed = True
+                                        self._circuit_fail(pid_g)
+                                        try:
+                                            finish = {"id": "potato-stream-error", "object": "chat.completion.chunk", "choices": [{"index": 0, "delta": {}, "finish_reason": "error"}]}
+                                            err_evt = openai_error(str(e)[:500], code="upstream_stream_error", type_="server_error")
+                                            yield b"data: " + _json.dumps(finish).encode("utf-8") + b"\n\n"
+                                            yield b"data: " + _json.dumps(err_evt).encode("utf-8") + b"\n\n"
+                                            yield b"data: [DONE]\n\n"
+                                        except Exception:
+                                            pass
+                                        return
+                                    finally:
+                                        prod_task_g.cancel()
+                                        with suppress(Exception):
+                                            await prod_task_g
+
+                                stream_result_g = StreamResult(
+                                    status_code=s_g,
+                                    byte_iter=robust_iter_g(first_chunk_g, byte_iter_g),
+                                    headers=hd_g,
+                                    key=k_g,
+                                    model=model_g,
+                                    fallback_index=len(chain) + offset,
+                                    decision=decision,
+                                    upstream_ttft_ms=bound_ttft_ms_g,
+                                    usage=usage_bag_g,
+                                    provider_id=pid_g,
+                                    stream_failed=False,
+                                )
+                                result_holder_g["r"] = stream_result_g
+                                return stream_result_g
+
+                            # Non-2xx — record and try next
+                            if s_g >= 500:
+                                self._circuit_fail(pid_g)
+                            try:
+                                async for _chunk in byte_iter_g:
+                                    pass
+                            except Exception:
+                                pass
+                            self._record_outcome(
+                                decision, model_g, k_g.key_id if k_g else None,
+                                success=False, status_code=s_g,
+                                intent=decision.intent.value,
+                            )
+                            last_status, last_model, last_pid = s_g, model_g, pid_g
+                except Exception:
+                    logger.exception("stream graceful fallback failed")
 
         # No stream successfully relayed — never return 2xx with empty body (F-05)
         if saw_deadline:

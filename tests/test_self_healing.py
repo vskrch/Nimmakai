@@ -40,6 +40,28 @@ def test_circuit_breaker_closes_on_success():
     assert cb.state("groq") == BreakerState.CLOSED
 
 
+def test_circuit_blocked_only_while_open_cooldown_pending():
+    """blocked() must be non-mutating and match hard-skip semantics."""
+    cb = ProviderCircuitBreaker(failure_threshold=2, recovery_timeout=0.1)
+    cb.fail("groq")
+    cb.fail("groq")
+    assert cb.blocked("groq") is True
+    assert cb.any_closed({"groq"}) is False
+    time.sleep(0.15)
+    assert cb.blocked("groq") is False
+    assert cb.any_closed({"groq"}) is True
+
+
+def test_force_allow_grants_immediate_probe():
+    """force_allow must not consume the probe slot (last-resort retry relies on it)."""
+    cb = ProviderCircuitBreaker(failure_threshold=2, recovery_timeout=0.05)
+    cb.fail("groq")
+    cb.fail("groq")
+    cb.force_allow("groq")
+    assert cb.state("groq") == BreakerState.HALF_OPEN
+    assert cb.allow("groq") is True
+
+
 def test_health_cooldown_clears_after_success():
     """Model cooldown should clear immediately on success."""
     health = ModelHealthStore(model_cooldown_seconds=30)
